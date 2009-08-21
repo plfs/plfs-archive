@@ -1,6 +1,7 @@
 #ifndef __METADATA_H__
 #define __METADATA_H__
 
+#include "COPYRIGHT.h"
 #include <iostream>
 #include <sstream>
 using namespace std;

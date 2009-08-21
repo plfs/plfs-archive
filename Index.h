@@ -1,6 +1,7 @@
 #ifndef __Index_H__
 #define __Index_H__
 
+#include "COPYRIGHT.h"
 #include <set>
 #include <map>
 #include <vector>

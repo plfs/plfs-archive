@@ -8,7 +8,9 @@ OBJS       = $(addsuffix .o, $(basename $(SRCS) ) )
 # put -DNUTIL in to turn off timing in Util
 # add -DPLFS_TIMES to turn on timing in plfs
 # add -DINDEX_CONTAINS_TIMESTAMPS to allow trace vizualization
-DEBUG   = -DNDEBUG -DPLFS_TIMES -DNUTIL -DINDEX_CONTAINS_TIMESTAMPS
+# add -DCOUNT_SKIPS to maintain a count of sequential / non-sequential IO 
+DEBUG   = -DNDEBUG -DPLFS_TIMES -DNUTIL -DINDEX_CONTAINS_TIMESTAMPS \
+	      -DCOUNT_SKIPS
 CFLAGS  = -g -Wall $(DEBUG) 
 LDFLAGS = 
 INSTALLDIR = /usr/sbin/ 

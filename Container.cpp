@@ -1,4 +1,5 @@
 #include <sys/time.h>
+#include "COPYRIGHT.h"
 #include <time.h>
 #include <math.h>
 #include <sstream>
@@ -23,7 +24,7 @@ size_t Container::hashValue( const char *str ) {
     for( i = 0; i < strlen( str ); i++ ) {
         sum += (size_t)str[i];
     }
-    cerr << __FUNCTION__ << " : " << str << " => " << sum << endl;
+    //cerr << __FUNCTION__ << " : " << str << " => " << sum << endl;
     return sum;
     /*
     #include <openssl/md5.h>
@@ -646,8 +647,8 @@ int Container::create( const char *expanded_path, const char *hostname,
                 break;
             }
         }
-        if ( res != 0 ) extra_attempts++;
-    } while( res );
+        if ( res != 0 ) (*extra_attempts)++;
+    } while( res && *extra_attempts <= 5 );
 
     if ( res == 0 ) {
     }

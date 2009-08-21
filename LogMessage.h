@@ -1,6 +1,7 @@
 #ifndef __LogMessage_H__
 #define __LogMessage_H__
 
+#include "COPYRIGHT.h"
 #include <iostream>
 #include <sstream>
 #include <iomanip>

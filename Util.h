@@ -1,6 +1,7 @@
 #ifndef _UTIL_H_
 #define _UTIL_H_
 
+#include "COPYRIGHT.h"
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>

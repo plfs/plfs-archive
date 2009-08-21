@@ -1,4 +1,5 @@
 #include "OpenFile.h"
+#include "COPYRIGHT.h"
 
 OpenFile::OpenFile( WriteFile *wf, Index *i, pid_t p ) :
         Metadata::Metadata() 

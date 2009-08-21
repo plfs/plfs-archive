@@ -1,4 +1,5 @@
 #include "plfs.h"
+#include "COPYRIGHT.h"
 #include "Util.h"
 
 int main (int argc, char **argv) {

@@ -1,5 +1,6 @@
 #ifndef __OpenFile_H__
 #define __OpenFile_H__
+#include "COPYRIGHT.h"
 #include <string>
 #include <map>
 #include "WriteFile.h"

@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include "COPYRIGHT.h"
 #include <unistd.h>
 #include "plfs.h"
 #include "Util.h"

@@ -1,4 +1,5 @@
 #include <errno.h>
+#include "COPYRIGHT.h"
 #include <string>
 #include <fstream>
 #include <iostream>

@@ -1,4 +1,5 @@
 #include "fusexx.h"
+#include "COPYRIGHT.h"
 #include "WriteFile.h"
 #include "Container.h"
 #include "Util.h"
@@ -105,6 +106,7 @@ class Plfs : public fusexx::fuse<Plfs> {
         static int plfs_getattr( string, struct stat *, OpenFile * );
         static int plfs_sync( OpenFile *of );
         static int plfs_sync( OpenFile *of, bool, bool );
+        static int plfs_mkdir( const char *, mode_t );
         static int extendFile( OpenFile *, string , off_t );
         static mode_t getMode( string expanded );
         static int checkAccess( string strPath, struct fuse_file_info *fi );
@@ -120,7 +122,6 @@ class Plfs : public fusexx::fuse<Plfs> {
         // shoot.  
         HASH_MAP<string, WriteFile *> write_files;  // hash_map is better
         HASH_MAP<string, mode_t>      known_modes;  // cache when possible
-
         // private for debugging
         int extra_attempts;         // # failures on makeContainer were retried
         int wtfs;                       // just track unexpected stuff
@@ -128,5 +129,11 @@ class Plfs : public fusexx::fuse<Plfs> {
         double make_container_time;    // for debugging
         double begin_time;
         int o_rdwrs;
+        #ifdef COUNT_SKIPS
+            HASH_MAP<int, int>            last_offsets;
+            int fward_skips;
+            int bward_skips;
+            int nonskip_writes;
+        #endif
 };
 

@@ -1,4 +1,5 @@
 #include "plfs.h"
+#include "COPYRIGHT.h"
 
 #include <errno.h>
 #include <string>
@@ -92,7 +93,7 @@ split(const std::string &s, const char delim, std::vector<std::string> &elems) {
 // move code from constructor in here
 // and stop using /etc config file
 int Plfs::init( int *argc, char **argv ) {
-    cerr << __FUNCTION__ << " called\n";
+    cerr << "Starting PLFS." << endl;
     LogMessage::init( "/dev/stderr" );
 
         // bufferindex works and is good because it consolidates the index some
@@ -137,8 +138,6 @@ int Plfs::init( int *argc, char **argv ) {
             cerr << "FATAL: No valid backend directory found.  "
                  << "Pass -plfs_backend=/path/to/backend\n"; 
             return -ENOENT;
-        } else {
-            cerr << "Using " << *itr << " as backend store\n";
         }
    }
 
@@ -164,7 +163,7 @@ int Plfs::init( int *argc, char **argv ) {
     pthread_mutex_init( &(shared.index_mutex), NULL );
 
         // make sure we have a trash container
-    f_mkdir( TRASHDIR, DEFAULT_MODE );
+    plfs_mkdir( TRASHDIR, DEFAULT_MODE );
 
     return 0;
 }
@@ -184,6 +183,9 @@ Plfs::Plfs () {
     wtfs                = 0;
     make_container_time = 0;
     o_rdwrs             = 0;
+    #ifdef COUNT_SKIPS
+        fward_skips = bward_skips = nonskip_writes = 0;
+    #endif
     begin_time          = Util::getTime();
 }
 
@@ -533,9 +535,9 @@ int Plfs::f_chown (const char *path, uid_t uid, gid_t gid ) {
 // probably this should be transactional but it really shouldn't happen
 // that we succeed for some and fail for others
 //
-// ugh.  we need to do chmod, chown, chgrp across all mirrored dirs.
-int Plfs::f_mkdir (const char *path, mode_t mode ) {
-    PLFS_ENTER;
+// we also do chmod, chown, chgrp across all mirrored dirs.
+int Plfs::plfs_mkdir (const char *path, mode_t mode ) {
+    int ret;
     vector<string>::iterator itr;
     for( itr = shared.params.backends.begin();
          itr!= shared.params.backends.end();
@@ -545,6 +547,13 @@ int Plfs::f_mkdir (const char *path, mode_t mode ) {
         ret = retValue( Util::Mkdir( full.c_str(), mode ) );
         if ( ret != 0 ) break;
     }
+    return ret;
+}
+
+
+int Plfs::f_mkdir (const char *path, mode_t mode ) {
+    PLFS_ENTER;
+    plfs_mkdir( path, mode );
     PLFS_EXIT;
 }
 
@@ -686,8 +695,7 @@ int Plfs::removeDirectoryTree( const char *path, bool truncate_only ) {
     }
 }
 
-// it's a shame that we can't stash the DIR * here and then use
-// it in the readdir.
+// see f_readdir for some documentation here
 // returns 0 or -errno
 int Plfs::f_opendir( const char *path, struct fuse_file_info *fi ) {
     PLFS_ENTER_PID;
@@ -714,23 +722,23 @@ int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
          itr++ )
     {
         DIR *dp;
-        string fullpath( *itr ); fullpath += "/"; fullpath += path;
-        cerr << "Will opendir " << path << endl;
-        ret = Util::Opendir( fullpath.c_str(), &dp );
+        string dirpath( *itr ); dirpath += "/"; dirpath += path;
+        cerr << "Will opendir " << dirpath << endl;
+        ret = Util::Opendir( dirpath.c_str(), &dp );
         if ( ret != 0 || ! dp ) {
             break;
         }
         (void) path;
         struct dirent *de;
         while ((de = readdir(dp)) != NULL) {
-            cerr << "Found entry " << de->d_name << endl;
+            //cerr << "Found entry " << de->d_name << endl;
             if( entries.find(de->d_name) != entries.end() ) continue;
             entries.insert( de->d_name );
             struct stat st;
             memset(&st, 0, sizeof(st));
             st.st_ino = de->d_ino;
             st.st_mode = de->d_type << 12;
-            string fullPath( fullpath + "/" + de->d_name );
+            string fullPath( dirpath + "/" + de->d_name );
             if ( isContainer( fullPath.c_str() ) ) {
                 st.st_mode = Container::fileMode( st.st_mode );
             }
@@ -998,7 +1006,26 @@ int Plfs::f_write(const char *path, const char *buf, size_t size, off_t offset,
             ret = -errno;
         }
         size_t written = ret;
-
+	#ifdef COUNT_SKIPS
+        Util::MutexLock( &shared.index_mutex);
+	    HASH_MAP<int, int>::iterator itr;
+	    itr = self->last_offsets.find( data_fd );
+	    if ( itr == self->last_offsets.end() ) {
+	      self->nonskip_writes++; // The first write to a datafile never skips
+	    } else {
+	      int last_off = itr->second;
+	      if ( offset < last_off ) {
+		self->bward_skips++;
+	      } else if ( offset > last_off ) {
+		self->fward_skips++;
+	      } else {
+		// this write is sequential to the last
+		self->nonskip_writes++;
+	      }
+	    }
+	    self->last_offsets[data_fd] = offset+size;
+        Util::MutexUnlock( &shared.index_mutex );
+	#endif 
             // record the write even if we don't actually buffer the index
             // so that we can remember it for flush and release so we can
             // write out meta data to speed up stat
@@ -1221,6 +1248,11 @@ int Plfs::writeDebug( char *buf, size_t size, off_t offset, const char *path ) {
                 "%d WTFs\n"
                 "%d ExtraAttempts\n"
                 "%d Opens with O_RDWR\n"
+		#ifdef COUNT_SKIPS
+                "%d forward skips in datafiles\n"
+                "%d backward skips in datafiles\n"
+                "%d sequential writes to datafiles\n"
+        #endif 
                 "%s"
                 "%s",
                 shared.myhost.c_str(), 
@@ -1231,6 +1263,11 @@ int Plfs::writeDebug( char *buf, size_t size, off_t offset, const char *path ) {
                 self->wtfs,
                 self->extra_attempts,
                 self->o_rdwrs,
+		#ifdef COUNT_SKIPS
+                self->fward_skips,
+                self->bward_skips,
+                self->nonskip_writes,
+		#endif
                 writeFilesToString().c_str(),
                 readFilesToString().c_str() );
     } else {

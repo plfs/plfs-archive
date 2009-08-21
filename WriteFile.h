@@ -1,6 +1,7 @@
 #ifndef __WriteFile_H__
 #define __WriteFile_H__
 
+#include "COPYRIGHT.h"
 #include <map>
 using namespace std;
 #include "Util.h"

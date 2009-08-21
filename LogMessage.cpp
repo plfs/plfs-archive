@@ -1,4 +1,5 @@
 #include <strings.h>
+#include "COPYRIGHT.h"
 #include <pthread.h>
 #include <iostream>
 #include <iomanip>

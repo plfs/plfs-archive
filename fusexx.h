@@ -20,6 +20,7 @@
 #ifndef FUSEXX_H_
 #define FUSEXX_H_
 
+#include "COPYRIGHT.h"
 #define FUSE_USE_VERSION 26 // earlier versions have deprecated functions
 
 // C++ Headers
