@@ -3,7 +3,7 @@
 
 Name:		plfs
 Summary:	plfs - Parallel Log Structured File System
-Version:	0.1.2
+Version:	0.1.0
 Release:	%{_release}
 License:	LANS LLC
 Group:		System Environment/Filesystems
@@ -20,7 +20,7 @@ BuildRequires: fuse-devel
 
 %prep
 %{__rm} -rf %{buildroot}
-%setup -q -n plfs-%{version}
+%setup -q -n plfs-0.1.0
 
 %build
 %{__perl} -pi -e 's:/usr/sbin/:%{buildroot}/usr/sbin/:g' Makefile
@@ -62,9 +62,5 @@ fi
 %doc STATUS
 
 %changelog
-* Thu May 14 2009 Ben McClelland <ben@lanl.gov> 0.1.2-1
-- new verion of plfs
-- fixed version definition
-
 * Wed Feb 11 2009 Ben McClelland <ben@lanl.gov> 0.1.0-1
 - Initial package version

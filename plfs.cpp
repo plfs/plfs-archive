@@ -56,7 +56,7 @@ using namespace std;
 #define PLFS_ENTER_IO  PLFS_ENTER
 #define PLFS_ENTER_PID PLFS_ENTER 
 #define PLFS_EXIT      RESTORE_IDS; END_TIMES;                            \
-                       funct_id << (ret ? strerror(-errno) : "success")   \
+                       funct_id << (ret ? strerror(errno) : "success")   \
                                 << " " << end-begin << "s";               \
                        lm << funct_id.str() << endl; lm.flush();          \
                        return ret;
@@ -194,6 +194,10 @@ string Plfs::expandPath( const char *path ) {
     size_t hv = Container::hashValue( path );
     size_t which = hv % shared.params.backends.size();
     string full( shared.params.backends[which] + "/" + path );
+    if ( 1 ) {
+        cerr << __FUNCTION__ << " expanded " << path << " into " 
+             << full << endl;
+    }
     return full;
 }
 
@@ -710,23 +714,23 @@ int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
          itr++ )
     {
         DIR *dp;
-        string dirpath( *itr ); dirpath += "/"; dirpath += path;
-        cerr << "Will opendir " << dirpath << endl;
-        ret = Util::Opendir( dirpath.c_str(), &dp );
+        string fullpath( *itr ); fullpath += "/"; fullpath += path;
+        cerr << "Will opendir " << path << endl;
+        ret = Util::Opendir( fullpath.c_str(), &dp );
         if ( ret != 0 || ! dp ) {
             break;
         }
         (void) path;
         struct dirent *de;
         while ((de = readdir(dp)) != NULL) {
-            //cerr << "Found entry " << de->d_name << endl;
+            cerr << "Found entry " << de->d_name << endl;
             if( entries.find(de->d_name) != entries.end() ) continue;
             entries.insert( de->d_name );
             struct stat st;
             memset(&st, 0, sizeof(st));
             st.st_ino = de->d_ino;
             st.st_mode = de->d_type << 12;
-            string fullPath( dirpath + "/" + de->d_name );
+            string fullPath( fullpath + "/" + de->d_name );
             if ( isContainer( fullPath.c_str() ) ) {
                 st.st_mode = Container::fileMode( st.st_mode );
             }
@@ -1019,6 +1023,35 @@ int Plfs::f_write(const char *path, const char *buf, size_t size, off_t offset,
         }
     }
     PLFS_EXIT_IO;
+}
+
+int Plfs::f_readlink (const char *path, char *buf, size_t bufsize) {
+    PLFS_ENTER;
+    ssize_t char_count;
+    memset( (void*)buf, 0, bufsize);
+    char_count = readlink( strPath.c_str(), buf, bufsize );
+    if ( char_count != -1 ) {
+        ret = 0;
+        cerr << "Readlink at " << strPath.c_str() << ": " << char_count << endl;
+    } else {
+        ret = retValue( -1 );
+    }
+    PLFS_EXIT;
+}
+
+int Plfs::f_link( const char *path1, const char *path ) {
+    PLFS_ENTER;
+    cerr << "Making hard link from " << path1 << " to " << strPath << endl;
+    cerr << "How do I check for EXDEV here?" << endl;
+    ret = retValue( link( path1, strPath.c_str() ) );
+    PLFS_EXIT;
+}
+
+int Plfs::f_symlink( const char *path1, const char *path ) {
+    PLFS_ENTER;
+    cerr << "Making symlink from " << path1 << " to " << strPath << endl;
+    ret = retValue( symlink( path1, strPath.c_str() ) );
+    PLFS_EXIT;
 }
 
 int Plfs::f_statfs(const char *path, struct statvfs *stbuf) {

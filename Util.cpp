@@ -309,7 +309,7 @@ int Util::Mmap( void *addr, size_t len, int prot, int flags, int fildes,
 int Util::Lseek( int fildes, off_t offset, int whence, off_t *result ) {
     ENTER_UTIL;
     *result = lseek( fildes, offset, whence );
-    ret = (int)*result;
+    ret = (int)result;
     EXIT_UTIL;
 }
 
