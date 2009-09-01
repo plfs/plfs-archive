@@ -3,7 +3,7 @@
 
 Name:		plfs
 Summary:	plfs - Parallel Log Structured File System
-Version:	0.1.3
+Version:	0.1.4
 Release:	%{_release}
 License:	LANS LLC
 Group:		System Environment/Filesystems
@@ -62,6 +62,11 @@ fi
 %doc STATUS
 
 %changelog
+* Fri Aug 21 2009 Ben McClelland <ben@lanl.gov>
+- "This version now supports links and it seems more stable" -John
+- added Milo's patch to count skips
+- Container extra_attempts
+
 * Thu May 14 2009 Ben McClelland <ben@lanl.gov> 0.1.2-1
 - new verion of plfs
 - fixed version definition

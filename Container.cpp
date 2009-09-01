@@ -13,7 +13,8 @@ using namespace std;
 extern SharedState shared;
                 
 blkcnt_t Container::bytesToBlocks( size_t total_bytes ) {
-    return (blkcnt_t)ceil((float)total_bytes/BLKSIZE);
+    //return (blkcnt_t)ceil((float)total_bytes/BLKSIZE);
+    return (blkcnt_t)((total_bytes + BLKSIZE - 1) & ~(BLKSIZE-1));
 }
 
 size_t Container::hashValue( const char *str ) {
@@ -43,15 +44,8 @@ size_t Container::hashValue( const char *str ) {
 // is the same name as the container
 bool Container::isContainer( const char *physical_path ) {
     struct stat buf;
-    if ( Util::Lstat( physical_path, &buf ) != 0 ) {
-        return false;
-    }
-    return isContainer( &buf );
-}
-
-bool Container::isContainer( struct stat *buf ) {
-    bool ret = ( buf->st_mode & S_IFDIR && buf->st_mode & S_ISUID );
-    return ret;
+    return ( Util::Lstat( (getAccessFilePath(physical_path)).c_str(), &buf ) 
+            == 0 );
 }
 
 int Container::freeIndex( Index **index ) {
@@ -126,7 +120,7 @@ int Container::populateIndex( const char *path, Index *index ) {
     
     DIR *td = NULL, *hd = NULL; struct dirent *tent = NULL;
     while((ret = nextdropping(path,&hostindex,INDEXPREFIX, &td,&hd,&tent))== 1){
-        //fprintf( stderr, "# need to build index from %s\n", hostindex.c_str() );
+        //fprintf(stderr, "# need to build index from %s\n", hostindex.c_str());
         ret = index->readIndex( hostindex );
         if ( ret != 0 ) break;
     }
@@ -209,6 +203,7 @@ int Container::addMeta( off_t last_offset, size_t total_bytes,
         << time.tv_sec << "." << time.tv_usec << "."
         << host;
     metafile = oss.str();
+    cerr << "Creating metafile " << metafile << endl;
     return ignoreNoEnt(Util::Creat( metafile.c_str(), DEFAULT_MODE ));
 }
 
@@ -430,8 +425,12 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
 // we want atomicity bec someone might make a dir of the same name as a file
 // and we need to be absolutely sure a container is really a container and not
 // just a directory
+// the above is out of date.  We don't use S_ISUID anymore.  Now we use
+// the existence of the access file
 // returns -errno or 0
-int Container::makeTopLevel( const char *expanded_path,  const char *hostname, mode_t mode ){
+int Container::makeTopLevel( const char *expanded_path,  
+        const char *hostname, mode_t mode )
+{
     /*
         // ok, instead of mkdir tmp ; chmod tmp ; rename tmp top
         // we tried just mkdir top ; chmod top to remove the rename 
@@ -449,6 +448,7 @@ int Container::makeTopLevel( const char *expanded_path,  const char *hostname, m
     // doesn't work in /tmp because rename can't go acros different file sys's
 
     // ok, here's the real code:  mkdir tmp ; chmod tmp; rename tmp
+    // get rid of the chmod; now it's mkdir tmp; create accessfile; rename tmp
     string strPath( expanded_path );
     string tmpName( strPath + "." + hostname ); 
     if ( Util::Mkdir( tmpName.c_str(), dirMode(mode) ) < 0 ) {
@@ -458,9 +458,9 @@ int Container::makeTopLevel( const char *expanded_path,  const char *hostname, m
             return -errno;
         }
     }
-    if (Util::Chmod( tmpName.c_str(), containerMode(mode) ) < 0 ) {
-        fprintf( stderr, "chmod %s to %s failed: %s\n",
-                tmpName.c_str(), expanded_path, strerror(errno) );
+    if ( makeMeta( getAccessFilePath(tmpName), S_IFREG, mode ) < 0 ) {
+        fprintf( stderr, "create access file in %s failed: %s\n",
+                tmpName.c_str(), strerror(errno) );
         int saveerrno = errno;
         if ( Util::Rmdir( tmpName.c_str() ) != 0 ) {
             fprintf( stderr, "rmdir of %s failed : %s\n",
@@ -506,9 +506,6 @@ int Container::makeTopLevel( const char *expanded_path,  const char *hostname, m
             return -errno;
         }
         if ( makeMeta( getOpenHostsDir(strPath), S_IFDIR, DEFAULT_MODE ) < 0 ) {
-            return -errno;
-        }
-        if ( makeMeta( getAccessFilePath(strPath), S_IFREG, mode ) < 0 ) {
             return -errno;
         }
     }
@@ -564,7 +561,7 @@ string Container::getHostDirPath( const char* expanded_path,
 // of a file.  
 // e.g. someone does a stat on a container, make it look like a file
 mode_t Container::fileMode( mode_t mode ) {
-    int dirmask  = ~(S_ISUID | S_IFDIR);
+    int dirmask  = ~(S_IFDIR);
     mode         = ( mode & dirmask ) | S_IFREG;    
     return mode;
 }
@@ -572,14 +569,16 @@ mode_t Container::fileMode( mode_t mode ) {
 // this makes a mode for a file look like a directory
 // e.g. someone is creating a file which is actually a container
 // so use this to get the mode to pass to the mkdir
+// need to add S_IWUSR to the flag incase a file has --r--r--r
+//    the file can be --r--r--r but the top level dir can't
 mode_t Container::dirMode( mode_t mode ) {
     int filemask = ~(S_IFREG);
-    mode = ( mode & filemask ) | S_IXUSR | S_IXGRP | S_IFDIR;
+    mode = ( mode & filemask ) | S_IWUSR | S_IXUSR | S_IXGRP | S_IFDIR;
     return mode;
 }
 
 mode_t Container::containerMode( mode_t mode ) {
-    return dirMode(mode) | S_ISUID;
+    return dirMode(mode);
 }
 
 int Container::createHelper( const char *expanded_path, const char *hostname, 
@@ -627,19 +626,7 @@ int Container::create( const char *expanded_path, const char *hostname,
     do {
         res = createHelper(expanded_path, hostname, mode,flags,extra_attempts);
         if ( res != 0 ) {
-            int checkbystat = 0;
-            if ( checkbystat ) {
-                    // this check maybe slows us down?
-                    // should be OK to just check the various errnos instead 
-                    // of doing the stat
-                string host_dir = getHostDirPath( expanded_path, hostname );
-                if ( isContainer(expanded_path) && Util::isDirectory(hostname)){
-                    // something failed locally but it must have succeeded 
-                    // elsewhere.  Good enough.
-                    res = 0;
-                    break;
-                } 
-            } else if ( errno != EEXIST && errno != ENOENT && errno != EISDIR
+            if ( errno != EEXIST && errno != ENOENT && errno != EISDIR
                     && errno != ENOTEMPTY ) 
             {
                 // if it's some other errno, than it's a real error so return it
@@ -650,8 +637,6 @@ int Container::create( const char *expanded_path, const char *hostname,
         if ( res != 0 ) (*extra_attempts)++;
     } while( res && *extra_attempts <= 5 );
 
-    if ( res == 0 ) {
-    }
     return res;
 }
 
@@ -661,7 +646,8 @@ struct dirent *Container::getnextent( DIR *dir, const char *prefix ) {
     struct dirent *next = NULL;
     do {
         next = readdir( dir );
-    } while( next && strncmp( next->d_name, prefix, strlen(prefix) ) != 0 );
+    } while( next && prefix && 
+            strncmp( next->d_name, prefix, strlen(prefix) ) != 0 );
     return next;
 }
 
@@ -674,6 +660,9 @@ int Container::nextdropping( string physical_path,
         string *droppingpath, const char *dropping_type,
         DIR **topdir, DIR **hostdir, struct dirent **topent ) 
 {
+    ostringstream oss;
+    oss << "looking for nextdropping in " << physical_path << endl;
+    cerr << oss.str();
         // open it on the initial 
     if ( *topdir == NULL ) {
         Util::Opendir( physical_path.c_str(), topdir );
@@ -682,6 +671,7 @@ int Container::nextdropping( string physical_path,
 
         // make sure topent is valid
     if ( *topent == NULL ) {
+            // here is where nextdropping is specific to HOSTDIR
         *topent = getnextent( *topdir, HOSTDIRPREFIX );
         if ( *topent == NULL ) {
             // all done
@@ -698,11 +688,17 @@ int Container::nextdropping( string physical_path,
     hostpath       += (*topent)->d_name;
 
         // make sure hostdir is valid
+        // oh, ok, this only looks for droppings in the hostdir
+        // but we need it to look for droppings everywhere
+        // is that right?
     if ( *hostdir == NULL ) {
         Util::Opendir( hostpath.c_str(), hostdir );
         if ( *hostdir == NULL ) {
             fprintf(stderr,"opendir %s: %s\n",hostpath.c_str(),strerror(errno));
             return -errno;
+        } else {
+            fprintf( stderr, "%s opened dir %s\n", 
+                    __FUNCTION__, hostpath.c_str() );
         }
     }
 

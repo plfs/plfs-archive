@@ -74,12 +74,14 @@ class Util {
         static int Rmdir( const char* );
         static int Setfsgid( gid_t );
         static int Setfsuid( uid_t );
+        static int Symlink( const char *, const char * );
         static int Truncate( const char *, off_t length );
         static int Unlink( const char * );
         static int Utime( const char *, const struct utimbuf * );
         static ssize_t Write( int, const void *, size_t );
 
             // other misc stuff
+        static bool exists( const char* );
         static bool isDirectory( const char* );
         static double getTime();
         static ssize_t Writen( int, const void *, size_t );

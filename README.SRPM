@@ -1,7 +1,5 @@
 cd ..
 cp -rap cpp plfs-`cat cpp/VERSION`
 tar czf plfs-`cat cpp/VERSION`.tgz plfs-`cat cpp/VERSION`
-cp cpp/plfs.spec /usr/src/redhat/SPECS/
-cp plfs-`cat cpp/VERSION`.tgz /usr/src/redhat/SOURCES/
-rpmbuild -bs --rmspec --rmsource /usr/src/redhat/SPECS/plfs.spec
+rpmbuild -ts plfs-`cat cpp/VERSION`.tgz
 rpmbuild --rebuild /usr/src/redhat/SRPMS/plfs*.src.rpm

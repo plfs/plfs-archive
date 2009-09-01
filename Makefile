@@ -32,16 +32,17 @@ ifndef PLFS_BACK
 endif
 
 
+# removed direct_io bec can't exec files in PLFS if it is set
 PLFS_SHARED_ARGS = -plfs_backend=$(PLFS_BACK) -plfs_subdirs=32 \
 				   -plfs_synconclose=1
 ifeq ($(UNAME), Darwin)
 	# also google for -oauto_xattr and noapplespecial and noappledouble
 	# -omodules=volicon -oiconpath=../../mac/plfs.icns
 	UMOUNT    = umount $(PLFS_MNT)
-	PLFS_ARGS = -o direct_io,volname=PLFS $(PLFS_SHARED_ARGS) -plfs_bufferindex=0
+	PLFS_ARGS = -o volname=PLFS $(PLFS_SHARED_ARGS) -plfs_bufferindex=0
 else
 	UMOUNT    = fusermount -u $(PLFS_MNT)
-	PLFS_ARGS = -o direct_io $(PLFS_SHARED_ARGS) 
+	PLFS_ARGS = $(PLFS_SHARED_ARGS) 
 endif
 
 CFLAGS  += `pkg-config fuse --cflags`

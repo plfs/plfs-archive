@@ -30,6 +30,7 @@ using namespace std;
 #define DEBUGFILE ".plfsdebug"
 #define DEBUGLOG  ".plfslog"
 #define DEBUGFILESIZE 1048576
+#define DANGLE_POSSIBILITY 1
 
 #ifdef PLFS_TIMES
     #define START_TIMES double begin, end;  \
@@ -42,16 +43,16 @@ using namespace std;
 #endif
 
 
-#define PLFS_ENTER string strPath = expandPath( path );              \
-                   ostringstream funct_id;                           \
-                   LogMessage lm;                                    \
-                   START_TIMES;                                      \
-                   funct_id << setw(16) << fixed << setprecision(16) \
-                        << begin << " PLFS::" << __FUNCTION__        \
-                        << " on " << strPath << " ";                 \
-                   lm << funct_id.str() << endl;                     \
-                   lm.flush();                                       \
-                   SAVE_IDS;                                         \
+#define PLFS_ENTER string strPath  = expandPath( path, CURRENT_PATH ); \
+                   ostringstream funct_id;                             \
+                   LogMessage lm;                                      \
+                   START_TIMES;                                        \
+                   funct_id << setw(16) << fixed << setprecision(16)   \
+                        << begin << " PLFS::" << __FUNCTION__          \
+                        << " on " << strPath << " ";                   \
+                   lm << funct_id.str() << endl;                       \
+                   lm.flush();                                         \
+                   SAVE_IDS;                                           \
                    int ret = 0;
 
 #define PLFS_ENTER_IO  PLFS_ENTER
@@ -93,7 +94,15 @@ split(const std::string &s, const char delim, std::vector<std::string> &elems) {
 // move code from constructor in here
 // and stop using /etc config file
 int Plfs::init( int *argc, char **argv ) {
-    cerr << "Starting PLFS." << endl;
+        // figure out our hostname now in order to make containers
+    char hostname[PPATH];
+    if (gethostname(hostname, sizeof(hostname)) < 0) {
+        fprintf(stderr,"plfsfuse gethostname failed");
+        return -errno;
+    }
+    shared.myhost = hostname; 
+
+    cerr << "Starting PLFS on " << hostname << "." << endl;
     LogMessage::init( "/dev/stderr" );
 
         // bufferindex works and is good because it consolidates the index some
@@ -149,14 +158,6 @@ int Plfs::init( int *argc, char **argv ) {
     write( fd, buffer, 1024 );
     close( fd );
 
-        // figure out our hostname now in order to make containers
-    char hostname[PPATH];
-    if (gethostname(hostname, sizeof(hostname)) < 0) {
-        fprintf(stderr,"plfsfuse gethostname failed");
-        return -errno;
-    }
-    shared.myhost = hostname; 
-
         // init our mutex
     pthread_mutex_init( &(shared.container_mutex), NULL );
     pthread_mutex_init( &(shared.fd_mutex), NULL );
@@ -164,6 +165,10 @@ int Plfs::init( int *argc, char **argv ) {
 
         // make sure we have a trash container
     plfs_mkdir( TRASHDIR, DEFAULT_MODE );
+
+        // seed our random number generator which we use to know when to link
+        // in dangling files
+    srand(time(NULL));
 
     return 0;
 }
@@ -192,15 +197,105 @@ Plfs::Plfs () {
 // this takes the logical path, and returns the path to this object on the
 // underlying mount point
 // hash the path and choose a backend
-string Plfs::expandPath( const char *path ) {
-    size_t hv = Container::hashValue( path );
-    size_t which = hv % shared.params.backends.size();
-    string full( shared.params.backends[which] + "/" + path );
+// hash on path means N-N open storm
+// hash on host improves this but makes multiple containers
+// what we really want is hash on host for the create
+// and hash on path for the lookup
+string Plfs::expandPath( const char *path, int how ) {
+    size_t hash_by_node  = Container::hashValue( shared.myhost.c_str() )
+                            % shared.params.backends.size();
+    size_t hash_by_path  = Container::hashValue( path )
+                            % shared.params.backends.size();
+    string dangle_path( shared.params.backends[hash_by_node] + "/" + path );
+    string canonical_path( shared.params.backends[hash_by_path] + "/" + path );
+    string retString;
+
+    // if it's a dangler, return the dangler path, not the canonical
+    if ( how == CURRENT_PATH ) {
+        if ( shared.danglers.find(dangle_path) != shared.danglers.end() ) {
+            cerr << canonical_path << " is dangling." << endl;
+            retString = dangle_path;
+        } else {
+            retString = canonical_path;
+        }
+    } else {
+        retString = ( how == CANONICAL_PATH ? canonical_path : dangle_path);
+    }
+
     if ( 1 ) {
         cerr << __FUNCTION__ << " expanded " << path << " into " 
-             << full << endl;
+             << retString << endl;
     }
-    return full;
+    return retString;
+}
+
+        // we create dangling containers to avoid the N-N open storm
+        // that we would create if we hashed containers by path
+        // then all N would simultaneously be created somewhere
+        // so instead we hash by hostname for the mknod
+        // and hash by path for the lookup
+int Plfs::undangleDangler( string dangler ) {
+    int ret;
+    string canonical_path = shared.danglers[dangler];
+    cerr << __FUNCTION__ << " fix dangler " << dangler << " to "
+         << canonical_path << endl;
+
+    mode_t mode = DEFAULT_MODE;
+    if ( self->known_modes.find(dangler) != self->known_modes.end() ) {
+        mode = self->known_modes[dangler];
+    }
+
+        // now we need to make a container at the canonical path
+        // and link all of our node droppings at the dangling path
+        // into the canonical path and then remove this from our
+        // list of danglers
+    ret = makeContainer( canonical_path.c_str(), mode, 0 );
+    if ( ret == 0 ) {
+        ret = linkDanglers( dangler, dangler, canonical_path );
+        shared.danglers.erase( dangler );
+    }
+    return ret; 
+}
+
+int Plfs::linkDanglers( string dangle_top, string dangler, string canonical ) {
+    // how do we iterate over all droppings?  wish this was perl...
+    DIR *dir;
+    struct dirent *ent;
+    int ret = 0;
+
+    dir = opendir( dangler.c_str() );
+    if ( dir == NULL ) return -errno;
+
+    while( (ent = readdir( dir ) ) != NULL ) {
+        if ( ! strcmp(ent->d_name, ".") || ! strcmp(ent->d_name, "..") ) {
+            //fprintf( stderr, "skipping %s\n", ent->d_name );
+            continue;
+        }
+        string child( dangler.c_str() );
+        child += "/";
+        child += ent->d_name;
+        if ( Util::isDirectory( child.c_str() ) ) {
+            linkDanglers( dangle_top, child, canonical );
+        } else {
+            size_t base_len = dangle_top.size();
+            string dropping = child.substr( base_len );
+            string dst      ( canonical + "/" + dropping );
+            // need to check first if file already exists.  If so,
+            // don't link it.
+            if ( ! Util::exists( dst.c_str() ) ) {
+                ret = Util::Symlink( child.c_str(), dst.c_str() );
+                fprintf( stderr, "Need to link %s -> %s (ret %d)\n", 
+                    child.c_str(), dst.c_str(), ret );
+                if ( ret != 0 ) {
+                    return retValue(ret);
+                }
+            }
+        }
+    }
+    if ( closedir( dir ) != 0 ) {
+        ret = -errno;
+    }
+    return ret;
 }
 
 bool Plfs::isdebugfile( const char *path ) {
@@ -224,10 +319,11 @@ bool Plfs::isContainer( const char *path ) {
 // secondary dirs named by hostname
 // index files and data files named by pid within the hostname dir
 // returns 0 or -errno
-int Plfs::makeContainer( const char *expanded_path, mode_t mode, int flags ) {
+int Plfs::makeContainer( string expanded_path, mode_t mode, int flags ) {
     int res = 0;
     fprintf( stderr, "Need to create container for %s (%s %d)\n", 
-            expanded_path, shared.myhost.c_str(), fuse_get_context()->pid );
+            expanded_path.c_str(), 
+            shared.myhost.c_str(), fuse_get_context()->pid );
 
         // so this is distributed across multi-nodes so the lock
         // doesn't fully help but it does help a little bit for multi-proc
@@ -238,7 +334,7 @@ int Plfs::makeContainer( const char *expanded_path, mode_t mode, int flags ) {
     if (shared.createdContainers.find(expanded_path)
             ==shared.createdContainers.end()) 
     {
-        res = Container::create( expanded_path, (shared.myhost).c_str(),
+        res = Container::create( expanded_path.c_str(), (shared.myhost).c_str(),
                 mode, flags, &extra_attempts );
         self->extra_attempts += extra_attempts;
         if ( res == 0 ) {
@@ -252,7 +348,7 @@ int Plfs::makeContainer( const char *expanded_path, mode_t mode, int flags ) {
     self->make_container_time += (time_end - time_start);
     if ( time_end - time_start > 2 ) {
         fprintf( stderr, "WTF: %s of %s took %.2f secs\n", __FUNCTION__,
-                expanded_path, time_end - time_start );
+                expanded_path.c_str(), time_end - time_start );
         self->wtfs++;
     }
     return res;
@@ -271,25 +367,41 @@ int Plfs::f_access(const char *path, int mask) {
             self->wtfs++;
             ret = Util::Access( strPath.c_str(), mask );
         }
+        ret = retValue( ret );
     } else {
-        ret = Util::Access( strPath.c_str(), mask );
+        ret = retValue( Util::Access( strPath.c_str(), mask ) );
     }
-    ret = retValue( ret );
     PLFS_EXIT;
 }
 
+// always create containers as danglers, later link at correct path
+// also there is a 1/N chance that dangle path is correct path
 int Plfs::f_mknod(const char *path, mode_t mode, dev_t rdev) {
     PLFS_ENTER;
     // here is where we create the container
-    ret = makeContainer( strPath.c_str(), mode, 0 );
+    string dangler = expandPath( path, DANGLING_PATH );
+    ret = makeContainer( dangler.c_str(), mode, 0 );
+
+        // if it is a dangling container, remember that so we can fix it later
+    if ( dangler != strPath ) {
+        cerr << "New dangler: " << dangler << " -> " << strPath << endl;
+        Util::MutexLock( &shared.container_mutex );
+        shared.danglers[dangler] = strPath;
+        Util::MutexUnlock( &shared.container_mutex );
+    }
     PLFS_EXIT;
 }
 
-   // very strange.  When fuse gets the ENOSYS for 
-   // create, it then calls mknod.  The same exact code which works in
-   // mknod fails if we put it in here
+// very strange.  When fuse gets the ENOSYS for 
+// create, it then calls mknod.  The same exact code which works in
+// mknod fails if we put it in here
+// maybe that's specific to mac's
+// now I'm seeing that *usually* when f_create gets the -ENOSYS, that the
+// caller will then call f_mknod, but that doesn't always happen in big
+// untar of tarballs, so I'm gonna try to call f_mknod here
 int Plfs::f_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
     PLFS_ENTER_PID;
+    //ret = f_mknod( path, mode, 0 );
     ret = -ENOSYS;
     PLFS_EXIT;
 }
@@ -449,17 +561,23 @@ int Plfs::f_getattr(const char *path, struct stat *stbuf) {
         // bec everything in PLFS should be a Container (or a dir)
         // is getattr ever called on a dir?
 
-    ret = Util::Lstat( strPath.c_str(), stbuf );
-    if ( ret == 0 && Container::isContainer( stbuf ) ) {
+    if ( Container::isContainer( strPath.c_str() ) ) {
         fprintf( stderr, "Need to stat container %s\n", strPath.c_str() );
         ret = plfs_getattr( strPath, stbuf, NULL );
     } else {
-        ret = retValue( ret );
+        fprintf( stderr, "Need to stat non-container %s\n", strPath.c_str() );
+        ret = retValue( Util::Lstat( strPath.c_str(), stbuf ) );
         if ( isdebugfile(path) ) {
             stbuf->st_mode = S_IFREG | 0444;
             stbuf->st_nlink = 1;
             stbuf->st_size = DEBUGFILESIZE;
             ret = 0; 
+        } else if ( ret == -ENOENT && shared.danglers.find(strPath) 
+                != shared.danglers.end() ) 
+        {
+            string dangler = shared.danglers[strPath];
+            cerr << "Need to stat dangler " << dangler << endl;
+            return plfs_getattr( dangler, stbuf, NULL ); 
         }
     }
         // can implement f_fgetattr if we want.  than it would be called
@@ -588,7 +706,14 @@ int Plfs::f_rmdir( const char *path ) {
 int Plfs::f_unlink( const char *path ) {
     PLFS_ENTER;
     if ( isContainer( strPath.c_str() ) ) {
-        ret = removeDirectoryTree( strPath.c_str(), false );  // recurse
+        ret = removeDirectoryTree( strPath.c_str(), false );  
+
+            // also may need to remove old dangled path
+        string dangler = expandPath( path, DANGLING_PATH );
+        if ( ret == 0 && dangler != strPath ) {
+            ret = removeDirectoryTree( dangler.c_str(), false );
+        }
+
     } else {
         fprintf( stderr, "WTF: Normal file %s in plfs..\n", strPath.c_str() );
         self->wtfs++;
@@ -770,7 +895,9 @@ int Plfs::checkAccess( string strPath, struct fuse_file_info *fi ) {
             // if so, just ask about the directory itself.
         ret = Util::Access( strPath.c_str(), accessmask );
     }
-    return retValue( ret );
+    ret = retValue( ret );
+    cerr << "Checked access for " << strPath << ": " << ret << endl;
+    return ret; 
 }
 
 // returns 0 or -errno
@@ -786,7 +913,10 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
     Index     *index = NULL;
 
     // make sure we're allowed to open this container
-    ret = checkAccess( strPath, fi ); 
+    // this breaks things when tar is trying to create new files
+    // with --r--r--r bec we create it w/ that access and then 
+    // we can't write to it
+    //ret = checkAccess( strPath, fi ); 
 
     // go ahead and open it here, pass O_CREAT to create it if it doesn't exist 
     // "open it" just means create the data structures we use 
@@ -848,6 +978,10 @@ int Plfs::f_release( const char *path, struct fuse_file_info *fi ) {
             ret = removeWriteFile( wf, strPath );
         }
         Util::MutexUnlock( &shared.fd_mutex );
+            // fix any dangling that hasn't been fixed yet
+        if ( shared.danglers.find( strPath ) != shared.danglers.end() ) {
+            undangleDangler( strPath );
+        }
     } else if ( index ) {
         Util::MutexLock( &shared.index_mutex );
         int remaining_opens = index->incrementOpens( -1 );
@@ -1048,8 +1182,24 @@ int Plfs::f_write(const char *path, const char *buf, size_t size, off_t offset,
                 ret = written; 
             }
         }
+
+            // clean up danglers with some probability
+        if ( timeToUndangle( strPath ) ) {
+            undangleDangler( strPath );
+        }
     }
     PLFS_EXIT_IO;
+}
+
+// should be link in a dangling file?  do so at the release definitely if
+// we haven't already done so.  Every write has a random probability of fixing
+// the dangler
+int Plfs::timeToUndangle( string possible_dangler ) {
+    bool undangle = false;
+    if ( shared.danglers.find( possible_dangler ) != shared.danglers.end() ) {
+        undangle = !( random() % DANGLE_POSSIBILITY );
+    }
+    return undangle;
 }
 
 int Plfs::f_readlink (const char *path, char *buf, size_t bufsize) {
@@ -1077,7 +1227,7 @@ int Plfs::f_link( const char *path1, const char *path ) {
 int Plfs::f_symlink( const char *path1, const char *path ) {
     PLFS_ENTER;
     cerr << "Making symlink from " << path1 << " to " << strPath << endl;
-    ret = retValue( symlink( path1, strPath.c_str() ) );
+    ret = retValue( Util::Symlink( path1, strPath.c_str() ) );
     PLFS_EXIT;
 }
 
@@ -1192,6 +1342,20 @@ int Plfs::read_helper( Index *index, char *buf, size_t size, off_t offset ) {
     return ret;
 }
 
+string Plfs::danglersToString() {
+    ostringstream oss;
+    int quant = shared.danglers.size();
+    oss << quant << " Dangling Containers" << ( quant ? ": " : " " );
+    HASH_MAP<string, string>::iterator itr;
+    for(    itr = shared.danglers.begin(); 
+            itr != shared.danglers.end(); itr++)
+    {
+        oss << itr->first << " dangling at " << itr->second << " "; 
+    }
+    oss << endl;
+    return oss.str();
+}
+
 string Plfs::writeFilesToString() {
     ostringstream oss;
     int quant = self->write_files.size();
@@ -1254,6 +1418,7 @@ int Plfs::writeDebug( char *buf, size_t size, off_t offset, const char *path ) {
                 "%d sequential writes to datafiles\n"
         #endif 
                 "%s"
+                "%s"
                 "%s",
                 shared.myhost.c_str(), 
                 Util::getTime() - self->begin_time,
@@ -1268,6 +1433,7 @@ int Plfs::writeDebug( char *buf, size_t size, off_t offset, const char *path ) {
                 self->bward_skips,
                 self->nonskip_writes,
 		#endif
+                danglersToString().c_str(),
                 writeFilesToString().c_str(),
                 readFilesToString().c_str() );
     } else {
@@ -1346,7 +1512,17 @@ int Plfs::f_flush( const char *path, struct fuse_file_info *fi ) {
 // returns 0 or -errno
 int Plfs::f_rename( const char *path, const char *to ) {
     PLFS_ENTER;
-    string toPath   = expandPath( to );
-    ret = retValue( Util::Rename( strPath.c_str(), toPath.c_str() ) );
+    string toPath   = expandPath( to, CANONICAL_PATH );
+
+    if ( isContainer( toPath.c_str() ) ) {
+        // rename will trash a file in the toPath but not a dir
+        // if it is a container
+        cerr << "Need to blow away container " << toPath 
+             << " in order to rename onto it." << endl;
+        ret = removeDirectoryTree( toPath.c_str(), false );  
+    }
+    if ( ret == 0 ) {
+        ret = retValue( Util::Rename( strPath.c_str(), toPath.c_str() ) );
+    }
     PLFS_EXIT;
 }

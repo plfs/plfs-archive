@@ -27,6 +27,7 @@ using namespace std;
 #define OPENHOSTDIR    "openhosts"    // where to stash whether file open
 #define ACCESSFILE     "access"       // where to stash the chmods and chowns
 #define TRASHDIR       ".plfs_trash"  // where to put silly rename containers
+#define CONTAINER_SUFFIX ".plfscontainer081173" // how to identify containers
 
 enum 
 ContainerModification {
@@ -42,7 +43,6 @@ class Container {
                 mode_t mode, int flags, int *extra_attempts );
 
         static bool isContainer( const char *physical_path );
-        static bool isContainer( struct stat * );
 
         static string getIndexPath( const char *, const char * );
         static string getIndexPath( const char *, const char *, int pid );
@@ -75,6 +75,8 @@ class Container {
         static int freeIndex( Index ** );
         static size_t hashValue( const char *str );
         static blkcnt_t bytesToBlocks( size_t total_bytes );
+        static int nextdropping( string, string *, const char *,
+                DIR **, DIR **, struct dirent ** );
 
     private:
             // static stuff
@@ -93,8 +95,6 @@ class Container {
         static string hostFromChunk( string datapath, const char *type );
         static string hostdirFromChunk( string chunkpath, const char *type );
         static string containerFromChunk( string datapath );
-        static int nextdropping( string, string *, const char *,
-                DIR **, DIR **, struct dirent ** );
         static struct dirent *getnextent( DIR *dir, const char *prefix );
         static int makeMeta( string path, mode_t type, mode_t mode );
         static int ignoreNoEnt( int ret );

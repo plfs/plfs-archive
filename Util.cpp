@@ -144,7 +144,7 @@ string Util::timeToString( HASH_MAP<string,double>::iterator itr,
     *total_ops  += count;
     *total_time += value;
 
-    oss << setw(11) << itr->first << ": " << setw(8) << count << " ops, " 
+    oss << setw(12) << itr->first << ": " << setw(8) << count << " ops, " 
         << std::setprecision(2)
         << std::fixed
         << setw(8)
@@ -263,6 +263,12 @@ int Util::Rename( const char *path, const char *to ) {
     EXIT_UTIL;
 }
 
+int Util::Symlink( const char *path, const char *to ) {
+    ENTER_PATH;
+    ret = symlink( path, to );
+    EXIT_UTIL;
+}
+
 ssize_t Util::Write( int fd, const void *buf, size_t size) {
     ENTER_IO;
     ret = write( fd, buf, size ); 
@@ -323,6 +329,17 @@ int Util::Open( const char *path, int flags ) {
 int Util::Open( const char *path, int flags, mode_t mode ) {
     ENTER_PATH;
     ret = open( path, flags, mode ); 
+    EXIT_UTIL;
+}
+
+bool Util::exists( const char *path ) {
+    ENTER_PATH;
+    bool exists = false;
+    struct stat buf;
+    if ( stat( path, &buf ) == 0 ) {
+        exists = true;
+    }
+    ret = exists;
     EXIT_UTIL;
 }
 

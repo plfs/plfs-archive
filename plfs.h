@@ -18,6 +18,20 @@ DroppingLevel {
 };
 
 
+// ok, when we create a file, on which backend directory do we create it
+// (i.e. which metadata server)?
+// if we hash by path, we'll have an N-N open storm on a single backend
+// directory.  so instead hash by node for create and hash by path for
+// lookup.  This means that we'll have to eventually move the data or 
+// link to it or something
+enum
+FileLocation {
+    DANGLING_PATH,  // the dangling path accessed by hashing on node name
+    CANONICAL_PATH, // the canonical path accessed by hashing on file name
+    CURRENT_PATH,   // the current path (i.e. dangling until linked in)
+};
+
+
 // and I don't like globals at the top of the .cpp.  So add all shared
 // data here and then declare one instance of this struct at the top of
 // the .cpp
@@ -37,6 +51,7 @@ typedef struct {
     pthread_mutex_t           index_mutex;
     set< string >             createdContainers;
     HASH_MAP<string, Index *> read_files;
+    HASH_MAP<string, string>  danglers;
     string                    myhost;
     string                    trashdir;
     Params                    params;
@@ -84,10 +99,13 @@ class Plfs : public fusexx::fuse<Plfs> {
         static int init( int *argc, char **argv );
 
 	private:
-        static string expandPath( const char * );
+        static string expandPath( const char *, int );
         static int retValue( int res );
-        static int makeContainer( const char*, mode_t, int );
+        static int makeContainer( string, mode_t, int );
         static int removeDirectoryTree( const char*, bool truncate_only );
+        static int undangleDangler( string path ); 
+        static int linkDanglers( string, string dangler, string canonical ); 
+        static int timeToUndangle( string possible_dangler );
         static bool isContainer( const char* );
         static bool isdebugfile( const char*, const char * );
         static bool isdebugfile( const char* );
@@ -100,6 +118,7 @@ class Plfs : public fusexx::fuse<Plfs> {
         static string paramsToString( Params *p );
         static string readFilesToString();
         static string writeFilesToString();
+        static string danglersToString();
 		static int read_helper(Index *, char *, size_t, off_t ); 
         static int getWriteFds( string, int *, int *, Index **, OpenFile * );
         static int plfs_truncate( string, off_t, OpenFile * );
