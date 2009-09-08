@@ -138,6 +138,12 @@ int Plfs::init( int *argc, char **argv ) {
     *argc -= removed_args;
 
         // make sure our backend store is good
+    if (!shared.params.backends.size()) {
+        cerr << "FATAL: No valid backend directory found.  "
+             << "Pass -plfs_backend=/path/to/backend\n"; 
+        return -ENOENT;
+    }
+
     vector<string>::iterator itr;
     for(itr = shared.params.backends.begin(); 
         itr != shared.params.backends.end(); 
