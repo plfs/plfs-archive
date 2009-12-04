@@ -16,6 +16,9 @@ using namespace std;
 // on a write, every host has a host index
 // on a read, all the host index files get aggregated into one container index
 
+
+// this is the class that represents the records that get written into the
+// index file for each host.
 class HostEntry {
     public:
         HostEntry() { }
@@ -39,6 +42,13 @@ class HostEntry {
     friend class Index;
 };
 
+
+// this is the class that represents one record in the in-memory 
+// data structure that is
+// the index for the entire container (the aggregation of the multiple host
+// index files).  
+// this in-memory structure is used to answer read's by finding the appropriate
+// requested logical offset within one of the physical host index files
 class ContainerEntry : HostEntry {
     public:
         bool mergable( const ContainerEntry & );

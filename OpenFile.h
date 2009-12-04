@@ -13,15 +13,18 @@ using namespace std;
 class OpenFile : public Metadata {
     public:
         OpenFile( WriteFile *, Index *, pid_t );
-        WriteFile *getWritefile();
-        Index     *getIndex();
-        void      setWriteFds( int, int, Index * );
-        void      getWriteFds( int *, int *, Index ** );
-        pid_t     getPid();
+        WriteFile  *getWritefile();
+        Index      *getIndex();
+        void       setWriteFds( int, int, Index * );
+        void       getWriteFds( int *, int *, Index ** );
+        pid_t      getPid();
+        const char *getPath() { return this->path.c_str(); }
+        void       setPath( string p)  { this->path = p; }
     private:
         WriteFile *writefile;
         Index     *index;
         pid_t     pid;
+        string    path;
 
             // also stash a copy of the stuff we need for writing in here
             // this way, we won't have to lock a mutex in f_write in order

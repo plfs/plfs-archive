@@ -298,7 +298,6 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
         // value and we don't see it since it's only in the index file
         // maybe safest to get all of them.  But using both is no good bec 
         // it adds both the index and the data.  ugh.
-    bool use_cache = true;
     const char *prefix   = INDEXPREFIX;
     
     int chunks = 0;
@@ -325,48 +324,46 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
         // maybe even actually reading the index files!
     set< string > openHosts;
     set< string > validMeta;
-    if ( use_cache ) {
-        discoverOpenHosts( path, &openHosts );
-        time_t most_recent_mod = 0;
+    discoverOpenHosts( path, &openHosts );
+    time_t most_recent_mod = 0;
 
-        DIR *metadir;
-        Util::Opendir( (getMetaDirPath(path)).c_str(), &metadir );
-        struct dirent *dent = NULL;
-        if ( metadir != NULL ) {
-            while( (dent = readdir( metadir )) != NULL ) {
-                if ( ! strncmp( dent->d_name, ".", 1 ) ) continue;  // . and ..
-                off_t last_offset;
-                size_t total_bytes;
-                struct timespec time;
-                string host = fetchMeta( dent->d_name, 
-                        &last_offset, &total_bytes, &time );
-                if ( openHosts.find(host) != openHosts.end() ) {
-                    cerr << "Can't use metafile " << dent->d_name << " because "
-                         << host << " has an open handle." << endl;
-                    continue;
-                }
-                cerr << "Pulled meta " << last_offset << " " << total_bytes
-                     << ", " << time.tv_sec << "." << time.tv_nsec 
-                     << " on host " << host << endl;
-
-                // oh, let's get rewrite correct.  if someone writes
-                // a file, and they close it and then later they
-                // open it again and write some more then we'll
-                // have multiple metadata droppings.  That's fine.
-                // just consider all of them.
-                stbuf->st_size   =  max( stbuf->st_size, last_offset );
-                stbuf->st_blocks += bytesToBlocks( total_bytes );
-                most_recent_mod  =  max( most_recent_mod, time.tv_sec );
-                validMeta.insert( host );
+    DIR *metadir;
+    Util::Opendir( (getMetaDirPath(path)).c_str(), &metadir );
+    struct dirent *dent = NULL;
+    if ( metadir != NULL ) {
+        while( (dent = readdir( metadir )) != NULL ) {
+            if ( ! strncmp( dent->d_name, ".", 1 ) ) continue;  // . and ..
+            off_t last_offset;
+            size_t total_bytes;
+            struct timespec time;
+            string host = fetchMeta( dent->d_name, 
+                    &last_offset, &total_bytes, &time );
+            if ( openHosts.find(host) != openHosts.end() ) {
+                cerr << "Can't use metafile " << dent->d_name << " because "
+                     << host << " has an open handle." << endl;
+                continue;
             }
-            Util::Closedir( metadir );
+            cerr << "Pulled meta " << last_offset << " " << total_bytes
+                 << ", " << time.tv_sec << "." << time.tv_nsec 
+                 << " on host " << host << endl;
+
+            // oh, let's get rewrite correct.  if someone writes
+            // a file, and they close it and then later they
+            // open it again and write some more then we'll
+            // have multiple metadata droppings.  That's fine.
+            // just consider all of them.
+            stbuf->st_size   =  max( stbuf->st_size, last_offset );
+            stbuf->st_blocks += bytesToBlocks( total_bytes );
+            most_recent_mod  =  max( most_recent_mod, time.tv_sec );
+            validMeta.insert( host );
         }
-        stbuf->st_mtime = most_recent_mod;
+        Util::Closedir( metadir );
     }
+    stbuf->st_mtime = most_recent_mod;
 
     // if we're using cached data we don't do this part unless there
     // were open hosts
-    if ( ! use_cache || openHosts.size() > 0 ) {
+    if ( openHosts.size() > 0 ) {
         string dropping; 
         blkcnt_t index_blocks = 0, data_blocks = 0;
         off_t    index_size = 0, data_size = 0;

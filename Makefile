@@ -48,7 +48,8 @@ endif
 CFLAGS  += `pkg-config fuse --cflags`
 LDFLAGS += `pkg-config fuse --libs`
 
-all: $(TARGET)
+all: plfs.o 
+#all: $(TARGET)
 
 $(TARGET): main.o $(OBJS) 
 	@ # this next line builds it all at once from all source

@@ -89,6 +89,7 @@ class Util {
         static string openFlagsToString( int );
         static string expandPath( string path, string hostname );
         static void addTime( string, double );
+        static char *hostname();
     private:
         static void addBytes( string, size_t );
         static string timeToString(      HASH_MAP<string,double>::iterator,

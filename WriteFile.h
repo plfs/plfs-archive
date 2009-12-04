@@ -16,7 +16,7 @@ typedef struct {
 
 class WriteFile : public Metadata {
     public:
-        WriteFile( string, string, bool, mode_t ); 
+        WriteFile( string, string, mode_t ); 
         ~WriteFile();
 
         int getFds( pid_t pid, mode_t, 
@@ -29,9 +29,12 @@ class WriteFile : public Metadata {
 
         int Remove( int pid );
 
-        bool bufferIndex() { return this->bufferindex; }
-
         int  getIndexFd()          { return this->indexfd; }
+
+        const char *getHost()      { return this->hostname.c_str(); } 
+
+        void setMode( mode_t m )   { this->mode = m; }
+        mode_t getMode()           { return this->mode; }
 
         int truncate( off_t offset );
         static int openIndexFile( string path, string host, mode_t mode );
@@ -43,7 +46,6 @@ class WriteFile : public Metadata {
         string getIndexDataPath( const char *, int );
         int closeFd( int fd, const char *type, int pid );
         int closeFds( FDS fds, int pid );
-        bool bufferindex;
 
         string physical_path;
         string hostname;

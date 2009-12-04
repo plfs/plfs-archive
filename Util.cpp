@@ -540,3 +540,10 @@ int Util::Setfsuid( uid_t u ) {
     EXIT_UTIL;
 }
 
+char *Util::hostname() {
+    static char hname[128];
+    if ( gethostname(hname, sizeof(hname)) < 0) {
+        return NULL;
+    }
+    return hname;
+}

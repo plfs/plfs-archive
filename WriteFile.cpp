@@ -12,11 +12,10 @@
 using namespace std;
 
 WriteFile::WriteFile( string path, string hostname, 
-        bool bufferindex, mode_t mode ) : Metadata::Metadata() 
+        mode_t mode ) : Metadata::Metadata() 
 {
     this->physical_path   = path;
     this->hostname        = hostname;
-    this->bufferindex     = bufferindex;
     this->indexfd         = -1;
     this->mode            = mode;
 }
@@ -130,7 +129,7 @@ int WriteFile::getFds( pid_t pid, mode_t mode,
                     physical_path.c_str(), strerror( errno ) );
                 ret = -errno;
             } else {
-                fds.index =(bufferindex?  new Index(physical_path,pid) : NULL);
+                fds.index = NULL;
                 fd_map[pid] = fds;
             }
         } else {
