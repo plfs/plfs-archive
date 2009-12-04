@@ -1,3 +1,0 @@
-#! /bin/tcsh
-
-cat `find ../ -name min_max.dat` | cat -n 
