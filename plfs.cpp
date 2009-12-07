@@ -11,7 +11,8 @@ plfs_create( const char *path, mode_t mode, int flags ) {
 }
 
 // returns bytes read or -errno
-int read_helper( Index *index, char *buf, size_t size, off_t offset ) {
+int 
+read_helper( Index *index, char *buf, size_t size, off_t offset ) {
     off_t  chunk_offset = 0;
     size_t chunk_length = 0;
     int    fd           = -1;
@@ -180,7 +181,8 @@ plfs_write( Plfs_fd *pfd, const char *buf, size_t size, off_t offset ) {
     return ( ret >= 0 ? written : ret );
 }
 
-int plfs_sync( Plfs_fd *pfd ) {
+int 
+plfs_sync( Plfs_fd *pfd ) {
     Index *index = NULL;
     int indexfd = -1, datafd = -1, ret = 0;
     pfd->getWriteFds( &datafd, &indexfd, &index );
@@ -198,9 +200,164 @@ int plfs_sync( Plfs_fd *pfd ) {
     return ret;
 }
 
+// this can fail due to silly rename 
+// imagine an N-1 normal file on PanFS that someone is reading and
+// someone else is unlink'ing.  The unlink will see a reference count
+// and will rename it to .panfs.blah.  The read continues and when the
+// read releases the reference count on .panfs.blah drops to zero and
+// .panfs.blah is unlinked
+// but in our containers, here's what happens:  a chunk or an index is
+// open by someone and is unlinked by someone else, the silly rename 
+// does the same thing and now the container has a .panfs.blah file in
+// it.  Then when we try to remove the directory, we get a ENOTEMPTY.
+// truncate only removes the droppings but leaves the directory structure
+// 
+// we also use this function to implement truncate on a container
+// in that case, we remove all droppings but preserve the container
+// an empty container = empty file
 int 
-plfs_trunc( const char *path ) {
+removeDirectoryTree( const char *path, bool truncate_only ) {
+    DIR *dir;
+    struct dirent *ent;
+    int ret = 0;
+    fprintf( stderr, "%s on %s\n", __FUNCTION__, path );
 
+    dir = opendir( path );
+    if ( dir == NULL ) return -errno;
+
+    while( (ent = readdir( dir ) ) != NULL ) {
+        if ( ! strcmp(ent->d_name, ".") || ! strcmp(ent->d_name, "..") ) {
+            //fprintf( stderr, "skipping %s\n", ent->d_name );
+            continue;
+        }
+        if ( ! strcmp(ent->d_name, ACCESSFILE ) && truncate_only ) {
+            continue;   // don't remove our accessfile!
+        }
+        if ( ! strcmp( ent->d_name, OPENHOSTDIR ) && truncate_only ) {
+            continue;   // don't remove open hosts
+        }
+        string child( path );
+        child += "/";
+        child += ent->d_name;
+        if ( Util::isDirectory( child.c_str() ) ) {
+            if ( removeDirectoryTree( child.c_str(), truncate_only ) != 0 ) {
+                ret = -errno;
+                continue;
+            }
+        } else {
+            //fprintf( stderr, "unlinking %s\n", ent->d_name );
+            if ( Util::Unlink( child.c_str() ) != 0 ) {
+                // ENOENT would be OK, could mean that an openhosts dropping
+                // was removed on another host or something
+                if ( errno != ENOENT ) {
+                    ret = -errno;
+                    continue;
+                }
+            }
+        }
+    }
+    if ( closedir( dir ) != 0 ) {
+        ret = -errno;
+    }
+
+    // here we have deleted all children.  Now delete the directory itself
+    // if truncate is called, this means it's a container.  so we only
+    // delete the internal stuff but not the directory structure
+    if ( ret != 0 ) return ret;
+    if ( truncate_only ) {
+        return 0;
+    } else {
+        ret = Util::Rmdir( path );
+        if ( ret != 0 && errno == ENOTEMPTY ) {
+            int prec = numeric_limits<long double>::digits10; // 18
+            ostringstream trash_path;
+            trash_path.precision(prec); // override the default of 6
+            trash_path << "." << path "." << shared.myhost << "." 
+                       << Util::getTime();
+            cerr << "Need to silly rename " << path << " to "
+                 << trash_path.str().c_str() << endl;
+            Util::Rename( path, trash_path.str().c_str() ); 
+            ret = 0;
+        }
+        return retValue( ret );
+    }
+}
+            
+// this should only be called if the uid has already been checked
+// and is allowed to access this file
+// also, this assumes strPath is a container
+// returns 0 or -errno
+int 
+plfs_getattr( string strPath, struct stat *stbuf, OpenFile *of ) {
+    int ret = Container::getattr( strPath.c_str(), stbuf );
+    if ( ret == 0 ) {
+            // is it also open currently?
+            // we might be reading from some other users writeFile but
+            // we're only here if we had access to stat the container
+            // commented out some stuff that I thought was maybe slow
+            // this might not be necessary depending on how we did 
+            // the stat.  If we stat'ed data droppings then we don't
+            // need to do this but it won't hurt.  
+            // If we were trying to read index droppings
+            // and they weren't available, then we should do this.
+        Util::MutexLock( &shared.fd_mutex );
+        WriteFile *wf = ( of && of->getWritefile() ? of->getWritefile() : 
+                                    getWriteFile( strPath, NOCREAT, false ) );
+        if ( wf ) {
+            off_t  last_offset;
+            size_t total_bytes;
+            wf->getMeta( &last_offset, &total_bytes );
+            if ( last_offset > stbuf->st_size ) {
+                cerr << "Pulled stat info from open write file: "
+                     << last_offset << ", " << total_bytes << endl;
+                stbuf->st_size = last_offset;
+                cerr << "Pulled stat info from writefile struct (" 
+                     << stbuf->st_size << ") for " << strPath << endl;
+            }
+                // if the index has already been flushed, then we might
+                // count it twice here.....
+            stbuf->st_blocks += Container::bytesToBlocks(total_bytes);
+        } else {
+            cerr << "No additional stat info for " << strPath << endl;
+        }
+        Util::MutexUnlock( &shared.fd_mutex );
+    }
+    return ret;
+}
+
+// the Plfs_fd can be NULL
+int 
+plfs_trunc( Plfs_fd *pfd, const char *path, off_t offset ) {
+    int ret = 0;
+    if ( isContainer( path ) ) {
+        if ( offset == 0 ) {
+            ret = removeDirectoryTree( path, true );
+        } else {
+                // either at existing end, before it, or after it
+            struct stat stbuf;
+            ret = plfs_getattr( strPath, &stbuf, of );
+            cerr << "Will truncate " << strPath << ", current size " 
+                 << stbuf.st_size << " at " << offset << endl;
+            if ( ret == 0 && stbuf.st_size == offset ) {
+                ret = 0;
+            } else if ( ret == 0 && stbuf.st_size > offset ) {
+                ret = Container::Truncate( strPath.c_str(), offset );
+            } else if ( ret == 0 && stbuf.st_size < offset ) {
+                ret = extendFile( of, strPath, offset );
+            }
+        }
+        if ( ret == 0 && of && of->getWritefile() ) {
+            Util::MutexLock( &shared.index_mutex );
+            ret = of->getWritefile()->truncate( offset );
+            of->truncate( offset );
+            Util::MutexUnlock( &shared.index_mutex );
+        }
+    } else {
+        fprintf( stderr, "WTF: %s called on non-container file %s",
+                __FUNCTION__, strPath.c_str() );
+        ret = retValue( truncate(strPath.c_str(),offset) );
+    }
+    return ret;
 }
 
 int 

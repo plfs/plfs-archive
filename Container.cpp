@@ -608,13 +608,8 @@ int Container::createHelper( const char *expanded_path, const char *hostname,
     return res;
 }
 
-// This must be in a mutex
-// the mutex prevents multiple procs on the same node from trying to make
-// the container at the same time.  In the normal no-error case, one will
-// get in first and make it, then the others will get in, stat it and quit
-// but the stats are networked.  instead using some static data structure
-// to record that this container was created.  However, we will need to
-// remove this record on unlink.
+// This should be in a mutex if multiple procs on the same node try to create
+// it at the same time
 int Container::create( const char *expanded_path, const char *hostname,
         mode_t mode, int flags, int *extra_attempts ) 
 {
