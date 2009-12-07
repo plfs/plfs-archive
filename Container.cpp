@@ -10,7 +10,6 @@ using namespace std;
 #include "Util.h"
 
 #define BLKSIZE 512
-extern SharedState shared;
                 
 blkcnt_t Container::bytesToBlocks( size_t total_bytes ) {
     //return (blkcnt_t)ceil((float)total_bytes/BLKSIZE);
@@ -547,7 +546,7 @@ string Container::getHostDirPath( const char* expanded_path,
         const char* hostname )
 {
     ostringstream oss;
-    size_t host_value = (hashValue( hostname ) % shared.params.subdirs) + 1;
+    size_t host_value = (hashValue( hostname ) % PLFS_SUBDIRS) + 1;
     oss << expanded_path << "/" << HOSTDIRPREFIX << host_value; 
     fprintf( stderr, "%s : %s %s -> %s\n", 
             __FUNCTION__, hostname, expanded_path, oss.str().c_str() );

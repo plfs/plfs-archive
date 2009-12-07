@@ -1,8 +1,8 @@
-TARGET     = plfs
-LOG        = /tmp/plfs.log
+LIBRARY    = libplfs.a
 SRCS       = $(wildcard *.cpp) 
 HDRS       = $(wildcard *.h)
 OBJS       = $(addsuffix .o, $(basename $(SRCS) ) ) 
+
 # put -DNDEBUG in to turn off assertions, this can make a big difference
 # as many of the asserts are doing stats
 # put -DNUTIL in to turn off timing in Util
@@ -11,56 +11,31 @@ OBJS       = $(addsuffix .o, $(basename $(SRCS) ) )
 # add -DCOUNT_SKIPS to maintain a count of sequential / non-sequential IO 
 DEBUG   = -DNDEBUG -DPLFS_TIMES -DNUTIL -DINDEX_CONTAINS_TIMESTAMPS \
 	      -DCOUNT_SKIPS
-CFLAGS  = -g -Wall $(DEBUG) 
+CFLAGS  = -g -Wall $(DEBUG) -D_FILE_OFFSET_BITS=64
 LDFLAGS = 
 INSTALLDIR = /usr/sbin/ 
 
 UNAME		:= $(shell uname)
 
-# make sure we have PKG_CONFIG_PATH in environment
-ifndef PKG_CONFIG_PATH
-	PKG_CONFIG_PATH = /etc:/usr/local/lib/pkgconfig/:
-endif
-export PKG_CONFIG_PATH 
-
-# set values for mntpnt and backend
-ifndef PLFS_MNT 
-	PLFS_MNT = /mnt/fuse
-endif
-ifndef PLFS_BACK
-	PLFS_BACK = /net/scratch3/${USER}/plfs_back
-endif
-
-
-# removed direct_io bec can't exec files in PLFS if it is set
-PLFS_SHARED_ARGS = -plfs_backend=$(PLFS_BACK) -plfs_subdirs=32 \
-				   -plfs_synconclose=1
 ifeq ($(UNAME), Darwin)
 	# also google for -oauto_xattr and noapplespecial and noappledouble
 	# -omodules=volicon -oiconpath=../../mac/plfs.icns
 	UMOUNT    = umount $(PLFS_MNT)
 	PLFS_ARGS = -o volname=PLFS $(PLFS_SHARED_ARGS) -plfs_bufferindex=0
+	CFLAGS += -D__FreeBSD__=10
 else
 	UMOUNT    = fusermount -u $(PLFS_MNT)
 	PLFS_ARGS = $(PLFS_SHARED_ARGS) 
 endif
 
-CFLAGS  += `pkg-config fuse --cflags`
-LDFLAGS += `pkg-config fuse --libs`
 
-all: plfs.o 
-#all: $(TARGET)
+all: $(LIBRARY)
 
-$(TARGET): main.o $(OBJS) 
-	@ # this next line builds it all at once from all source
-	@ # it's a teeny bit better for building from clean
-	@ # but much worse if just a single file has changed
-	@ #g++ $(CFLAGS) -o $(TARGET) $(SRCS) `pkg-config fuse --cflags --libs`
-	@ # this next line just does the link from each individual object
-	g++ $(LDFLAGS) -o $(TARGET) main.o $(OBJS) 
+$(LIBRARY): $(OBJS) 
+	ar rcs $@ $(OBJS) 
 
 plfs_map: plfs_map.o $(OBJS)
-	g++ $(LDFLAGS) -o $@ plfs_map.o $(OBJS)
+	g++ $(LDFLAGS) -o $@ plfs_map.o -L. -lplfs 
 
 %.o: %.C $(HDRS)
 	g++ $(CFLAGS) -o $@ -c $<
@@ -69,7 +44,7 @@ plfs_map: plfs_map.o $(OBJS)
 	g++ $(CFLAGS) -o $@ -c $<
  
 clean:
-	/bin/rm -f $(TARGET) plfs_map *.o
+	/bin/rm -f $(LIBRARY) plfs_map *.o
 
 test:
 	/bin/cat $(PLFS_MNT)/.plfsdebug
@@ -88,7 +63,7 @@ $(PLFS_MNT):
 #$(PLFS_BACK):
 #	/bin/mkdir -p $(PLFS_BACK)
 
-install: $(TARGET)
+install: $(LIBRARY)
 	/bin/cp ./$(TARGET) $(INSTALLDIR)
 
 mount: $(TARGET) $(PLFS_MNT) 

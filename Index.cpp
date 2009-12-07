@@ -20,7 +20,6 @@
 #include <time.h>
 #include "Container.h"
 #include "Index.h"
-#include "fusexx.h"
 #include <sys/mman.h>
 
 #ifndef MAP_NOCACHE
@@ -629,7 +628,7 @@ void Index::truncate( off_t offset ) {
 // returns 0 or -errno
 int Index::writeIndex( int fd, off_t offset, size_t written, pid_t pid,
         double begin_timestamp, double end_timestamp ) {
-    HostEntry entry( offset, written, fuse_get_context()->pid );
+    HostEntry entry( offset, written, pid );
     #ifdef INDEX_CONTAINS_TIMESTAMPS
         entry.begin_timestamp = begin_timestamp;
         entry.end_timestamp   = end_timestamp;
