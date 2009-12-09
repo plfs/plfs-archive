@@ -1,4 +1,5 @@
 #include "plfs.h"
+#include "LogMessage.h"
 #include "COPYRIGHT.h"
 
 #include <errno.h>
@@ -21,7 +22,7 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
-#include "LogMessage.h"
+#include "plfs_fuse.h"
 #include "fusexx.h"
 
 using namespace std;
