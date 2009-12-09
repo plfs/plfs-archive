@@ -1,4 +1,5 @@
 #include "plfs.h"
+#include "plfs_private.h"
 #include "COPYRIGHT.h"
 #include "WriteFile.h"
 #include "Container.h"

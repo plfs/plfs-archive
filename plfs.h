@@ -1,12 +1,15 @@
 #ifndef __PLFS_H_
 #define __PLFS_H_
 
-#define PLFS_SUBDIRS 128
-#define SHARED_PID     0
-
 #include "OpenFile.h"
 
 typedef OpenFile Plfs_fd;
+
+/*
+
+   All PLFS functions return 0 or -errno
+
+*/
 
 int plfs_create( const char *path, mode_t mode, int flags ); 
 

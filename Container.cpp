@@ -7,6 +7,7 @@ using namespace std;
 
 #include "Container.h"
 #include "plfs.h"
+#include "plfs_private.h"
 #include "Util.h"
 
 #define BLKSIZE 512

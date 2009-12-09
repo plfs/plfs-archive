@@ -28,14 +28,10 @@ else
 	PLFS_ARGS = $(PLFS_SHARED_ARGS) 
 endif
 
-
 all: $(LIBRARY)
 
 $(LIBRARY): $(OBJS) 
 	ar rcs $@ $(OBJS) 
-
-plfs_map: plfs_map.o $(OBJS)
-	g++ $(LDFLAGS) -o $@ plfs_map.o -L. -lplfs 
 
 %.o: %.C $(HDRS)
 	g++ $(CFLAGS) -o $@ -c $<

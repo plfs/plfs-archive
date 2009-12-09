@@ -1,8 +1,16 @@
 #include "plfs.h"
+#include "plfs_private.h"
 #include "Index.h"
 #include "WriteFile.h"
 #include "Container.h"
 #include "Util.h"
+
+// a shortcut for functions that are expecting zero
+int 
+retValue( int res ) {
+    if ( ! res ) return 0;
+    else         return -errno;
+}
 
 int 
 plfs_create( const char *path, mode_t mode, int flags ) {
@@ -272,7 +280,7 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
             int prec = numeric_limits<long double>::digits10; // 18
             ostringstream trash_path;
             trash_path.precision(prec); // override the default of 6
-            trash_path << "." << path "." << shared.myhost << "." 
+            trash_path << "." << path << "." << Util::hostname() << "." 
                        << Util::getTime();
             cerr << "Need to silly rename " << path << " to "
                  << trash_path.str().c_str() << endl;
@@ -286,9 +294,10 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
 // this should only be called if the uid has already been checked
 // and is allowed to access this file
 // also, this assumes strPath is a container
+// Plfs_fd can be NULL
 // returns 0 or -errno
 int 
-plfs_getattr( string strPath, struct stat *stbuf, OpenFile *of ) {
+plfs_getattr( string strPath, struct stat *stbuf, Plfs_fd *of ) {
     int ret = Container::getattr( strPath.c_str(), stbuf );
     if ( ret == 0 ) {
             // is it also open currently?
@@ -300,68 +309,69 @@ plfs_getattr( string strPath, struct stat *stbuf, OpenFile *of ) {
             // need to do this but it won't hurt.  
             // If we were trying to read index droppings
             // and they weren't available, then we should do this.
-        Util::MutexLock( &shared.fd_mutex );
-        WriteFile *wf = ( of && of->getWritefile() ? of->getWritefile() : 
-                                    getWriteFile( strPath, NOCREAT, false ) );
+        WriteFile *wf = ( of && of->getWritefile() ? of->getWritefile() : NULL);
         if ( wf ) {
             off_t  last_offset;
             size_t total_bytes;
             wf->getMeta( &last_offset, &total_bytes );
             if ( last_offset > stbuf->st_size ) {
-                cerr << "Pulled stat info from open write file: "
-                     << last_offset << ", " << total_bytes << endl;
                 stbuf->st_size = last_offset;
-                cerr << "Pulled stat info from writefile struct (" 
-                     << stbuf->st_size << ") for " << strPath << endl;
             }
                 // if the index has already been flushed, then we might
                 // count it twice here.....
             stbuf->st_blocks += Container::bytesToBlocks(total_bytes);
-        } else {
-            cerr << "No additional stat info for " << strPath << endl;
         }
-        Util::MutexUnlock( &shared.fd_mutex );
     }
     return ret;
 }
 
 // the Plfs_fd can be NULL
 int 
-plfs_trunc( Plfs_fd *pfd, const char *path, off_t offset ) {
+plfs_trunc( Plfs_fd *of, const char *path, off_t offset ) {
+    if ( ! Container::isContainer( path ) ) {
+        // this is weird, we expect only to operate on containers
+        return retValue( truncate(path,offset) );
+    }
+
     int ret = 0;
-    if ( isContainer( path ) ) {
-        if ( offset == 0 ) {
-            ret = removeDirectoryTree( path, true );
-        } else {
-                // either at existing end, before it, or after it
-            struct stat stbuf;
-            ret = plfs_getattr( strPath, &stbuf, of );
-            cerr << "Will truncate " << strPath << ", current size " 
-                 << stbuf.st_size << " at " << offset << endl;
-            if ( ret == 0 && stbuf.st_size == offset ) {
-                ret = 0;
-            } else if ( ret == 0 && stbuf.st_size > offset ) {
-                ret = Container::Truncate( strPath.c_str(), offset );
-            } else if ( ret == 0 && stbuf.st_size < offset ) {
-                ret = extendFile( of, strPath, offset );
+    if ( offset == 0 ) {
+            // this is easy, just remove all droppings
+        ret = removeDirectoryTree( path, true );
+    } else {
+            // either at existing end, before it, or after it
+        struct stat stbuf;
+        ret = plfs_getattr( path, &stbuf, of );
+        if ( ret == 0 ) {
+            if ( stbuf.st_size == offset ) {
+                ret = 0; // nothing to do
+            } else if ( stbuf.st_size > offset ) {
+                ret = Container::Truncate( path, offset ); // make smaller
+            } else if ( stbuf.st_size < offset ) {
+                // TODO
+                //ret = extendFile( of, path, offset );    // make bigger
             }
         }
-        if ( ret == 0 && of && of->getWritefile() ) {
-            Util::MutexLock( &shared.index_mutex );
-            ret = of->getWritefile()->truncate( offset );
-            of->truncate( offset );
-            Util::MutexUnlock( &shared.index_mutex );
-        }
-    } else {
-        fprintf( stderr, "WTF: %s called on non-container file %s",
-                __FUNCTION__, strPath.c_str() );
-        ret = retValue( truncate(strPath.c_str(),offset) );
     }
+
+    // if we actually modified the container, update any open file handle
+    if ( ret == 0 && of && of->getWritefile() ) {
+        ret = of->getWritefile()->truncate( offset );
+        of->truncate( offset );
+    }
+
     return ret;
 }
 
 int 
 plfs_unlink( const char *path ) {
+    int ret = 0;
+    if ( Container::isContainer( path ) ) {
+        ret = removeDirectoryTree( path, false );  
+    } else {
+        // this is weird, we should only be asked to remove containers
+        ret = retValue( unlink( path ) );   // recurse
+    }
+    return ret; 
 }
 
 int
