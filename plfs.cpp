@@ -115,6 +115,10 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, int pid, mode_t mode ) {
         ret = plfs_create( path, mode, flags ); 
     }
 
+    if ( flags & O_TRUNC ) {
+        ret = plfs_trunc( NULL, path, 0 );
+    }
+
     // go ahead and open it here, pass O_CREAT to create it if it doesn't exist 
     // "open it" just means create the data structures we use 
     if ( ret == 0 && (flags & O_WRONLY || flags & O_RDWR) ) {
@@ -293,13 +297,16 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
             
 // this should only be called if the uid has already been checked
 // and is allowed to access this file
-// also, this assumes strPath is a container
 // Plfs_fd can be NULL
 // returns 0 or -errno
 int 
-plfs_getattr( string strPath, struct stat *stbuf, Plfs_fd *of ) {
-    int ret = Container::getattr( strPath.c_str(), stbuf );
-    if ( ret == 0 ) {
+plfs_getattr( Plfs_fd *of, const char *path, struct stat *stbuf ) {
+    int ret = 0;
+    if ( ! Container::isContainer( path ) ) {
+        ret = retValue( Util::Lstat( path, stbuf ) );
+    } else {
+        ret = Container::getattr( path, stbuf );
+        if ( ret == 0 ) {
             // is it also open currently?
             // we might be reading from some other users writeFile but
             // we're only here if we had access to stat the container
@@ -309,17 +316,18 @@ plfs_getattr( string strPath, struct stat *stbuf, Plfs_fd *of ) {
             // need to do this but it won't hurt.  
             // If we were trying to read index droppings
             // and they weren't available, then we should do this.
-        WriteFile *wf = ( of && of->getWritefile() ? of->getWritefile() : NULL);
-        if ( wf ) {
-            off_t  last_offset;
-            size_t total_bytes;
-            wf->getMeta( &last_offset, &total_bytes );
-            if ( last_offset > stbuf->st_size ) {
-                stbuf->st_size = last_offset;
+            WriteFile *wf=(of && of->getWritefile() ? of->getWritefile() :NULL);
+            if ( wf ) {
+                off_t  last_offset;
+                size_t total_bytes;
+                wf->getMeta( &last_offset, &total_bytes );
+                if ( last_offset > stbuf->st_size ) {
+                    stbuf->st_size = last_offset;
+                }
+                    // if the index has already been flushed, then we might
+                    // count it twice here.....
+                stbuf->st_blocks += Container::bytesToBlocks(total_bytes);
             }
-                // if the index has already been flushed, then we might
-                // count it twice here.....
-            stbuf->st_blocks += Container::bytesToBlocks(total_bytes);
         }
     }
     return ret;
@@ -340,7 +348,7 @@ plfs_trunc( Plfs_fd *of, const char *path, off_t offset ) {
     } else {
             // either at existing end, before it, or after it
         struct stat stbuf;
-        ret = plfs_getattr( path, &stbuf, of );
+        ret = plfs_getattr( of, path, &stbuf );
         if ( ret == 0 ) {
             if ( stbuf.st_size == offset ) {
                 ret = 0; // nothing to do
@@ -361,6 +369,45 @@ plfs_trunc( Plfs_fd *of, const char *path, off_t offset ) {
 
     return ret;
 }
+
+/*
+// this is called when truncate has been used to extend a file
+// returns 0 or -errno
+int Plfs::extendFile( OpenFile *of, string strPath, off_t offset ) {
+    int ret = 0;
+    int fd = -1;
+    bool newly_opened = false;
+    if ( of && of->getWritefile() ) {
+            // hey, if this if statement is ever not true,
+            // then it looks like we'll get metadata wrong....
+        fd = of->getWritefile()->getIndexFd();
+        of->getWritefile()->addWrite( offset, 0 ); // to set the metadata
+    }
+    if ( fd == -1 ) {
+        fd = WriteFile::openIndexFile( strPath, 
+                (shared.myhost).c_str(), getMode(strPath) );
+        if ( fd < 0 ) {
+            ret = -errno;
+        } else {
+            newly_opened = true;
+        }
+    }
+    if ( fd >= 0 ) {
+        pid_t pid = of->getPid();
+        double begin_timestamp = Util::getTime();
+        Util::MutexLock( &shared.index_mutex );
+        ret = Index::writeIndex( fd, offset, 0, pid,
+                begin_timestamp, begin_timestamp );
+        Util::MutexUnlock( &shared.index_mutex );
+        if ( newly_opened ) {
+            if ( WriteFile::closeIndexFile( fd ) != 0 ) {
+                ret = -errno;
+            }
+        }
+    }
+    return ret;
+}
+*/
 
 int 
 plfs_unlink( const char *path ) {
