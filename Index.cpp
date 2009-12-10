@@ -18,6 +18,7 @@
 #include <sstream>
 
 #include <time.h>
+#include "plfs.h"
 #include "Container.h"
 #include "Index.h"
 #include <sys/mman.h>

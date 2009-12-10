@@ -17,6 +17,14 @@ blkcnt_t Container::bytesToBlocks( size_t total_bytes ) {
     return (blkcnt_t)((total_bytes + BLKSIZE - 1) & ~(BLKSIZE-1));
 }
 
+int Container::Access( const char *path, int mask ) {
+    // there used to be some concern here that the accessfile might not
+    // exist yet but the way containers are made ensures that an accessfile
+    // will exist if the container exists
+    string accessfile = getAccessFilePath(path);
+    return Util::Access( accessfile.c_str(), mask );
+}
+
 size_t Container::hashValue( const char *str ) {
         // wonder if we need a fancy hash function or if we could just
         // count the bits or something in the string?

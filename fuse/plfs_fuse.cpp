@@ -42,6 +42,20 @@ using namespace std;
     #define END_TIMES
 #endif
 
+#ifdef __FreeBSD__
+    #define SAVE_IDS
+    #define RESTORE_IDS 
+#else
+    #include <sys/fsuid.h>  
+    #define SAVE_IDS   uid_t save_uid = Util::Getuid();                   \
+                       gid_t save_gid = Util::Getgid();                   \
+                       Util::Setfsuid( fuse_get_context()->uid );         \
+                       Util::Setfsgid( fuse_get_context()->gid );
+
+    #define RESTORE_IDS Util::Setfsuid(save_uid); Util::Setfsgid(save_gid);
+#endif
+
+
 #define PLFS_ENTER string strPath  = expandPath( path );               \
                    ostringstream funct_id;                             \
                    LogMessage lm;                                      \
@@ -267,19 +281,7 @@ int Plfs::makePlfsFile( string expanded_path, mode_t mode, int flags ) {
 int Plfs::f_access(const char *path, int mask) {
     EXIT_IF_DEBUG;
     PLFS_ENTER;
-    if ( isContainer( strPath.c_str() ) ) {
-        string accessfile = Container::getAccessFilePath(strPath);
-        ret = Util::Access( accessfile.c_str(), mask );
-        if ( ret != 0 && errno == ENOENT ) {
-                // just do it on the container
-            cerr << "WTF.  Access file doesn't exist yet" << endl;
-            self->wtfs++;
-            ret = Util::Access( strPath.c_str(), mask );
-        }
-        ret = retValue( ret );
-    } else {
-        ret = retValue( Util::Access( strPath.c_str(), mask ) );
-    }
+    ret = plfs_access( const char *path, int mask );
     PLFS_EXIT;
 }
 

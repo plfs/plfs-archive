@@ -70,6 +70,7 @@ class Container {
         static int Chmod( const char *path, mode_t mode );
         static int Utime( const char *path, const struct utimbuf *buf );
         static int Truncate( const char *, off_t );
+        static int Access( const char *path, int mask );
 
         static int populateIndex( const char *, Index * );
         static int freeIndex( Index ** );

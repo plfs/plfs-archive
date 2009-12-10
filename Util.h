@@ -25,25 +25,8 @@
 #include <map>
 using namespace std;
 
-#ifdef __FreeBSD__
-    #define SAVE_IDS
-    #define RESTORE_IDS
-#else
-    #include <sys/fsuid.h> 
-    #define SAVE_IDS   uid_t save_uid = Util::Getuid();                   \
-                       gid_t save_gid = Util::Getgid();                   \
-                       Util::Setfsuid( fuse_get_context()->uid );         \
-                       Util::Setfsgid( fuse_get_context()->gid );     
-
-    #define RESTORE_IDS Util::Setfsuid(save_uid); Util::Setfsgid(save_gid);      
-#endif
-
-#define O_CONCURRENT_WRITE                         020000000000
-
 //#include <hash_map>   // shoot, hash_map not found.  more appropriate though..
 #define HASH_MAP map
-
-#define PPATH 1024
 
 class Util {
     public:
@@ -67,7 +50,6 @@ class Util {
         static int Open( const char*, int );
         static int Open( const char*, int, mode_t );
         static int Opendir( const char *dirname, DIR ** );
-        //static struct dirent *Readdir( DIR * );
         static ssize_t Pread( int, void *, size_t, off_t );
         static ssize_t Pwrite(int, const void *buf, size_t count, off_t offset);
         static int Rename( const char*, const char * );
@@ -105,3 +87,4 @@ class Util {
 };
 
 #endif
+

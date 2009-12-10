@@ -10,9 +10,9 @@ using namespace std;
 
 #define PPATH 1024
 
-class OpenFile : public Metadata {
+class PlfsFd : public Metadata {
     public:
-        OpenFile( WriteFile *, Index *, pid_t );
+        PlfsFd( WriteFile *, Index *, pid_t );
         WriteFile  *getWritefile();
         Index      *getIndex();
         void       setWriteFds( int, int, Index * );

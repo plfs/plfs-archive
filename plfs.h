@@ -1,15 +1,17 @@
 #ifndef __PLFS_H_
 #define __PLFS_H_
 
-#include "OpenFile.h"
+#include <sys/types.h>
 
-typedef OpenFile Plfs_fd;
+class Plfs_fd;
 
 /*
 
    All PLFS functions return 0 or -errno
 
 */
+
+int plfs_access( const char *path, int mask );
 
 int plfs_close( Plfs_fd * );
 
