@@ -543,6 +543,11 @@ int Util::Setfsuid( uid_t u ) {
     EXIT_UTIL;
 }
 
+// a utility for turning return values into 0 or -ERRNO
+int Util::retValue( int res ) {
+    return ( res == 0 ? 0 : -errno );
+}
+
 char *Util::hostname() {
     static char hname[128];
     if ( gethostname(hname, sizeof(hname)) < 0) {

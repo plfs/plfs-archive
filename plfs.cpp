@@ -9,8 +9,7 @@
 // a shortcut for functions that are expecting zero
 int 
 retValue( int res ) {
-    if ( ! res ) return 0;
-    else         return -errno;
+    return Util::retValue(res);
 }
 
 int 
@@ -26,6 +25,26 @@ plfs_access( const char *path, int mask ) {
         ret = Container::Access( path, mask );
     } else {
         ret = retValue( Util::Access( path, mask ) );
+    }
+    return ret;
+}
+int 
+plfs_chmod( const char *path, mode_t mode ) {
+  if ( isContainer( path ) ) {
+        ret = retValue( Container::Chmod( path, mode ) );
+    } else {
+        ret = retValue( Util::Chmod( full.c_str(), mode ) );
+    }
+}
+
+
+int
+plfs_utime( const char *path, struct utimbuf *ut ) {
+    int ret = -1;
+    if ( Container::isContainer( path ) ) {
+        ret = Container::Utime( path, ut );
+    } else {
+        ret = retValue( Util::Utime( path, ut ) );
     }
     return ret;
 }

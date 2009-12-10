@@ -281,15 +281,13 @@ int Plfs::makePlfsFile( string expanded_path, mode_t mode, int flags ) {
 int Plfs::f_access(const char *path, int mask) {
     EXIT_IF_DEBUG;
     PLFS_ENTER;
-    ret = plfs_access( const char *path, int mask );
+    ret = plfs_access( strPath.c_str(), int mask );
     PLFS_EXIT;
 }
 
 int Plfs::f_mknod(const char *path, mode_t mode, dev_t rdev) {
     PLFS_ENTER;
-    // here is where we create the container
-    string container = expandPath( path );
-    ret = makePlfsFile( container.c_str(), mode, 0 );
+    ret = makePlfsFile( strPath.c_str(), mode, 0 );
     PLFS_EXIT;
 }
 
@@ -302,7 +300,7 @@ int Plfs::f_mknod(const char *path, mode_t mode, dev_t rdev) {
 // untar of tarballs, so I'm gonna try to call f_mknod here
 int Plfs::f_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
     PLFS_ENTER_PID;
-    //ret = f_mknod( path, mode, 0 );
+    //ret = f_mknod( strPath.c_str(), mode, 0 );
     ret = -ENOSYS;
     PLFS_EXIT;
 }
@@ -322,7 +320,7 @@ int Plfs::f_fsync(const char *path, int datasync, struct fuse_file_info *fi) {
 int Plfs::f_ftruncate(const char *path, off_t offset, struct fuse_file_info *fi)
 {
     PLFS_ENTER_PID; SETUP_OPEN_FILES;
-    ret = plfs_truncate( strPath, offset, of );
+    ret = plfs_truncate( strPath.c_str(), offset, of );
     PLFS_EXIT;
 }
 
@@ -330,35 +328,54 @@ int Plfs::f_ftruncate(const char *path, off_t offset, struct fuse_file_info *fi)
 // return 0 or -errno 
 int Plfs::f_truncate( const char *path, off_t offset ) {
     PLFS_ENTER;
-    ret = plfs_truncate( strPath, offset, NULL );
+    ret = plfs_truncate( strPath.c_str(), offset, NULL );
+    PLFS_EXIT;
+}
+
+int Plfs::f_fgetattr(const char *path, struct stat *stbuf, 
+        struct fuse_file_info *fi) 
+{
+    PLFS_ENTER;
+    ret = plfs_getattr( fi->fh, strPath.c_str(), stbuf );
     PLFS_EXIT;
 }
 
 int Plfs::f_getattr(const char *path, struct stat *stbuf) {
     PLFS_ENTER;
-    ret = plfs_getattr( NULL, path, stbuf );
+    ret = plfs_getattr( NULL, strPath.c_str(), stbuf );
     PLFS_EXIT;
+}
+
+// a utility for discovering whether something is a directory
+// we need to know this since file ops are handled by PLFS
+// but directory ops need to be handled here since we have
+// the multiple backend feature
+int Plfs::isDirectory( const char *path ) {
+    struct stat stbuf;
+    int ret = plfs_getattr( NULL, path, &stbuf );
+    if ( ret == 0 ) {
+    }
 }
 
 // a shortcut for functions that are expecting zero
 int Plfs::retValue( int res ) {
-    if ( ! res ) return 0;
-    else         return -errno;
+    return Util::retValue( res );
 }
 
 int Plfs::f_utime (const char *path, struct utimbuf *ut) {
     PLFS_ENTER;
-    if ( isContainer( strPath.c_str() ) ) {
-        ret = retValue( Container::Utime( strPath.c_str(), ut) );  
-    } else {
-        ret = retValue( Util::Utime( strPath.c_str(), ut) );  
-    }
+    return plfs_utime( strPath.c_str(), ut );
     PLFS_EXIT;
 }
 		    
 // this needs to recurse on all data and index files
 int Plfs::f_chmod (const char *path, mode_t mode) {
     PLFS_ENTER;
+    ret = plfs_chmod( strPath.c_str(), mode );
+    if ( ret == 0 ) {
+        self->known_modes[strPath] = mode;
+    }
+    PLFS_EXIT;
     if ( isContainer( strPath.c_str() ) ) {
         ret = retValue( Container::Chmod( strPath.c_str(), mode ) );  
         if ( ret == 0 ) {

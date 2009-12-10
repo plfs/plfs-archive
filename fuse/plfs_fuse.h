@@ -65,6 +65,8 @@ class Plfs : public fusexx::fuse<Plfs> {
         static int f_chmod (const char *path, mode_t mode);
         static int f_chown (const char *path, uid_t uid, gid_t gid );
         static int f_create (const char *, mode_t, struct fuse_file_info *);
+		static int f_fgetattr(const char *, struct stat *, 
+                struct fuse_file_info *);
         static int f_flush (const char *, struct fuse_file_info *); 
         static int f_ftruncate (const char *, off_t, struct fuse_file_info *); 
         static int f_fsync(const char *path, int, struct fuse_file_info *fi);

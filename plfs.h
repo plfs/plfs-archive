@@ -13,6 +13,8 @@ class Plfs_fd;
 
 int plfs_access( const char *path, int mask );
 
+int plfs_chmod( const char *path, mode_t mode );
+
 int plfs_close( Plfs_fd * );
 
 int plfs_create( const char *path, mode_t mode, int flags ); 
@@ -30,6 +32,8 @@ int plfs_sync( Plfs_fd * );
 int plfs_trunc( Plfs_fd *, const char *path, off_t offset );
 
 int plfs_unlink( const char *path );
+
+int plfs_utime( const char *path, struct utimbuf *ut );
 
 int plfs_write( Plfs_fd *, const char *buf, size_t size, off_t offset );
 
