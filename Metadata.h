@@ -13,7 +13,7 @@ class Metadata {
     Metadata() { 
         //cerr << "Init metadata " << this << endl;
         synced = true;
-        last_offset = total_bytes = 0; }
+        last_offset = total_bytes = reference_count = 0; }
 
     void addWrite( off_t offset, size_t bytes ) {
         total_bytes += bytes;
@@ -46,6 +46,10 @@ class Metadata {
              << ", total_bytes " << total_bytes << endl;
     }
 
+    int incrementOpens( int amount ) {
+        return ( reference_count += amount );
+    }
+
     bool isSynced() {
         return synced;
     }
@@ -61,6 +65,7 @@ class Metadata {
     protected:
         off_t  last_offset;
         size_t total_bytes;
+        int    reference_count;
         bool   synced;
 };
 

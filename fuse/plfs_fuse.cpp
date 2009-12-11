@@ -200,12 +200,9 @@ int Plfs::init( int *argc, char **argv ) {
     pthread_mutex_init( &(shared.fd_mutex), NULL );
     pthread_mutex_init( &(shared.index_mutex), NULL );
 
-        // make sure we have a trash container
-    f_mkdir( TRASHDIR, DEFAULT_MODE );
-
-        // seed our random number generator which we use to know when to link
-        // in dangling files
-    srand(time(NULL));
+        // we used to make a trash container but now that we moved to library, 
+        // fuse layer doesn't handle silly rename
+        // we also have (temporarily?) removed the dangler stuff
 
     return 0;
 }
@@ -296,6 +293,8 @@ int Plfs::makePlfsFile( string expanded_path, mode_t mode, int flags ) {
 }
 
 // slight chance that the access file doesn't exist yet.
+// this doesn't use the iterate_backend function if it's a directory.
+// Since it only reads the dir, checking only one of cloned dirs is sufficient
 int Plfs::f_access(const char *path, int mask) {
     EXIT_IF_DEBUG;
     PLFS_ENTER;
@@ -316,6 +315,7 @@ int Plfs::f_mknod(const char *path, mode_t mode, dev_t rdev) {
 // now I'm seeing that *usually* when f_create gets the -ENOSYS, that the
 // caller will then call f_mknod, but that doesn't always happen in big
 // untar of tarballs, so I'm gonna try to call f_mknod here
+// the big tarball thing seems to work again with this commented out.... ?
 int Plfs::f_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
     PLFS_ENTER_PID;
     //ret = f_mknod( strPath.c_str(), mode, 0 );
@@ -353,8 +353,8 @@ int Plfs::f_truncate( const char *path, off_t offset ) {
 int Plfs::f_fgetattr(const char *path, struct stat *stbuf, 
         struct fuse_file_info *fi) 
 {
-    PLFS_ENTER;
-    ret = plfs_getattr( fi->fh, strPath.c_str(), stbuf );
+    PLFS_ENTER_PID;
+    ret = plfs_getattr( of, strPath.c_str(), stbuf );
     PLFS_EXIT;
 }
 
@@ -373,28 +373,63 @@ int Plfs::retValue( int res ) {
 int Plfs::f_utime (const char *path, struct utimbuf *ut) {
     PLFS_ENTER;
     if ( isDirectory( strPath ) ) {
-        // TODO
+        dir_op d;
+        d.op = UTIME;
+        d.arg = ut;
+        ret = iterate_backends( path, &d ); 
     } else {
         ret = plfs_utime( strPath.c_str(), ut );
     }
     PLFS_EXIT;
+}
+
+// the big question here is how to handle failure
+// do we continue doing the op to successive backends if it fails once?
+// for rmdir, maybe.  for the others maybe not.
+// currently, we break on first failure
+int Plfs::iterate_backends( dir_op *d ) {
+    vector<string>::iterator itr;
+    int ret = 0;
+    for( itr = shared.params.backends.begin();
+         itr!= shared.params.backends.end();
+         itr ++ )
+    {
+        string full( *itr + "/" + d->path );
+        switch( d->op ) {
+            case CHMOD:
+                ret = Util::Chmod( full.c_str(), d->m );
+                break;
+            case CHOWN:
+                ret = Util::Chown( full.c_str(), d->u, d->g );
+                break;
+            case UTIME:
+                ret = Util::Utime( full.c_str(), d->t );
+                break;
+            case MKDIR:
+                ret = Util::Mkdir( full.c_str(), d->m );
+                break;
+            case RMDIR:
+                ret = Util::Rmdir( full.c_str() );
+                break;
+            default:
+                assert( 0 );
+                cerr << "Bad dir op in " << __FUNCTION__ << endl;
+                break;
+        }
+        if ( ( ret = retValue( ret ) ) != 0 ) break;
+    }
+    return ret;
 }
 		    
 // this needs to recurse on all data and index files
 int Plfs::f_chmod (const char *path, mode_t mode) {
     PLFS_ENTER;
     if ( isDirectory( strPath ) ) {
-        // this code needs to be replicated for everything that iterates
-        // over cloned (i.e. backend) directories
-        vector<string>::iterator itr;
-        for( itr = shared.params.backends.begin();
-             itr!= shared.params.backends.end();
-             itr ++ )
-        {
-            string full( *itr + "/" + path );
-            ret = retValue( Util::Chmod( full.c_str(), mode ) );
-            if ( ret != 0 ) break;
-        }
+        dir_op d;
+        d->path = path;
+        d->op   = CHMOD;
+        d->m    = mode;
+        ret = iterate_backends( &d );
     } else {
         ret = plfs_chmod( strPath.c_str(), mode );
     }
@@ -407,15 +442,12 @@ int Plfs::f_chmod (const char *path, mode_t mode) {
 int Plfs::f_chown (const char *path, uid_t uid, gid_t gid ) { 
     PLFS_ENTER;
     if ( isDirectory( strPath ) ) {
-        vector<string>::iterator itr;
-        for( itr = shared.params.backends.begin();
-             itr!= shared.params.backends.end();
-             itr ++ )
-        {
-            string full( *itr + "/" + path );
-            ret = retValue( Util::Chown( full.c_str(), uid, gid ) );
-            if ( ret != 0 ) break;
-        }
+        dir_op d;
+        d->path = path;
+        d->op   = CHOWN;
+        d->u    = uid;
+        d->g    = gid;
+        ret = iterate_backends( &d );
     } else {
         ret = retValue( plfs_chown( strPath.c_str(), uid, gid ) );  
     }
@@ -429,34 +461,20 @@ int Plfs::f_chown (const char *path, uid_t uid, gid_t gid ) {
 // that we succeed for some and fail for others
 int Plfs::f_mkdir (const char *path, mode_t mode ) {
     PLFS_ENTER;
-    vector<string>::iterator itr;
-    for( itr = shared.params.backends.begin();
-         itr!= shared.params.backends.end();
-         itr ++ )
-    {
-        string full( *itr + "/" + path );
-        ret = retValue( Util::Rmdir( full.c_str() ) );
-        if ( ret != 0 ) break;
-    }
+    dir_op d;
+    d->path = path;
+    d->op   = MKDIR;
+    d->m    = mode;
+    ret = iterate_backends( &d );
     PLFS_EXIT;
 }
 
 int Plfs::f_rmdir( const char *path ) {
     PLFS_ENTER;
-    // this might show a better way to do it:
-    // http://www.gamedev.net/community/forums/topic.asp?topic_id=502800
-    int save_ret = 0;
-    vector<string>::iterator itr;
-    for( itr = shared.params.backends.begin();
-         itr!= shared.params.backends.end();
-         itr ++ )
-    {
-        string full( *itr + "/" + path );
-        ret = retValue( Util::Rmdir( full.c_str() ) );
-        // don't break on an error.  keep trying to delete rest of them
-        if ( ret != 0 ) save_ret = ret;
-    }
-    ret = save_ret;
+    dir_op d;
+    d->path = path;
+    d->op   = RMDIR;
+    ret = iterate_backends( &d );
     PLFS_EXIT;
 }
 
@@ -478,7 +496,6 @@ int Plfs::removeWriteFile( WriteFile *of, string strPath ) {
     delete( of );
     self->write_files.erase( strPath );
     shared.createdContainers.erase( strPath );
-    Container::removeOpenrecord( strPath.c_str(), (shared.myhost).c_str() );
     return ret;
 }
 

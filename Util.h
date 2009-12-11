@@ -28,6 +28,11 @@ using namespace std;
 //#include <hash_map>   // shoot, hash_map not found.  more appropriate though..
 #define HASH_MAP map
 
+enum 
+DirectoryOperation {
+    CHMOD, CHOWN, UTIME, RMDIR, MKDIR
+};
+
 class Util {
     public:
             // all the system calls

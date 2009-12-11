@@ -323,7 +323,7 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
             ostringstream trash_path;
             trash_path.precision(prec); // override the default of 6
             trash_path << "." << path << "." << Util::hostname() << "." 
-                       << Util::getTime();
+                       << Util::getTime() << ".silly_rename";
             cerr << "Need to silly rename " << path << " to "
                  << trash_path.str().c_str() << endl;
             Util::Rename( path, trash_path.str().c_str() ); 
@@ -371,6 +371,42 @@ plfs_getattr( PlfsFd *of, const char *path, struct stat *stbuf ) {
     return ret;
 }
 
+// this is called when truncate has been used to extend a file
+// returns 0 or -errno
+int 
+extendFile( PlfsFd *of, string strPath, off_t offset ) {
+    int ret = 0;
+    int fd = -1;
+    bool newly_opened = false;
+    if ( of && of->getWritefile() ) {
+            // hey, if this if statement is ever not true,
+            // then it looks like we'll get metadata wrong....
+        fd = of->getWritefile()->getIndexFd();
+        of->getWritefile()->addWrite( offset, 0 ); // to set the metadata
+    }
+    if ( fd == -1 ) {
+        mode_t mode = Container::getmode( strPath.c_str() ); 
+        fd = WriteFile::openIndexFile( strPath, Util::hostname(), mode );
+        if ( fd < 0 ) {
+            ret = -errno;
+        } else {
+            newly_opened = true;
+        }
+    }
+    if ( fd >= 0 ) {
+        pid_t pid = of->getPid();
+        double begin_timestamp = Util::getTime();
+        ret = Index::writeIndex( fd, offset, 0, pid,
+                begin_timestamp, begin_timestamp );
+        if ( newly_opened ) {
+            if ( WriteFile::closeIndexFile( fd ) != 0 ) {
+                ret = -errno;
+            }
+        }
+    }
+    return ret;
+}
+
 // the PlfsFd can be NULL
 int 
 plfs_trunc( PlfsFd *of, const char *path, off_t offset ) {
@@ -393,8 +429,7 @@ plfs_trunc( PlfsFd *of, const char *path, off_t offset ) {
             } else if ( stbuf.st_size > offset ) {
                 ret = Container::Truncate( path, offset ); // make smaller
             } else if ( stbuf.st_size < offset ) {
-                // TODO
-                //ret = extendFile( of, path, offset );    // make bigger
+                ret = extendFile( of, path, offset );    // make bigger
             }
         }
     }
@@ -407,45 +442,6 @@ plfs_trunc( PlfsFd *of, const char *path, off_t offset ) {
 
     return ret;
 }
-
-/*
-// this is called when truncate has been used to extend a file
-// returns 0 or -errno
-int Plfs::extendFile( PlfsFd *of, string strPath, off_t offset ) {
-    int ret = 0;
-    int fd = -1;
-    bool newly_opened = false;
-    if ( of && of->getWritefile() ) {
-            // hey, if this if statement is ever not true,
-            // then it looks like we'll get metadata wrong....
-        fd = of->getWritefile()->getIndexFd();
-        of->getWritefile()->addWrite( offset, 0 ); // to set the metadata
-    }
-    if ( fd == -1 ) {
-        fd = WriteFile::openIndexFile( strPath, 
-                (shared.myhost).c_str(), getMode(strPath) );
-        if ( fd < 0 ) {
-            ret = -errno;
-        } else {
-            newly_opened = true;
-        }
-    }
-    if ( fd >= 0 ) {
-        pid_t pid = of->getPid();
-        double begin_timestamp = Util::getTime();
-        Util::MutexLock( &shared.index_mutex );
-        ret = Index::writeIndex( fd, offset, 0, pid,
-                begin_timestamp, begin_timestamp );
-        Util::MutexUnlock( &shared.index_mutex );
-        if ( newly_opened ) {
-            if ( WriteFile::closeIndexFile( fd ) != 0 ) {
-                ret = -errno;
-            }
-        }
-    }
-    return ret;
-}
-*/
 
 int 
 plfs_unlink( const char *path ) {
@@ -472,6 +468,8 @@ plfs_close( PlfsFd *pfd ) {
         Container::addMeta( last_offset, total_bytes, pfd->getPath(),
                 wf->getHost() );
         ret = wf->Close();
+        // with multiple non-connected pids per host (as ADIO will require)
+        // this open record will need a pid too probably
         Container::removeOpenrecord( pfd->getPath(), wf->getHost() );
         delete( wf );
     } else if ( index ) {

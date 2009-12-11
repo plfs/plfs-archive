@@ -22,6 +22,8 @@ DroppingLevel {
 // directory.  so instead hash by node for create and hash by path for
 // lookup.  This means that we'll have to eventually move the data or 
 // link to it or something
+// we've temporarily (?) turned off this dangling thing which was adding
+// lots of code complexity and complicating the separation of fuse and library
 enum
 FileLocation {
     DANGLING_PATH,  // the dangling path accessed by hashing on node name
@@ -29,6 +31,15 @@ FileLocation {
     CURRENT_PATH,   // the current path (i.e. dangling until linked in)
 };
 
+struct dir_op {
+    // could be compressed with a union
+    DirectoryOperation   op;
+    const char           *path;
+    const struct utimbuf *t;
+    uid_t                u;
+    gid_t                g;
+    mode_t               m;
+}
 
 // and I don't like globals at the top of the .cpp.  So add all shared
 // data here and then declare one instance of this struct at the top of
@@ -98,6 +109,7 @@ class Plfs : public fusexx::fuse<Plfs> {
         static int init( int *argc, char **argv );
 
 	private:
+        static int iterate_backends( dir_op *d );
         static string expandPath( const char * );
         static int retValue( int res );
         static int makePlfsFile( string, mode_t, int );

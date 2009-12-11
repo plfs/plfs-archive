@@ -86,7 +86,7 @@ int Container::Chown( const char *path, uid_t uid, gid_t gid ) {
     return Container::Modify( CHOWN, path, uid, gid, NULL, 0 );  
 }
 
-int Container::Modify( ContainerModification type, const char *path,
+int Container::Modify( DirectoryOperation type, const char *path,
         uid_t uid, gid_t gid,
         const struct utimbuf *utbuf,
         mode_t mode )

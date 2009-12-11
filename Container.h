@@ -26,13 +26,7 @@ using namespace std;
 #define METADIR        "meta"         // where to stash shortcut metadata
 #define OPENHOSTDIR    "openhosts"    // where to stash whether file open
 #define ACCESSFILE     "access"       // where to stash the chmods and chowns
-#define TRASHDIR       ".plfs_trash"  // where to put silly rename containers
 #define CONTAINER_SUFFIX ".plfscontainer081173" // how to identify containers
-
-enum 
-ContainerModification {
-    CHMOD, CHOWN, UTIME 
-};
 
 #include "Index.h"
 
@@ -81,7 +75,7 @@ class Container {
 
     private:
             // static stuff
-        static int Modify( ContainerModification, 
+        static int Modify( DirectoryOperation, 
                 const char *, uid_t, gid_t, const struct utimbuf*, mode_t );
         static int createHelper( const char *, const char *, 
                 mode_t mode, int flags, int *extra_attempts );
