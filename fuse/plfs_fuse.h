@@ -7,6 +7,7 @@ class T;
 #include <set>
 #include <string>
 #include <map>
+#include <vector>
 using namespace std;
 
 enum 
@@ -105,6 +106,7 @@ class Plfs : public fusexx::fuse<Plfs> {
         static int linkDanglers( string, string dangler, string canonical ); 
         static int timeToUndangle( string possible_dangler );
         static bool isContainer( const char* );
+        static bool isDirectory( string );
         static bool isdebugfile( const char*, const char * );
         static bool isdebugfile( const char* );
         static int writeDebug( char *buf, size_t, off_t, const char* );
@@ -118,7 +120,6 @@ class Plfs : public fusexx::fuse<Plfs> {
         static string writeFilesToString();
         static int getWriteFds( string, int *, int *, Index **, OpenFile * );
         static int plfs_sync( OpenFile *of );
-        static int plfs_sync( OpenFile *of, bool, bool );
         static int plfs_mkdir( const char *, mode_t );
         static int extendFile( OpenFile *, string , off_t );
         static mode_t getMode( string expanded );

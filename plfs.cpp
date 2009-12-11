@@ -18,11 +18,16 @@ plfs_create( const char *path, mode_t mode, int flags ) {
     return Container::create( path, Util::hostname(), mode, flags, &attempts );
 }
 
+int 
+plfs_chown( const char *path, uid_t u, gid_t g ) {
+    return Container::Chown( path, u, g );
+}
+
 int
 plfs_access( const char *path, int mask ) {
     int ret = -1;
     if ( Container::isContainer( path ) ) {
-        ret = Container::Access( path, mask );
+        ret = retValue( Container::Access( path, mask ) );
     } else {
         ret = retValue( Util::Access( path, mask ) );
     }
@@ -30,11 +35,13 @@ plfs_access( const char *path, int mask ) {
 }
 int 
 plfs_chmod( const char *path, mode_t mode ) {
-  if ( isContainer( path ) ) {
+    int ret = -1;
+    if ( Container::isContainer( path ) ) {
         ret = retValue( Container::Chmod( path, mode ) );
     } else {
-        ret = retValue( Util::Chmod( full.c_str(), mode ) );
+        ret = retValue( Util::Chmod( path, mode ) );
     }
+    return ret;
 }
 
 

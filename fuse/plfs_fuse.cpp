@@ -1,4 +1,9 @@
 #include "plfs.h"
+#include "Util.h"
+#include "Index.h"
+#include "OpenFile.h"
+#include "WriteFile.h"
+#include "Container.h"
 #include "LogMessage.h"
 #include "COPYRIGHT.h"
 
@@ -80,7 +85,7 @@ using namespace std;
 
 #define EXIT_IF_DEBUG  if ( isdebugfile(path) ) return 0;
 
-#define SETUP_OPEN_FILES    OpenFile  *of    = (OpenFile*)fi->fh;   \
+#define SETUP_OPEN_FILES    PlfsFd  *of    = (PlfsFd*)fi->fh;   \
                             WriteFile *wf    = NULL;                \
                             Index     *index = NULL;                \
                             if ( of ) {                             \
@@ -101,6 +106,19 @@ split(const std::string &s, const char delim, std::vector<std::string> &elems) {
         elems.push_back(item);
     }
     return elems;
+}
+
+// a utility for discovering whether something is a directory
+// we need to know this since file ops are handled by PLFS
+// but directory ops need to be handled here since we have
+// the multiple backend feature
+bool Plfs::isDirectory( string path ) {
+    bool isdir = false;
+    struct stat buf;
+    if ( plfs_getattr( path.c_str(), &buf ) == 0 ) {
+        isdir = ( buf.st_mode & S_IFDIR );
+    }
+    return isdir;
 }
 
 // set this up to parse command line args
@@ -162,8 +180,8 @@ int Plfs::init( int *argc, char **argv ) {
         itr != shared.params.backends.end(); 
         itr++)
     {
-        if ( ! Util::isDirectory( (*itr).c_str() ) ) {
-            cerr << "FATAL: No valid backend directory found.  "
+        if ( ! isDirectory( *itr ) ) {
+            cerr << "FATAL: " << *itr << " is not a valid backend directory.  "
                  << "Pass -plfs_backend=/path/to/backend\n"; 
             return -ENOENT;
         }
@@ -183,7 +201,7 @@ int Plfs::init( int *argc, char **argv ) {
     pthread_mutex_init( &(shared.index_mutex), NULL );
 
         // make sure we have a trash container
-    plfs_mkdir( TRASHDIR, DEFAULT_MODE );
+    f_mkdir( TRASHDIR, DEFAULT_MODE );
 
         // seed our random number generator which we use to know when to link
         // in dangling files
@@ -320,7 +338,7 @@ int Plfs::f_fsync(const char *path, int datasync, struct fuse_file_info *fi) {
 int Plfs::f_ftruncate(const char *path, off_t offset, struct fuse_file_info *fi)
 {
     PLFS_ENTER_PID; SETUP_OPEN_FILES;
-    ret = plfs_truncate( strPath.c_str(), offset, of );
+    ret = plfs_truncate( of, strPath.c_str(), offset );
     PLFS_EXIT;
 }
 
@@ -328,7 +346,7 @@ int Plfs::f_ftruncate(const char *path, off_t offset, struct fuse_file_info *fi)
 // return 0 or -errno 
 int Plfs::f_truncate( const char *path, off_t offset ) {
     PLFS_ENTER;
-    ret = plfs_truncate( strPath.c_str(), offset, NULL );
+    ret = plfs_truncate( NULL, strPath.c_str(), offset );
     PLFS_EXIT;
 }
 
@@ -346,42 +364,28 @@ int Plfs::f_getattr(const char *path, struct stat *stbuf) {
     PLFS_EXIT;
 }
 
-// a utility for discovering whether something is a directory
-// we need to know this since file ops are handled by PLFS
-// but directory ops need to be handled here since we have
-// the multiple backend feature
-int Plfs::isDirectory( const char *path ) {
-    struct stat stbuf;
-    int ret = plfs_getattr( NULL, path, &stbuf );
-    if ( ret == 0 ) {
-    }
-}
-
 // a shortcut for functions that are expecting zero
 int Plfs::retValue( int res ) {
     return Util::retValue( res );
 }
 
+// needs to work differently for directories
 int Plfs::f_utime (const char *path, struct utimbuf *ut) {
     PLFS_ENTER;
-    return plfs_utime( strPath.c_str(), ut );
+    if ( isDirectory( strPath ) ) {
+        // TODO
+    } else {
+        ret = plfs_utime( strPath.c_str(), ut );
+    }
     PLFS_EXIT;
 }
 		    
 // this needs to recurse on all data and index files
 int Plfs::f_chmod (const char *path, mode_t mode) {
     PLFS_ENTER;
-    ret = plfs_chmod( strPath.c_str(), mode );
-    if ( ret == 0 ) {
-        self->known_modes[strPath] = mode;
-    }
-    PLFS_EXIT;
-    if ( isContainer( strPath.c_str() ) ) {
-        ret = retValue( Container::Chmod( strPath.c_str(), mode ) );  
-        if ( ret == 0 ) {
-            self->known_modes[strPath] = mode;
-        }
-    } else {
+    if ( isDirectory( strPath ) ) {
+        // this code needs to be replicated for everything that iterates
+        // over cloned (i.e. backend) directories
         vector<string>::iterator itr;
         for( itr = shared.params.backends.begin();
              itr!= shared.params.backends.end();
@@ -391,15 +395,18 @@ int Plfs::f_chmod (const char *path, mode_t mode) {
             ret = retValue( Util::Chmod( full.c_str(), mode ) );
             if ( ret != 0 ) break;
         }
+    } else {
+        ret = plfs_chmod( strPath.c_str(), mode );
+    }
+    if ( ret == 0 ) {
+        self->known_modes[strPath] = mode;
     }
     PLFS_EXIT;
 }
 		    
 int Plfs::f_chown (const char *path, uid_t uid, gid_t gid ) { 
     PLFS_ENTER;
-    if ( isContainer( strPath.c_str() ) ) {
-        ret = retValue( Container::Chown( strPath.c_str(), uid, gid ) );  
-    } else {
+    if ( isDirectory( strPath ) ) {
         vector<string>::iterator itr;
         for( itr = shared.params.backends.begin();
              itr!= shared.params.backends.end();
@@ -409,6 +416,8 @@ int Plfs::f_chown (const char *path, uid_t uid, gid_t gid ) {
             ret = retValue( Util::Chown( full.c_str(), uid, gid ) );
             if ( ret != 0 ) break;
         }
+    } else {
+        ret = retValue( plfs_chown( strPath.c_str(), uid, gid ) );  
     }
     PLFS_EXIT;
 }
@@ -418,44 +427,36 @@ int Plfs::f_chown (const char *path, uid_t uid, gid_t gid ) {
 // location but dirs need to be mirrored on all
 // probably this should be transactional but it really shouldn't happen
 // that we succeed for some and fail for others
-//
-// we also do chmod, chown, chgrp across all mirrored dirs.
-int Plfs::plfs_mkdir (const char *path, mode_t mode ) {
-    int ret;
+int Plfs::f_mkdir (const char *path, mode_t mode ) {
+    PLFS_ENTER;
     vector<string>::iterator itr;
     for( itr = shared.params.backends.begin();
          itr!= shared.params.backends.end();
          itr ++ )
     {
         string full( *itr + "/" + path );
-        ret = retValue( Util::Mkdir( full.c_str(), mode ) );
+        ret = retValue( Util::Rmdir( full.c_str() ) );
         if ( ret != 0 ) break;
     }
-    return ret;
-}
-
-
-int Plfs::f_mkdir (const char *path, mode_t mode ) {
-    PLFS_ENTER;
-    plfs_mkdir( path, mode );
     PLFS_EXIT;
 }
 
 int Plfs::f_rmdir( const char *path ) {
     PLFS_ENTER;
-    if ( isContainer( strPath.c_str() ) ) {
-        ret = -ENOTDIR;
-    } else {
-        vector<string>::iterator itr;
-        for( itr = shared.params.backends.begin();
-             itr!= shared.params.backends.end();
-             itr ++ )
-        {
-            string full( *itr + "/" + path );
-            ret = retValue( Util::Rmdir( full.c_str() ) );
-            if ( ret != 0 ) break;
-        }
+    // this might show a better way to do it:
+    // http://www.gamedev.net/community/forums/topic.asp?topic_id=502800
+    int save_ret = 0;
+    vector<string>::iterator itr;
+    for( itr = shared.params.backends.begin();
+         itr!= shared.params.backends.end();
+         itr ++ )
+    {
+        string full( *itr + "/" + path );
+        ret = retValue( Util::Rmdir( full.c_str() ) );
+        // don't break on an error.  keep trying to delete rest of them
+        if ( ret != 0 ) save_ret = ret;
     }
+    ret = save_ret;
     PLFS_EXIT;
 }
 
@@ -528,7 +529,7 @@ int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
             st.st_ino = de->d_ino;
             st.st_mode = de->d_type << 12;
             string fullPath( dirpath + "/" + de->d_name );
-            if ( isContainer( fullPath.c_str() ) ) {
+            if ( ! isDirectory( fullPath.c_str() ) ) {
                 st.st_mode = Container::fileMode( st.st_mode );
             }
             if (filler(buf, de->d_name, &st, 0)) {
@@ -608,7 +609,7 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
     }
 
     if ( ret == 0 ) {
-        fi->fh = (uint64_t)new OpenFile( wf, index, fuse_get_context()->pid ); 
+        fi->fh = (uint64_t)new PlfsFd( wf, index, fuse_get_context()->pid ); 
     }
     PLFS_EXIT;
 }
@@ -728,7 +729,7 @@ int Plfs::getIndex( string expanded, mode_t mode, Index **index ) {
 // here we lock two muxes, first fd, then container (container just in case)
 // returns 0 or -errno
 int Plfs::getWriteFds( string strPath, int *data_fd, int *indx_fd, 
-        Index **index, OpenFile *of ) 
+        Index **index, PlfsFd *of ) 
 {
     int ret = 0;
     of->getWriteFds( data_fd, indx_fd, index );
@@ -1093,30 +1094,6 @@ string Plfs::paramsToString( Params *p ) {
     return oss.str();
 }
 
-int Plfs::plfs_sync( OpenFile *of ) {
-    return plfs_sync( of, true, true );
-}
-
-int Plfs::plfs_sync( OpenFile *of, bool sync_index, bool sync_data ) {
-    Index *index = NULL;
-    int indexfd = -1, datafd = -1, ret = 0;
-    of->getWriteFds( &datafd, &indexfd, &index );
-    if ( index ) {
-        Util::MutexLock( &shared.index_mutex );
-        ret = index->writeIndex( indexfd );
-        Util::MutexUnlock( &shared.index_mutex );
-    }
-    if ( ret == 0 ) {
-        if ( sync_index && indexfd > 0 && Util::Fsync( indexfd ) != 0 ) {
-            ret = -errno;
-        }
-        if ( sync_data && datafd > 0 && Util::Fsync( datafd ) != 0 ) {
-            ret = -errno;
-        }
-    }
-    return ret;
-}
-
 // this should be called when an app does a close on a file
 // 
 // for RDONLY files, nothing happens here, they should get cleaned
@@ -1133,7 +1110,7 @@ int Plfs::f_flush( const char *path, struct fuse_file_info *fi ) {
             // 2) sync the datafd and maybe the indexfd
             // 3) do nothing and let f_release do it
         bool sync_index = true;
-        ret = plfs_sync( of, sync_index, shared.params.sync_on_close );
+        ret = plfs_sync( of );
     }
     PLFS_EXIT_IO;
 }

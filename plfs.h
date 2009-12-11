@@ -15,6 +15,8 @@ int plfs_access( const char *path, int mask );
 
 int plfs_chmod( const char *path, mode_t mode );
 
+int plfs_chown( const char *path, uid_t, gid_t );
+
 int plfs_close( Plfs_fd * );
 
 int plfs_create( const char *path, mode_t mode, int flags ); 
