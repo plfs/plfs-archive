@@ -1,7 +1,7 @@
 #include "OpenFile.h"
 #include "COPYRIGHT.h"
 
-PlfsFd::PlfsFd( WriteFile *wf, Index *i, pid_t p ) :
+Plfs_fd::Plfs_fd( WriteFile *wf, Index *i, pid_t p ) :
         Metadata::Metadata() 
 {
     this->writefile = wf;
@@ -12,25 +12,25 @@ PlfsFd::PlfsFd( WriteFile *wf, Index *i, pid_t p ) :
     this->write_index    = NULL;
 }
 
-WriteFile *PlfsFd::getWritefile( ) {
+WriteFile *Plfs_fd::getWritefile( ) {
     return writefile;
 }
 
-Index *PlfsFd::getIndex( ) {
+Index *Plfs_fd::getIndex( ) {
     return index;
 }
 
-pid_t PlfsFd::getPid() {
+pid_t Plfs_fd::getPid() {
     return pid;
 }
 
-void PlfsFd::getWriteFds( int *d, int *i, Index **I ) {
+void Plfs_fd::getWriteFds( int *d, int *i, Index **I ) {
     *d = write_data_fd;
     *i = write_index_fd;
     *I = write_index;
 }
 
-void PlfsFd::setWriteFds( int d, int i, Index *I ) {
+void Plfs_fd::setWriteFds( int d, int i, Index *I ) {
     write_data_fd  = d;
     write_index_fd = i;
     write_index    = I;

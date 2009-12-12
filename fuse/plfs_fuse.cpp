@@ -85,13 +85,7 @@ using namespace std;
 
 #define EXIT_IF_DEBUG  if ( isdebugfile(path) ) return 0;
 
-#define SETUP_OPEN_FILES    PlfsFd  *of    = (PlfsFd*)fi->fh;   \
-                            WriteFile *wf    = NULL;                \
-                            Index     *index = NULL;                \
-                            if ( of ) {                             \
-                                wf    = of->getWritefile();         \
-                                index = of->getIndex();             \
-                            }
+#define GET_OPEN_FILE    Plfs_fd  *of    = (Plfs_fd*)fi->fh;
 
 
 
@@ -115,7 +109,7 @@ split(const std::string &s, const char delim, std::vector<std::string> &elems) {
 bool Plfs::isDirectory( string path ) {
     bool isdir = false;
     struct stat buf;
-    if ( plfs_getattr( path.c_str(), &buf ) == 0 ) {
+    if ( plfs_getattr( NULL, path.c_str(), &buf ) == 0 ) {
         isdir = ( buf.st_mode & S_IFDIR );
     }
     return isdir;
@@ -298,7 +292,7 @@ int Plfs::makePlfsFile( string expanded_path, mode_t mode, int flags ) {
 int Plfs::f_access(const char *path, int mask) {
     EXIT_IF_DEBUG;
     PLFS_ENTER;
-    ret = plfs_access( strPath.c_str(), int mask );
+    ret = plfs_access( strPath.c_str(), mask );
     PLFS_EXIT;
 }
 
@@ -326,8 +320,8 @@ int Plfs::f_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
 // returns 0 or -errno
 // nothing to do for a read file
 int Plfs::f_fsync(const char *path, int datasync, struct fuse_file_info *fi) {
-    PLFS_ENTER_PID; SETUP_OPEN_FILES;
-    if ( wf ) {
+    PLFS_ENTER_PID; GET_OPEN_FILE;
+    if ( of ) {
         plfs_sync( of );
     }
     PLFS_EXIT;
@@ -337,8 +331,8 @@ int Plfs::f_fsync(const char *path, int datasync, struct fuse_file_info *fi) {
 // current write file and adjust those indices also if necessary
 int Plfs::f_ftruncate(const char *path, off_t offset, struct fuse_file_info *fi)
 {
-    PLFS_ENTER_PID; SETUP_OPEN_FILES;
-    ret = plfs_truncate( of, strPath.c_str(), offset );
+    PLFS_ENTER_PID; GET_OPEN_FILE;
+    ret = plfs_trunc( of, strPath.c_str(), offset );
     PLFS_EXIT;
 }
 
@@ -346,14 +340,14 @@ int Plfs::f_ftruncate(const char *path, off_t offset, struct fuse_file_info *fi)
 // return 0 or -errno 
 int Plfs::f_truncate( const char *path, off_t offset ) {
     PLFS_ENTER;
-    ret = plfs_truncate( NULL, strPath.c_str(), offset );
+    ret = plfs_trunc( NULL, strPath.c_str(), offset );
     PLFS_EXIT;
 }
 
 int Plfs::f_fgetattr(const char *path, struct stat *stbuf, 
         struct fuse_file_info *fi) 
 {
-    PLFS_ENTER_PID;
+    PLFS_ENTER_PID; GET_OPEN_FILE;
     ret = plfs_getattr( of, strPath.c_str(), stbuf );
     PLFS_EXIT;
 }
@@ -361,6 +355,12 @@ int Plfs::f_fgetattr(const char *path, struct stat *stbuf,
 int Plfs::f_getattr(const char *path, struct stat *stbuf) {
     PLFS_ENTER;
     ret = plfs_getattr( NULL, strPath.c_str(), stbuf );
+    if ( ret == -ENOENT && isdebugfile( path ) ) {
+        stbuf->st_mode = S_IFREG | 0444;
+        stbuf->st_nlink = 1;
+        stbuf->st_size = DEBUGFILESIZE;
+        ret = 0; 
+    }
     PLFS_EXIT;
 }
 
@@ -374,9 +374,10 @@ int Plfs::f_utime (const char *path, struct utimbuf *ut) {
     PLFS_ENTER;
     if ( isDirectory( strPath ) ) {
         dir_op d;
-        d.op = UTIME;
-        d.arg = ut;
-        ret = iterate_backends( path, &d ); 
+        d.path = path;
+        d.op   = UTIME;
+        d.t    = ut;
+        ret = iterate_backends( &d ); 
     } else {
         ret = plfs_utime( strPath.c_str(), ut );
     }
@@ -426,9 +427,9 @@ int Plfs::f_chmod (const char *path, mode_t mode) {
     PLFS_ENTER;
     if ( isDirectory( strPath ) ) {
         dir_op d;
-        d->path = path;
-        d->op   = CHMOD;
-        d->m    = mode;
+        d.path = path;
+        d.op   = CHMOD;
+        d.m    = mode;
         ret = iterate_backends( &d );
     } else {
         ret = plfs_chmod( strPath.c_str(), mode );
@@ -443,10 +444,10 @@ int Plfs::f_chown (const char *path, uid_t uid, gid_t gid ) {
     PLFS_ENTER;
     if ( isDirectory( strPath ) ) {
         dir_op d;
-        d->path = path;
-        d->op   = CHOWN;
-        d->u    = uid;
-        d->g    = gid;
+        d.path = path;
+        d.op   = CHOWN;
+        d.u    = uid;
+        d.g    = gid;
         ret = iterate_backends( &d );
     } else {
         ret = retValue( plfs_chown( strPath.c_str(), uid, gid ) );  
@@ -462,9 +463,9 @@ int Plfs::f_chown (const char *path, uid_t uid, gid_t gid ) {
 int Plfs::f_mkdir (const char *path, mode_t mode ) {
     PLFS_ENTER;
     dir_op d;
-    d->path = path;
-    d->op   = MKDIR;
-    d->m    = mode;
+    d.path = path;
+    d.op   = MKDIR;
+    d.m    = mode;
     ret = iterate_backends( &d );
     PLFS_EXIT;
 }
@@ -472,8 +473,8 @@ int Plfs::f_mkdir (const char *path, mode_t mode ) {
 int Plfs::f_rmdir( const char *path ) {
     PLFS_ENTER;
     dir_op d;
-    d->path = path;
-    d->op   = RMDIR;
+    d.path = path;
+    d.op   = RMDIR;
     ret = iterate_backends( &d );
     PLFS_EXIT;
 }
@@ -491,6 +492,7 @@ int Plfs::f_unlink( const char *path ) {
     PLFS_EXIT;
 }
 
+/*
 int Plfs::removeWriteFile( WriteFile *of, string strPath ) {
     int ret = of->Close();  // close any open fds
     delete( of );
@@ -498,12 +500,7 @@ int Plfs::removeWriteFile( WriteFile *of, string strPath ) {
     shared.createdContainers.erase( strPath );
     return ret;
 }
-
-int Plfs::removeIndex( string path, Index *index ) {
-    delete( index );
-    shared.read_files.erase( path );
-    return 0;
-}
+*/
 
 // see f_readdir for some documentation here
 // returns 0 or -errno
@@ -564,24 +561,6 @@ int Plfs::f_releasedir( const char *path, struct fuse_file_info *fi ) {
     PLFS_EXIT;
 }
 
-// checks for access to a file
-// returns 0 or -errno
-int Plfs::checkAccess( string strPath, struct fuse_file_info *fi ) {
-    int ret = 0;
-    int accessmask = ( fi->flags & O_WRONLY || fi->flags & O_RDWR 
-                   ? W_OK : R_OK );
-    string accessfile = Container::getAccessFilePath(strPath);
-    ret = Util::Access( accessfile.c_str(), accessmask );
-    if ( ret != 0 && errno == ENOENT ) {
-            // it's possible that the access file doesn't exist yet
-            // if so, just ask about the directory itself.
-        ret = Util::Access( strPath.c_str(), accessmask );
-    }
-    ret = retValue( ret );
-    cerr << "Checked access for " << strPath << ": " << ret << endl;
-    return ret; 
-}
-
 // returns 0 or -errno
 // O_WRONLY and O_RDWR are handled as a write
 // O_RDONLY is handled as a read
@@ -591,42 +570,11 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
     fi->fh = (uint64_t)NULL;
     EXIT_IF_DEBUG;
     PLFS_ENTER_PID;
-    WriteFile *wf    = NULL;
-    Index     *index = NULL;
-
-    // make sure we're allowed to open this container
-    // this breaks things when tar is trying to create new files
-    // with --r--r--r bec we create it w/ that access and then 
-    // we can't write to it
-    //ret = checkAccess( strPath, fi ); 
-
-    // go ahead and open it here, pass O_CREAT to create it if it doesn't exist 
-    // "open it" just means create the data structures we use 
-    if ( ret == 0 && (fi->flags & O_WRONLY || fi->flags & O_RDWR) ) {
-        bool bufferindex = shared.params.bufferindex;
-        if ( fi->flags & O_RDWR ) {
-            bufferindex  = false;
-            self->o_rdwrs++;
-        }
-        Util::MutexLock( &shared.fd_mutex );
-        wf = getWriteFile( strPath, O_CREAT, bufferindex );
-        wf->incrementOpens( 1 );
-        Util::MutexUnlock( &shared.fd_mutex );
-    } else if ( ret == 0 ) {
-        Util::MutexLock( &shared.index_mutex );
-        ret = getIndex( strPath, O_CREAT, &index ); 
-        if ( ret != 0 ) {
-            index = NULL;
-            fprintf( stderr, "WTF.  getIndex for %s failed\n", strPath.c_str());
-            self->wtfs++;
-        } else {
-            index->incrementOpens( 1 );
-        }
-        Util::MutexUnlock( &shared.index_mutex );
-    }
-
+    Plfs_fd *pfd = NULL;
+    ret = plfs_open( &pfd, strPath.c_str(), fi->flags, 
+            fuse_get_context()->pid, 0 );
     if ( ret == 0 ) {
-        fi->fh = (uint64_t)new PlfsFd( wf, index, fuse_get_context()->pid ); 
+        fi->fh = (uint64_t)pfd;
     }
     PLFS_EXIT;
 }
@@ -641,38 +589,15 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
 // so it should be safe to close all fd's on the first release
 // and delete it.  But it's safer to wait until the last release
 int Plfs::f_release( const char *path, struct fuse_file_info *fi ) {
-    PLFS_ENTER_PID; SETUP_OPEN_FILES;
-
-    if ( wf ) {
-        off_t  last_offset;
-        size_t total_bytes;
-        of->getMeta( &last_offset, &total_bytes );
-        ret = plfs_sync( of );  // make sure all data is sync'd
-        Util::MutexLock( &shared.fd_mutex );
-            // only release it on the final release
-        wf->addMeta( last_offset, total_bytes );
-        int remaining_opens = wf->incrementOpens( -1 );
-        if ( remaining_opens == 0 ) {
-            // before we remove it, let's save some metadata
-            wf->getMeta( &last_offset, &total_bytes );
-            Container::addMeta( last_offset, total_bytes, 
-                    strPath.c_str(), (shared.myhost).c_str() );
-            ret = removeWriteFile( wf, strPath );
-        }
-        Util::MutexUnlock( &shared.fd_mutex );
-    } else if ( index ) {
-        Util::MutexLock( &shared.index_mutex );
-        int remaining_opens = index->incrementOpens( -1 );
-        if ( remaining_opens == 0 ) {
-            ret = removeIndex( strPath, index );
-        }
-        Util::MutexUnlock( &shared.index_mutex );
+    PLFS_ENTER_PID; GET_OPEN_FILE;
+    if ( of ) {
+        plfs_close( of );
+        fi->fh = NULL;
     }
-
-    delete( of );
     PLFS_EXIT;
 }
 
+/*
 // look for an instantiation of an WriteFile
 // if mode & O_CREAT, create one and cache it if not exist
 // when this is called, we should already be in a mux 
@@ -696,6 +621,7 @@ WriteFile *Plfs::getWriteFile( string expanded, mode_t mode, bool bufferindex ){
     }
     return of;
 }
+*/
 
 mode_t Plfs::getMode( string expanded ) {
     mode_t mode;
@@ -709,162 +635,16 @@ mode_t Plfs::getMode( string expanded ) {
     }
     return mode;
 }
-            
-// should be in a mutex
-int Plfs::getIndex( string expanded, mode_t mode, Index **index ) {
-    fprintf( stderr, "Looking for Index for %s\n", expanded.c_str() );
-    HASH_MAP<string, Index *>::iterator itr;
-    itr = shared.read_files.find( expanded );
-    if ( itr == shared.read_files.end() ) {
-        if ( mode & O_CREAT ) {
-            *index = new Index( expanded, SHARED_PID );
-            int ret = Container::populateIndex( expanded.c_str(), *index );
-            if ( ret != 0 ) {
-                    // no existing found and user asked to create one but
-                    // something weird happened while reading index files
-                delete( *index );
-                *index = NULL;
-                return -EIO;
-            } else {
-                    // no existing found so 
-                    // we created and populated a new one
-                shared.read_files[expanded] = *index;
-                return 0;
-            }
-        } else {
-                // no index found and user didn't ask to make one
-            *index = NULL;
-            return -ENOENT;
-        }
-    } else {
-            // existing index found
-        *index = itr->second;
-        return 0;
-    }
-}
-
-// here we lock two muxes, first fd, then container (container just in case)
-// returns 0 or -errno
-int Plfs::getWriteFds( string strPath, int *data_fd, int *indx_fd, 
-        Index **index, PlfsFd *of ) 
-{
-    int ret = 0;
-    of->getWriteFds( data_fd, indx_fd, index );
-    if ( *data_fd < 0 || indx_fd < 0 ) {
-        WriteFile *wf = of->getWritefile();
-        Util::MutexLock( &shared.fd_mutex );
-        for( int attempts = 0; attempts <= 1 && ret == 0; attempts++ ) {
-            ret=wf->getFds( of->getPid(), O_CREAT, indx_fd, data_fd, index );
-            if ( ret == -ENOENT && attempts == 0 ) {
-                // we might have to make a host dir if one doesn't exist yet
-                double time_start = Util::getTime();
-                self->extra_attempts++;
-                cerr << "Making hostdir for " << strPath << endl;
-                Util::MutexLock( &shared.container_mutex );
-                // should probably check in here for whether already made
-                if (shared.createdContainers.find(strPath)
-                        ==shared.createdContainers.end()) 
-                {
-                    ret = Container::makeHostDir( strPath.c_str(), 
-                        shared.myhost.c_str(), getMode(strPath) );
-                    if ( ret == 0 ) {
-                        shared.createdContainers.insert( strPath );
-                    }
-                }
-                Util::MutexUnlock( &shared.container_mutex );
-                double time_end = Util::getTime();
-                self->make_container_time += (time_end - time_start);
-            } else {
-                break;
-            }
-        }
-        Util::MutexUnlock( &shared.fd_mutex );
-        if ( ret == 0 ) {
-            of->setWriteFds( *data_fd, *indx_fd, *index );
-        }
-    }
-    return ret;
-}
-
 
 int Plfs::f_write(const char *path, const char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi) 
 {
-    PLFS_ENTER_IO; SETUP_OPEN_FILES;
-    cerr << __FUNCTION__ << " on " << path << ", off " << offset << ", len "
-         << size << endl;
-    int data_fd, indx_fd;
-
-    // get the fds and the index we need.  they'll be created if necessary 
-    ret = getWriteFds( strPath, &data_fd, &indx_fd, &index, of );
-
-        // write the bytes to the data file
-        // use Util::Writen (?)
-        // hmm.  for some reason, 131072 writes often only write 131064...
-        // this is because fuse writes need to be block aligned.
-        // so app using valloc might help.
-        // wow.  Writen seems to make it go much slower....
-        // not sure why...
-    if ( ret == 0 ) {
-        double begin_timestamp = 0, end_timestamp = 0;
-        #ifdef INDEX_CONTAINS_TIMESTAMPS
-            begin_timestamp = Util::getTime();
-        #endif
-        ret = Util::Write( data_fd, buf, size );
-        #ifdef INDEX_CONTAINS_TIMESTAMPS
-            end_timestamp = Util::getTime();
-        #endif
-        if ( ret < 0 ) {
-            ret = -errno;
-        }
-        size_t written = ret;
-	#ifdef COUNT_SKIPS
-        Util::MutexLock( &shared.index_mutex);
-	    HASH_MAP<int, int>::iterator itr;
-	    itr = self->last_offsets.find( data_fd );
-	    if ( itr == self->last_offsets.end() ) {
-	      self->nonskip_writes++; // The first write to a datafile never skips
-	    } else {
-	      int last_off = itr->second;
-	      if ( offset < last_off ) {
-		self->bward_skips++;
-	      } else if ( offset > last_off ) {
-		self->fward_skips++;
-	      } else {
-		// this write is sequential to the last
-		self->nonskip_writes++;
-	      }
-	    }
-	    self->last_offsets[data_fd] = offset+size;
-        Util::MutexUnlock( &shared.index_mutex );
-	#endif 
-            // record the write even if we don't actually buffer the index
-            // so that we can remember it for flush and release so we can
-            // write out meta data to speed up stat
-        if ( ret >= 0 ) {
-            of->addWrite( offset, written );
-                // either buffer it or write it directly
-            cerr << "Adding write with " << begin_timestamp 
-                 << " and " << end_timestamp << endl;
-            if ( index ) {
-                    //  no lock required here bec this index is not shared
-                index->addWrite( offset, written, 
-                        begin_timestamp, end_timestamp );
-            } else {
-                Util::MutexLock( &shared.index_mutex );
-                ret = Index::writeIndex( indx_fd, offset, written, 
-                        of->getPid(), begin_timestamp, end_timestamp );
-                Util::MutexUnlock( &shared.index_mutex );
-            }
-            if ( ret >= 0 ) {
-                ret = written; 
-            }
-        }
-
-    }
+    PLFS_ENTER_IO; GET_OPEN_FILE;
+    ret = plfs_write( of, buf, size, offset );
     PLFS_EXIT_IO;
 }
 
+// handle this directly in fuse, no need to use plfs library
 int Plfs::f_readlink (const char *path, char *buf, size_t bufsize) {
     PLFS_ENTER;
     ssize_t char_count;
@@ -879,6 +659,7 @@ int Plfs::f_readlink (const char *path, char *buf, size_t bufsize) {
     PLFS_EXIT;
 }
 
+// handle this directly in fuse, no need to use plfs library
 int Plfs::f_link( const char *path1, const char *path ) {
     PLFS_ENTER;
     cerr << "Making hard link from " << path1 << " to " << strPath << endl;
@@ -887,6 +668,7 @@ int Plfs::f_link( const char *path1, const char *path ) {
     PLFS_EXIT;
 }
 
+// handle this directly in fuse, no need to use plfs library
 int Plfs::f_symlink( const char *path1, const char *path ) {
     PLFS_ENTER;
     cerr << "Making symlink from " << path1 << " to " << strPath << endl;
@@ -894,6 +676,7 @@ int Plfs::f_symlink( const char *path1, const char *path ) {
     PLFS_EXIT;
 }
 
+// handle this directly in fuse, no need to use plfs library
 int Plfs::f_statfs(const char *path, struct statvfs *stbuf) {
     PLFS_ENTER;
     // tempting to stick some identifying info in here that we could
@@ -912,120 +695,36 @@ int Plfs::f_readn(const char *path, char *buf, size_t size, off_t offset,
         return writeDebug( buf, size, offset, path );
     }
 
-    PLFS_ENTER_IO; SETUP_OPEN_FILES;
-
-    // possible that we opened the file as O_RDWR
-    // if so, build an index now, but destroy it after this IO
-    // so that new writes are re-indexed for new reads
-    // basically O_RDWR is possible but it can reduce read BW
-    bool new_index_created = false;  
-
-    if ( index == NULL ) {
-        // need to lock this since it's a shared structure
-        // which means they are sharing the fds as well
-        Util::MutexLock( &shared.index_mutex );
-        ret = getIndex( strPath, O_CREAT, &index );
-        if ( ret != 0 ) {
-            fprintf( stderr, "WTF.  getIndex for %s failed\n", strPath.c_str());
-            self->wtfs++;
-        } else {
-            new_index_created = true;
-            index->incrementOpens( 1 );
-        }
-        Util::MutexUnlock( &shared.index_mutex );
-    }
-
-    // actually do the reads now that we have an index
-    if ( ret == 0 ) {
-            // if the read spans multiple chunks, we really need to loop in here
-            // to get them all read bec the man page for read says that it 
-            // guarantees to return the number of bytes requested up to EOF
-            // so any partial read by the client indicates EOF and a client
-            // may not retry
-        size_t bytes_remaining = size;
-        size_t bytes_read      = 0;
-        do {
-            ret = read_helper( index, &(buf[bytes_read]), bytes_remaining, 
-                    offset + bytes_read );
-            if ( ret > 0 ) {
-                bytes_read      += ret;
-                bytes_remaining -= ret;
-            }
-            if ( ret > 0 && bytes_remaining ) {
-                cerr << "Reading multiple chunks from " << strPath << endl;
-            }
-        } while( bytes_remaining && ret > 0 );
-        ret = ( ret < 0 ? ret : bytes_read );
-    }
-        // actually bytes_remaining won't go to 0 when read goes beyond EOF 
-        //assert( bytes_remaining == 0 );
-
-    if ( new_index_created ) {
-        Util::MutexLock( &shared.index_mutex );
-        if ( index->incrementOpens( -1 ) <= 0 ) {
-            removeIndex( strPath, index );
-        }
-        Util::MutexUnlock( &shared.index_mutex );
-    }
+    PLFS_ENTER_IO; GET_OPEN_FILE;
+    ret = plfs_read( of, buf, size, offset );
     PLFS_EXIT_IO;
-}
-
-// returns bytes read or -errno
-// we may already be holding the mutex.  check here.
-int Plfs::read_helper( Index *index, char *buf, size_t size, off_t offset ) {
-    off_t  chunk_offset = 0;
-    size_t chunk_length = 0;
-    int    fd           = -1;
-
-    // need to lock this since the globalLookup does the open of the fds
-    Util::MutexLock( &shared.index_mutex );
-    int ret = index->globalLookup( &fd, &chunk_offset, &chunk_length, offset );
-    Util::MutexUnlock( &shared.index_mutex );
-    if ( ret != 0 ) return ret;
-
-    size_t read_size = ( size < chunk_length ? size : chunk_length );
-    if ( read_size > 0 ) {
-        // use pread since the fd's are shared  
-        if ( fd >= 0 ) {
-            cerr << dec << "Reading " << read_size << " from " << fd << endl;
-            ret = Util::Pread( fd, buf, read_size, chunk_offset );
-            if ( ret < 0 ) {
-                cerr << "Couldn't read in " << fd << ":" << strerror(errno) << endl;
-                return -errno;
-            }
-        } else {
-            cerr << dec << "Zero filling hole of " << read_size << endl;
-            memset( (void*)buf, 0, read_size);
-            ret = read_size;
-        }
-    } else {
-        // when chunk_length = 0, that means we're at EOF
-        ret = 0;
-    }
-    return ret;
 }
 
 string Plfs::writeFilesToString() {
     ostringstream oss;
-    int quant = self->write_files.size();
+    int quant = 0; //self->write_files.size();
     oss << quant << " WriteFiles" << ( quant ? ": " : "" );
+	/*
     HASH_MAP<string, WriteFile *>::iterator itr;
     for(itr = self->write_files.begin(); itr != self->write_files.end(); itr++){
         oss << itr->first << " ";
     }
     oss << "\n";
+	*/
     return oss.str();
 }
 
 string Plfs::readFilesToString() {
     ostringstream oss;
-    int quant = shared.read_files.size(); 
+    int quant = 0; //shared.read_files.size(); 
     oss << quant << " ReadFiles" << ( quant ? ": " : "" );
+	/*
     HASH_MAP<string, Index *>::iterator itr;
     for(itr = shared.read_files.begin(); itr != shared.read_files.end(); itr++){
         oss << itr->first << " ";
     }
     oss << "\n";
+	*/
     return oss.str();
 }
 
@@ -1120,13 +819,8 @@ string Plfs::paramsToString( Params *p ) {
 // be called before some IO's.  So for safety sake, we should sync
 // here and do the close in the release
 int Plfs::f_flush( const char *path, struct fuse_file_info *fi ) {
-    PLFS_ENTER_IO; SETUP_OPEN_FILES;
-    if ( wf ) {
-            // we could change this here to:
-            // 1) close the datafd
-            // 2) sync the datafd and maybe the indexfd
-            // 3) do nothing and let f_release do it
-        bool sync_index = true;
+    PLFS_ENTER_IO; GET_OPEN_FILE;
+    if ( of ) {
         ret = plfs_sync( of );
     }
     PLFS_EXIT_IO;
@@ -1137,9 +831,12 @@ int Plfs::f_rename( const char *path, const char *to ) {
     PLFS_ENTER;
     string toPath   = expandPath( to );
 
-    // we can't just call rename bec it won't trash a dir in the toPath
-    // this might fail with ENOENT but that's fine
-    plfs_unlink( toPath.c_str() );
+    if ( ! isDirectory(strPath.c_str() ) ) {
+        // we can't just call rename bec it won't trash a dir in the toPath
+        // so in case the toPath is a container, do this
+        // this might fail with ENOENT but that's fine
+        plfs_unlink( toPath.c_str() );
+    }
 
     ret = retValue( Util::Rename( strPath.c_str(), toPath.c_str() ) );
     PLFS_EXIT;

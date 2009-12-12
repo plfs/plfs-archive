@@ -1,5 +1,6 @@
 #include "fusexx.h"
 #include "plfs.h"
+#include "Util.h"
 #include "COPYRIGHT.h"
 
 class T;
@@ -39,7 +40,7 @@ struct dir_op {
     uid_t                u;
     gid_t                g;
     mode_t               m;
-}
+};
 
 // and I don't like globals at the top of the .cpp.  So add all shared
 // data here and then declare one instance of this struct at the top of
@@ -59,7 +60,7 @@ typedef struct {
     pthread_mutex_t           fd_mutex;
     pthread_mutex_t           index_mutex;
     set< string >             createdContainers;
-    HASH_MAP<string, Index *> read_files;
+    //HASH_MAP<string, Index *> read_files;
     string                    myhost;
     string                    trashdir;
     Params                    params;
@@ -114,28 +115,20 @@ class Plfs : public fusexx::fuse<Plfs> {
         static int retValue( int res );
         static int makePlfsFile( string, mode_t, int );
         static int removeDirectoryTree( const char*, bool truncate_only );
-        static int undangleDangler( string path ); 
-        static int linkDanglers( string, string dangler, string canonical ); 
-        static int timeToUndangle( string possible_dangler );
         static bool isContainer( const char* );
         static bool isDirectory( string );
         static bool isdebugfile( const char*, const char * );
         static bool isdebugfile( const char* );
         static int writeDebug( char *buf, size_t, off_t, const char* );
-        static WriteFile *getWriteFile( string, mode_t, bool ); 
-        static int removeWriteFile( WriteFile *, string );
-        static int getIndex( string, mode_t, Index ** );
-        static int removeIndex( string, Index * );
+        //static WriteFile *getWriteFile( string, mode_t, bool ); 
+        //static int removeWriteFile( WriteFile *, string );
+        //static int getIndex( string, mode_t, Index ** );
+        //static int removeIndex( string, Index * );
         static const char *getPlfsArg( const char *, const char * );
         static string paramsToString( Params *p );
         static string readFilesToString();
         static string writeFilesToString();
-        static int getWriteFds( string, int *, int *, Index **, OpenFile * );
-        static int plfs_sync( OpenFile *of );
-        static int plfs_mkdir( const char *, mode_t );
-        static int extendFile( OpenFile *, string , off_t );
         static mode_t getMode( string expanded );
-        static int checkAccess( string strPath, struct fuse_file_info *fi );
 
             // is a set the best here?  doesn't need to be sorted.
             // just needs to be associative.  This needs to be static
@@ -146,7 +139,7 @@ class Plfs : public fusexx::fuse<Plfs> {
 		// Notice that they aren't static, 
         // i.e. they belong to an instantiated object
         // shoot.  
-        HASH_MAP<string, WriteFile *> write_files;  // hash_map is better
+        //HASH_MAP<string, WriteFile *> write_files;  // hash_map is better
         HASH_MAP<string, mode_t>      known_modes;  // cache when possible
         // private for debugging
         int extra_attempts;         // # failures on makeContainer were retried

@@ -90,7 +90,7 @@ read_helper( Index *index, char *buf, size_t size, off_t offset ) {
 }
 
 int 
-plfs_read( PlfsFd *pfd, char *buf, size_t size, off_t offset ) {
+plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
 	int ret = 0;
     Index *index = pfd->getIndex(); 
     bool new_index_created = false;  
@@ -138,7 +138,7 @@ plfs_read( PlfsFd *pfd, char *buf, size_t size, off_t offset ) {
 }
 
 int
-plfs_open( PlfsFd **pfd, const char *path, int flags, int pid, mode_t mode ) {
+plfs_open( Plfs_fd **pfd, const char *path, int flags, int pid, mode_t mode ) {
     WriteFile *wf    = NULL;
     Index     *index = NULL;
     int ret          = 0;
@@ -172,14 +172,14 @@ plfs_open( PlfsFd **pfd, const char *path, int flags, int pid, mode_t mode ) {
     }
 
     if ( ret == 0 ) {
-        *pfd = new PlfsFd( wf, index, pid ); 
+        *pfd = new Plfs_fd( wf, index, pid ); 
         (*pfd)->setPath( path );
     }
     return ret;
 }
 
 int 
-plfs_write( PlfsFd *pfd, const char *buf, size_t size, off_t offset ) {
+plfs_write( Plfs_fd *pfd, const char *buf, size_t size, off_t offset ) {
     int ret;
     int data_fd, indx_fd;
     Index *index;
@@ -232,7 +232,7 @@ plfs_write( PlfsFd *pfd, const char *buf, size_t size, off_t offset ) {
 }
 
 int 
-plfs_sync( PlfsFd *pfd ) {
+plfs_sync( Plfs_fd *pfd ) {
     Index *index = NULL;
     int indexfd = -1, datafd = -1, ret = 0;
     pfd->getWriteFds( &datafd, &indexfd, &index );
@@ -335,10 +335,10 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
             
 // this should only be called if the uid has already been checked
 // and is allowed to access this file
-// PlfsFd can be NULL
+// Plfs_fd can be NULL
 // returns 0 or -errno
 int 
-plfs_getattr( PlfsFd *of, const char *path, struct stat *stbuf ) {
+plfs_getattr( Plfs_fd *of, const char *path, struct stat *stbuf ) {
     int ret = 0;
     if ( ! Container::isContainer( path ) ) {
         ret = retValue( Util::Lstat( path, stbuf ) );
@@ -374,7 +374,7 @@ plfs_getattr( PlfsFd *of, const char *path, struct stat *stbuf ) {
 // this is called when truncate has been used to extend a file
 // returns 0 or -errno
 int 
-extendFile( PlfsFd *of, string strPath, off_t offset ) {
+extendFile( Plfs_fd *of, string strPath, off_t offset ) {
     int ret = 0;
     int fd = -1;
     bool newly_opened = false;
@@ -407,9 +407,9 @@ extendFile( PlfsFd *of, string strPath, off_t offset ) {
     return ret;
 }
 
-// the PlfsFd can be NULL
+// the Plfs_fd can be NULL
 int 
-plfs_trunc( PlfsFd *of, const char *path, off_t offset ) {
+plfs_trunc( Plfs_fd *of, const char *path, off_t offset ) {
     if ( ! Container::isContainer( path ) ) {
         // this is weird, we expect only to operate on containers
         return retValue( truncate(path,offset) );
@@ -456,7 +456,7 @@ plfs_unlink( const char *path ) {
 }
 
 int
-plfs_close( PlfsFd *pfd ) {
+plfs_close( Plfs_fd *pfd ) {
     int ret = 0;
     WriteFile *wf    = pfd->getWritefile();
     Index     *index = pfd->getIndex();

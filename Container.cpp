@@ -6,6 +6,7 @@
 using namespace std;
 
 #include "Container.h"
+#include "OpenFile.h"
 #include "plfs.h"
 #include "plfs_private.h"
 #include "Util.h"
