@@ -83,7 +83,7 @@ class Index : public Metadata {
         static int writeIndex( int fd, off_t offset, size_t written, 
                 pid_t pid, double begin_timestamp, double end_timestamp );
 
-        void addWrite( off_t offset, size_t bytes, double begin_ts, double end_ts );
+        void addWrite( off_t off, size_t, double begin_ts, double end_ts );
         void addWrite( off_t offset, size_t bytes, pid_t, double, double );
 
         off_t lastOffset( );

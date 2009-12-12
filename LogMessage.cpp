@@ -96,6 +96,7 @@ void LogMessage::flush() {
     this->str().resize(0);
     //cerr << "Erased my string "<< " new size is " << this->str().size() << endl;
     this->clear();
+    // for some reason flushing doesn't clear it?
 }
 
 void LogMessage::addTime( double t ) {

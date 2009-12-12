@@ -157,11 +157,10 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, int pid, mode_t mode ) {
         ret = plfs_trunc( NULL, path, 0 );
     }
 
-    // go ahead and open it here, pass O_CREAT to create it if it doesn't exist 
     // "open it" just means create the data structures we use 
+    // we don't actually open any write pids yet
     if ( ret == 0 && (flags & O_WRONLY || flags & O_RDWR) ) {
         wf = new WriteFile( path, Util::hostname(), mode ); 
-        wf->setMode ( mode );
     } else if ( ret == 0 ) {
         index = new Index( path, pid );  
         int ret = Container::populateIndex( path, index );
@@ -172,18 +171,19 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, int pid, mode_t mode ) {
     }
 
     if ( ret == 0 ) {
-        *pfd = new Plfs_fd( wf, index, pid ); 
-        (*pfd)->setPath( path );
+        *pfd = new Plfs_fd( wf, index, pid, mode, path ); 
     }
     return ret;
 }
 
 int 
 plfs_write( Plfs_fd *pfd, const char *buf, size_t size, off_t offset ) {
-    int ret;
+    int ret = 0;
     int data_fd, indx_fd;
     Index *index;
     size_t written = -1;
+
+    cerr << "Write to " << pfd->getPath() << " offset " << offset << endl;
 
     // the fd's don't get opened in the open, we 
     // wait until the first write to open them.  I forget why.
@@ -198,7 +198,6 @@ plfs_write( Plfs_fd *pfd, const char *buf, size_t size, off_t offset ) {
             errno = EPERM;
             ret = -1;
         }
-        int ret;
         for( int attempts = 0; attempts <= 1 && ret == 0; attempts++ ) {
             ret =wf->getFds(pfd->getPid(), O_CREAT, &indx_fd, &data_fd, &index);
             if ( ret == -ENOENT && attempts == 0 ) {
@@ -449,7 +448,6 @@ plfs_unlink( const char *path ) {
     if ( Container::isContainer( path ) ) {
         ret = removeDirectoryTree( path, false );  
     } else {
-        // this is weird, we should only be asked to remove containers
         ret = retValue( unlink( path ) );   // recurse
     }
     return ret; 

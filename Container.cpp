@@ -53,8 +53,9 @@ size_t Container::hashValue( const char *str ) {
 // is the same name as the container
 bool Container::isContainer( const char *physical_path ) {
     struct stat buf;
-    return ( Util::Lstat( (getAccessFilePath(physical_path)).c_str(), &buf ) 
-            == 0 );
+    string accessfile = getAccessFilePath(physical_path); 
+    int ret = Util::Lstat( accessfile.c_str(), &buf );
+    return ( ret == 0 ); 
 }
 
 int Container::freeIndex( Index **index ) {

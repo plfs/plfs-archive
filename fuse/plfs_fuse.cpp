@@ -63,7 +63,7 @@ using namespace std;
 
 #define PLFS_ENTER string strPath  = expandPath( path );               \
                    ostringstream funct_id;                             \
-                   LogMessage lm;                                      \
+                   LogMessage lm, lm2;                                 \
                    START_TIMES;                                        \
                    funct_id << setw(16) << fixed << setprecision(16)   \
                         << begin << " PLFS::" << __FUNCTION__          \
@@ -78,7 +78,7 @@ using namespace std;
 #define PLFS_EXIT      RESTORE_IDS; END_TIMES;                            \
                        funct_id << (ret ? strerror(errno) : "success")   \
                                 << " " << end-begin << "s";               \
-                       lm << funct_id.str() << endl; lm.flush();          \
+                       lm2 << funct_id.str() << endl; lm2.flush();          \
                        return ret;
 
 #define PLFS_EXIT_IO   PLFS_EXIT 
@@ -488,7 +488,10 @@ int Plfs::f_rmdir( const char *path ) {
 // fine to leave it undefined.  users shouldn't do stupid stuff like this anyway
 int Plfs::f_unlink( const char *path ) {
     PLFS_ENTER;
-    ret = plfs_unlink( path );
+    ret = plfs_unlink( strPath.c_str() );
+    if ( ret == 0 ) {
+        shared.createdContainers.erase( strPath );
+    }
     PLFS_EXIT;
 }
 
@@ -572,7 +575,7 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
     PLFS_ENTER_PID;
     Plfs_fd *pfd = NULL;
     ret = plfs_open( &pfd, strPath.c_str(), fi->flags, 
-            fuse_get_context()->pid, 0 );
+            fuse_get_context()->pid, DEFAULT_MODE );
     if ( ret == 0 ) {
         fi->fh = (uint64_t)pfd;
     }
@@ -709,8 +712,8 @@ string Plfs::writeFilesToString() {
     for(itr = self->write_files.begin(); itr != self->write_files.end(); itr++){
         oss << itr->first << " ";
     }
-    oss << "\n";
 	*/
+    oss << "\n";
     return oss.str();
 }
 
@@ -723,8 +726,8 @@ string Plfs::readFilesToString() {
     for(itr = shared.read_files.begin(); itr != shared.read_files.end(); itr++){
         oss << itr->first << " ";
     }
-    oss << "\n";
 	*/
+    oss << "\n";
     return oss.str();
 }
 

@@ -12,26 +12,19 @@ using namespace std;
 
 class Plfs_fd : public Metadata {
     public:
-        Plfs_fd( WriteFile *, Index *, pid_t );
+        Plfs_fd( WriteFile *, Index *, pid_t, mode_t, const char * );
         WriteFile  *getWritefile();
         Index      *getIndex();
         void       setWriteFds( int, int, Index * );
         void       getWriteFds( int *, int *, Index ** );
         pid_t      getPid();
         const char *getPath() { return this->path.c_str(); }
-        void       setPath( string p)  { this->path = p; }
     private:
         WriteFile *writefile;
         Index     *index;
         pid_t     pid;
+        mode_t    mode;
         string    path;
-
-            // also stash a copy of the stuff we need for writing in here
-            // this way, we won't have to lock a mutex in f_write in order
-            // to retrieve it
-        Index     *write_index;
-        int       write_data_fd;
-        int       write_index_fd;
 };
 
 #endif

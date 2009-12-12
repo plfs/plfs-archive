@@ -1,8 +1,9 @@
 PLFS_INSTALL_DIR = ..
 
 TARGET   = plfs
-CXXFLAGS = -I$(PLFS_INSTALL_DIR) -DPLFS_TIMES -DCOUNT_SKIPS
+CXXFLAGS = -I$(PLFS_INSTALL_DIR) -DPLFS_TIMES -DCOUNT_SKIPS -g -Wall
 LDFLAGS  = -L$(PLFS_INSTALL_DIR) -lplfs
+LOG      = /tmp/plfs.log
 
 # remove direct_io if you want to exec a PLFS file
 # but it makes the performance horrible because writes are split into 4K
@@ -31,7 +32,7 @@ export PKG_CONFIG_PATH
 
 # set values for mntpnt and backend
 ifndef PLFS_MNT
-    PLFS_MNT = /mnt/fuse
+    PLFS_MNT = /mnt/plfs
 endif
 ifndef PLFS_BACK
     PLFS_BACK = /tmp/plfs.back
