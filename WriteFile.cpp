@@ -24,7 +24,10 @@ WriteFile::WriteFile( string path, string hostname,
 WriteFile::~WriteFile() {
     fprintf( stderr, "Delete self %s\n", physical_path.c_str() );
     Close();
-    if ( index ) delete index;
+    if ( index ) {
+        closeIndex();
+        delete index;
+    }
 }
 
 int WriteFile::sync( pid_t pid ) {
