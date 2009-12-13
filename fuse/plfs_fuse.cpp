@@ -322,7 +322,7 @@ int Plfs::f_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
 int Plfs::f_fsync(const char *path, int datasync, struct fuse_file_info *fi) {
     PLFS_ENTER_PID; GET_OPEN_FILE;
     if ( of ) {
-        plfs_sync( of );
+        plfs_sync( of, fuse_get_context()->pid );
     }
     PLFS_EXIT;
 }
@@ -575,10 +575,12 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
     PLFS_ENTER_PID;
     Plfs_fd *pfd = NULL;
     ret = plfs_open( &pfd, strPath.c_str(), fi->flags, 
-            fuse_get_context()->pid, DEFAULT_MODE );
+            fuse_get_context()->pid, getMode( strPath ), true );
     if ( ret == 0 ) {
         fi->fh = (uint64_t)pfd;
     }
+    // we can safely add more writers to an already open file
+    // bec FUSE checks f_access before allowing an f_open
     PLFS_EXIT;
 }
 
@@ -626,11 +628,14 @@ WriteFile *Plfs::getWriteFile( string expanded, mode_t mode, bool bufferindex ){
 }
 */
 
+// look up a mode to pass to plfs_open.  We need to stash it bec FUSE doesn't 
+// pass mode on open instead it passes it on mknod
 mode_t Plfs::getMode( string expanded ) {
     mode_t mode;
     HASH_MAP<string, mode_t>::iterator itr =
             self->known_modes.find( expanded );
     if ( itr == self->known_modes.end() ) {
+            // Container::getmode returns DEFAULT_MODE if not found
         mode = Container::getmode( expanded.c_str() );
         self->known_modes[expanded] = mode;
     } else {
@@ -643,7 +648,7 @@ int Plfs::f_write(const char *path, const char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi) 
 {
     PLFS_ENTER_IO; GET_OPEN_FILE;
-    ret = plfs_write( of, buf, size, offset );
+    ret = plfs_write( of, buf, size, offset, fuse_get_context()->pid );
     PLFS_EXIT_IO;
 }
 
@@ -824,7 +829,7 @@ string Plfs::paramsToString( Params *p ) {
 int Plfs::f_flush( const char *path, struct fuse_file_info *fi ) {
     PLFS_ENTER_IO; GET_OPEN_FILE;
     if ( of ) {
-        ret = plfs_sync( of );
+        ret = plfs_sync( of, fuse_get_context()->pid );
     }
     PLFS_EXIT_IO;
 }

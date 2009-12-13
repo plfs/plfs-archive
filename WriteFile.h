@@ -8,49 +8,39 @@ using namespace std;
 #include "Index.h"
 #include "Metadata.h"
 
-typedef struct {
-    int datafd;
-    int indexfd;
-    Index *index;
-} FDS;
 
 class WriteFile : public Metadata {
     public:
         WriteFile( string, string, mode_t ); 
         ~WriteFile();
 
-        int getFds( pid_t pid, mode_t, 
-                int *indexfd, int *datafd, Index **index );
+        int openIndex( pid_t );
+        int closeIndex();
 
-            // should close before destroy so that errors can be returned
-        int Close( );
-
-        int Close( int pid );
-
-        int Remove( int pid );
-
-        int  getIndexFd()          { return this->indexfd; }
-
-        const char *getHost()      { return this->hostname.c_str(); } 
-
-        void setMode( mode_t m )   { this->mode = m; }
-        mode_t getMode()           { return this->mode; }
+        int addWriter( pid_t );
+        int removeWriter( pid_t );
 
         int truncate( off_t offset );
-        static int openIndexFile( string path, string host, mode_t mode );
-        static int closeIndexFile( int fd );
+        int extend( off_t offset );
 
+        ssize_t write( const char*, size_t, off_t, pid_t );
+
+        int sync( pid_t pid );
+
+        int restoreFds();
     private:
-        static int openDataFile(string path, string host, pid_t, mode_t );
-        static int openFile( string, mode_t mode );
-        string getIndexDataPath( const char *, int );
+        int openIndexFile( string path, string host, pid_t, mode_t );
+        int openDataFile(string path, string host, pid_t, mode_t );
+        int openFile( string, mode_t mode );
+        int Close( );
         int closeFd( int fd, const char *type, int pid );
-        int closeFds( FDS fds, int pid );
+        int getFd( pid_t pid );
 
         string physical_path;
         string hostname;
-        map< int, FDS > fd_map;
-        int indexfd;    // a write file now has a shared index fd
+        map< pid_t, int  > fds;
+        map< int, string > paths;   // need to remember fd paths to restore
+        Index *index;
         mode_t mode;
 };
 

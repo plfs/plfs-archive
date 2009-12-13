@@ -145,11 +145,6 @@ string Container::getIndexPath( const char *path, const char *host, int pid ) {
     return getChunkPath( path, host, pid, INDEXPREFIX );
 }
 
-// now host index is shared by multiple pids
-string Container::getIndexPath( const char *path, const char *host ) {
-    return getChunkPath( path, host, SHARED_PID, INDEXPREFIX );
-}
-
 // this function takes a container path, a hostname, a pid, and a type and 
 // returns a path to a chunk (type is either DATAPREFIX or INDEXPREFIX)
 // the resulting path looks like this:
@@ -727,7 +722,7 @@ int Container::Truncate( const char *path, off_t offset ) {
 
     DIR *td = NULL, *hd = NULL; struct dirent *tent = NULL;
     while((ret = nextdropping(path,&indexfile,INDEXPREFIX, &td,&hd,&tent))== 1){
-        Index *index = new Index( path, SHARED_PID );
+        Index *index = new Index( path, -1 );
         ret = index->readIndex( indexfile );
         if ( ret == 0 ) {
             if ( index->lastOffset() > offset ) {
@@ -740,6 +735,7 @@ int Container::Truncate( const char *path, off_t offset ) {
                 }
                 ret = index->rewriteIndex( fd );
                 Util::Close( fd );
+                delete index;
             }
         } else {
             cerr << "Failed to read index file " << indexfile 

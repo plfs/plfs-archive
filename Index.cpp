@@ -88,16 +88,24 @@ ostream& operator <<(ostream &os,const Index &ndx ) {
     return os;
 }
 
-Index::Index( string logical, pid_t pid ) : Metadata::Metadata() {
+void Index::init( string logical ) {
     logical_path    = logical;
     populated       = false;
-    mypid           = pid;
     chunk_id        = 0;
     last_offset     = 0;
     total_bytes     = 0;
     hostIndex.clear();
     global_index.clear();
     chunk_map.clear();
+}
+
+Index::Index( string logical, int fd ) : Metadata::Metadata() {
+    init( logical );
+    this->fd = fd;
+}
+
+Index::Index( string logical ) : Metadata::Metadata() {
+    init( logical );
 }
 
 Index::~Index() {
@@ -160,7 +168,7 @@ bool Index::ispopulated( ) {
 // returns 0 or -errno
 // this dumps the local index
 // and then clears it
-int Index::writeIndex( int fd ) {
+int Index::flush() {
     // ok, vectors are guaranteed to be contiguous
     // so just dump it in one fell swoop
     void *start = &(hostIndex.front());
@@ -591,13 +599,6 @@ void Index::addWrite( off_t offset, size_t length, pid_t pid,
     }
 }
 
-// returns 0 or -errno
-void Index::addWrite( off_t offset, size_t length, 
-        double begin_timestamp, double end_timestamp ) 
-{
-    return addWrite( offset, length, mypid, begin_timestamp, end_timestamp );
-}
-
 void Index::truncate( off_t offset ) {
     map<off_t,ContainerEntry>::iterator itr, prev;
     ContainerEntry entry;
@@ -625,19 +626,6 @@ void Index::truncate( off_t offset ) {
     }
 }
 
-// the caller (plfs.c) should hold the index mutex lock
-// returns 0 or -errno
-int Index::writeIndex( int fd, off_t offset, size_t written, pid_t pid,
-        double begin_timestamp, double end_timestamp ) {
-    HostEntry entry( offset, written, pid );
-    #ifdef INDEX_CONTAINS_TIMESTAMPS
-        entry.begin_timestamp = begin_timestamp;
-        entry.end_timestamp   = end_timestamp;
-    #endif
-    int ret = Util::Writen( fd, (void*)&entry, sizeof(HostEntry) );
-    return( ret > 0 ? 0 : -errno );
-}
-
 // operates on a host entry which is not sorted
 void Index::truncateHostIndex( off_t offset ) {
     vector< HostEntry > new_entries;
@@ -661,6 +649,7 @@ void Index::truncateHostIndex( off_t offset ) {
 // a new local index
 // also, we need to know the pid of the previous index
 int Index::rewriteIndex( int fd ) {
+    this->fd = fd;
     map<off_t,ContainerEntry>::iterator itr;
     for( itr = global_index.begin(); itr != global_index.end(); itr++ ) {
         double begin_timestamp = 0, end_timestamp = 0;
@@ -671,5 +660,5 @@ int Index::rewriteIndex( int fd ) {
         addWrite( itr->second.logical_offset,itr->second.length, 
                 itr->second.id, begin_timestamp, end_timestamp );
     }
-    return writeIndex( fd );
+    return flush(); 
 }

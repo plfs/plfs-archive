@@ -18,6 +18,19 @@ plfs_create( const char *path, mode_t mode, int flags ) {
     return Container::create( path, Util::hostname(), mode, flags, &attempts );
 }
 
+int
+addWriter( WriteFile *wf, pid_t pid, const char *path, mode_t mode ) {
+    int ret = -ENOENT;
+    for( int attempts = 0; attempts < 2 && ret == -ENOENT; attempts++ ) {
+        ret = wf->addWriter( pid ); 
+        if ( ret == -ENOENT ) {
+            // maybe the hostdir doesn't exist
+            Container::makeHostDir( path, Util::hostname(), mode );
+        }
+    }
+    return ret;
+}
+
 int 
 plfs_chown( const char *path, uid_t u, gid_t g ) {
     return Container::Chown( path, u, g );
@@ -57,17 +70,18 @@ plfs_utime( const char *path, struct utimbuf *ut ) {
 }
 
 // returns bytes read or -errno
-int 
+ssize_t 
 read_helper( Index *index, char *buf, size_t size, off_t offset ) {
     off_t  chunk_offset = 0;
     size_t chunk_length = 0;
     int    fd           = -1;
+    int ret;
 
     // need to lock this since the globalLookup does the open of the fds
-    int ret = index->globalLookup( &fd, &chunk_offset, &chunk_length, offset );
+    ret = index->globalLookup( &fd, &chunk_offset, &chunk_length, offset );
     if ( ret != 0 ) return ret;
 
-    size_t read_size = ( size < chunk_length ? size : chunk_length );
+    ssize_t read_size = ( size < chunk_length ? size : chunk_length );
     if ( read_size > 0 ) {
         // uses pread to allow the fd's to be shared 
         if ( fd >= 0 ) {
@@ -89,7 +103,7 @@ read_helper( Index *index, char *buf, size_t size, off_t offset ) {
     return ret;
 }
 
-int 
+ssize_t 
 plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
 	int ret = 0;
     Index *index = pfd->getIndex(); 
@@ -118,8 +132,8 @@ plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
             // guarantees to return the number of bytes requested up to EOF
             // so any partial read by the client indicates EOF and a client
             // may not retry
-        size_t bytes_remaining = size;
-        size_t bytes_read      = 0;
+        ssize_t bytes_remaining = size;
+        ssize_t bytes_read      = 0;
         do {
             ret = read_helper( index, &(buf[bytes_read]), bytes_remaining, 
                     offset + bytes_read );
@@ -138,7 +152,9 @@ plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
 }
 
 int
-plfs_open( Plfs_fd **pfd, const char *path, int flags, int pid, mode_t mode ) {
+plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode,
+        bool multiple_writers ) 
+{
     WriteFile *wf    = NULL;
     Index     *index = NULL;
     int ret          = 0;
@@ -157,12 +173,17 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, int pid, mode_t mode ) {
         ret = plfs_trunc( NULL, path, 0 );
     }
 
-    // "open it" just means create the data structures we use 
-    // we don't actually open any write pids yet
     if ( ret == 0 && (flags & O_WRONLY || flags & O_RDWR) ) {
         wf = new WriteFile( path, Util::hostname(), mode ); 
+        ret = wf->openIndex( multiple_writers ? SHARED_PID : pid );
+        if ( ret == 0 ) {
+            ret = addWriter( wf, pid, path, mode );
+        }
+        if ( ret != 0 && wf ) {
+            delete wf;
+        }
     } else if ( ret == 0 ) {
-        index = new Index( path, pid );  
+        index = new Index( path );  
         int ret = Container::populateIndex( path, index );
         if ( ret != 0 ) {
             index = NULL;
@@ -176,77 +197,24 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, int pid, mode_t mode ) {
     return ret;
 }
 
-int 
-plfs_write( Plfs_fd *pfd, const char *buf, size_t size, off_t offset ) {
-    int ret = 0;
-    int data_fd, indx_fd;
-    Index *index;
-    size_t written = -1;
+ssize_t 
+plfs_write( Plfs_fd *pfd, const char *buf, size_t size, off_t offset, pid_t pid)
+{
+    int ret = 0; ssize_t written;
+    WriteFile *wf = pfd->getWritefile();
 
     cerr << "Write to " << pfd->getPath() << " offset " << offset << endl;
-
-    // the fd's don't get opened in the open, we 
-    // wait until the first write to open them.  I forget why.
-    // One reason is that if we just touch a file, then we don't 
-    // necessarily want empty data and index files.
-    // if this seems like the wrong choice, then we can move this
-    // code into the open
-    pfd->getWriteFds( &data_fd, &indx_fd, &index );
-    if ( data_fd < 0 || indx_fd < 0 ) {
-        WriteFile *wf = pfd->getWritefile();
-        if ( wf == NULL ) {
-            errno = EPERM;
-            ret = -1;
-        }
-        for( int attempts = 0; attempts <= 1 && ret == 0; attempts++ ) {
-            ret =wf->getFds(pfd->getPid(), O_CREAT, &indx_fd, &data_fd, &index);
-            if ( ret == -ENOENT && attempts == 0 ) {
-                // we might have to make a host dir if one doesn't exist yet
-                ret = Container::makeHostDir( pfd->getPath(), 
-                        wf->getHost(), wf->getMode() );
-            } else {
-                break;
-            }
-        }
-    }
-
-    if ( ret == 0 ) {
-        double begin_timestamp = 0, end_timestamp = 0;
-        begin_timestamp = Util::getTime();
-        ret = Util::Write( data_fd, buf, size );
-        end_timestamp   = Util::getTime();
-        if ( ret >= 0 ) {
-            written = ret;
-            pfd->addWrite( offset, written );
-        }
-        if ( index ) {
-            index->addWrite( offset, written, begin_timestamp, end_timestamp );
-        } else {
-            ret = Index::writeIndex( indx_fd, offset, written, pfd->getPid(),
-                begin_timestamp, end_timestamp );
-        }
+    ret = written = wf->write( buf, size, offset, pid );
+    if ( ret > 0 ) {
+        pfd->addWrite( offset, size ); // save metadata
     }
 
     return ( ret >= 0 ? written : ret );
 }
 
 int 
-plfs_sync( Plfs_fd *pfd ) {
-    Index *index = NULL;
-    int indexfd = -1, datafd = -1, ret = 0;
-    pfd->getWriteFds( &datafd, &indexfd, &index );
-    if ( index ) {
-        ret = index->writeIndex( indexfd );
-    }
-    if ( ret == 0 ) {
-        if ( indexfd > 0 && Util::Fsync( indexfd ) != 0 ) {
-            ret = -errno;
-        }
-        if ( datafd > 0 && Util::Fsync( datafd ) != 0 ) {
-            ret = -errno;
-        }
-    }
-    return ret;
+plfs_sync( Plfs_fd *pfd, pid_t pid ) {
+    return ( pfd->getWritefile() ? pfd->getWritefile()->sync(pid) : 0 );
 }
 
 // this can fail due to silly rename 
@@ -375,34 +343,17 @@ plfs_getattr( Plfs_fd *of, const char *path, struct stat *stbuf ) {
 int 
 extendFile( Plfs_fd *of, string strPath, off_t offset ) {
     int ret = 0;
-    int fd = -1;
     bool newly_opened = false;
-    if ( of && of->getWritefile() ) {
-            // hey, if this if statement is ever not true,
-            // then it looks like we'll get metadata wrong....
-        fd = of->getWritefile()->getIndexFd();
-        of->getWritefile()->addWrite( offset, 0 ); // to set the metadata
-    }
-    if ( fd == -1 ) {
+    WriteFile *wf = ( of && of->getWritefile() ? of->getWritefile() : NULL );
+    pid_t pid = ( of ? of->getPid() : SHARED_PID );
+    if ( wf == NULL ) {
         mode_t mode = Container::getmode( strPath.c_str() ); 
-        fd = WriteFile::openIndexFile( strPath, Util::hostname(), mode );
-        if ( fd < 0 ) {
-            ret = -errno;
-        } else {
-            newly_opened = true;
-        }
+        wf = new WriteFile( strPath.c_str(), Util::hostname(), mode );
+        ret = wf->openIndex( pid );
+        newly_opened = true;
     }
-    if ( fd >= 0 ) {
-        pid_t pid = of->getPid();
-        double begin_timestamp = Util::getTime();
-        ret = Index::writeIndex( fd, offset, 0, pid,
-                begin_timestamp, begin_timestamp );
-        if ( newly_opened ) {
-            if ( WriteFile::closeIndexFile( fd ) != 0 ) {
-                ret = -errno;
-            }
-        }
-    }
+    if ( ret == 0 ) ret = wf->extend( offset );
+    if ( newly_opened ) delete wf;
     return ret;
 }
 
@@ -437,6 +388,12 @@ plfs_trunc( Plfs_fd *of, const char *path, off_t offset ) {
     if ( ret == 0 && of && of->getWritefile() ) {
         ret = of->getWritefile()->truncate( offset );
         of->truncate( offset );
+            // here's a problem, if the file is open for writing, we've
+            // already opened fds in there.  So the droppings are
+            // deleted/resized and our open handles are messed up 
+        if ( ret == 0 && of && of->getWritefile() ) {
+            ret = of->getWritefile()->restoreFds();
+        }
     }
 
     return ret;
@@ -462,13 +419,12 @@ plfs_close( Plfs_fd *pfd ) {
         off_t  last_offset;
         size_t total_bytes;
         pfd->getMeta( &last_offset, &total_bytes );
-        ret = plfs_sync( pfd );  // make sure all data is sync'd
-        Container::addMeta( last_offset, total_bytes, pfd->getPath(),
-                wf->getHost() );
-        ret = wf->Close();
+        Container::addMeta( last_offset, total_bytes, pfd->getPath(), 
+                Util::hostname() );
         // with multiple non-connected pids per host (as ADIO will require)
         // this open record will need a pid too probably
-        Container::removeOpenrecord( pfd->getPath(), wf->getHost() );
+        Container::removeOpenrecord( pfd->getPath(), Util::hostname() );
+        //ret = wf->Close();    // not sure if I need this.  
         delete( wf );
     } else if ( index ) {
         delete( index );

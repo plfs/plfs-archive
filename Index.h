@@ -72,21 +72,22 @@ typedef struct {
 
 class Index : public Metadata {
     public:
-        Index( string, pid_t ); 
+        Index( string ); 
+        Index( string path, int fd ); 
         ~Index();
 
         int readIndex( string hostindex );
     
         bool ispopulated( );
 
-        int writeIndex( int fd );
-        static int writeIndex( int fd, off_t offset, size_t written, 
-                pid_t pid, double begin_timestamp, double end_timestamp );
-
-        void addWrite( off_t off, size_t, double begin_ts, double end_ts );
         void addWrite( off_t offset, size_t bytes, pid_t, double, double );
 
+        int flush();
+
         off_t lastOffset( );
+
+        int getFd() { return fd; }
+        void resetFd( int fd ) { this->fd = fd; }
 
         size_t totalBytes( );
 
@@ -103,6 +104,7 @@ class Index : public Metadata {
 		friend ostream& operator <<(ostream &,const Index &);
 
     private:
+        void init( string );
         int chunkFound( int *, off_t *, size_t *, off_t, ContainerEntry* );
         int cleanupReadIndex(int, void *, off_t, int, const char*, const char*);
         void *mapIndex( string, int *, off_t * );
@@ -128,6 +130,7 @@ class Index : public Metadata {
         int    chunk_id;
         off_t  last_offset;
         size_t total_bytes;
+        int    fd;
 };
 
 #define MAP_ITR map<off_t,ContainerEntry>::iterator
