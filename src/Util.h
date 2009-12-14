@@ -75,14 +75,15 @@ class Util {
         static string toString();
         static string openFlagsToString( int );
         static string expandPath( string path, string hostname );
-        static void addTime( string, double );
+        static void addTime( string, double, bool );
         static char *hostname();
         static int retValue( int res );
     private:
         static void addBytes( string, size_t );
         static string timeToString(      HASH_MAP<string,double>::iterator,
                                          HASH_MAP<string,off_t>::iterator,
-                                         off_t *, double * ); 
+                                         HASH_MAP<string,off_t>::iterator,
+                                         off_t *, off_t *, double * ); 
         static string bandwidthToString( HASH_MAP<string,double>::iterator,
                                          HASH_MAP<string,off_t>::iterator ); 
         static double rmdir_time;

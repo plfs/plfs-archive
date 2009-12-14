@@ -75,7 +75,7 @@ using namespace std;
                         ENTER_SHARED;
 
     #define EXIT_SHARED DEBUG_EXIT;                                 \
-                        addTime( __FUNCTION__, end - begin );       \
+                        addTime( __FUNCTION__, end - begin, (ret<0) );       \
                         if ( end - begin > SLOW_UTIL ) {            \
                             LogMessage lm3;                         \
                             lm3 << "WTF: " << __FUNCTION__          \
@@ -98,25 +98,29 @@ using namespace std;
 HASH_MAP<string, double> utimers;
 HASH_MAP<string, off_t>  kbytes;
 HASH_MAP<string, off_t>  counters;
+HASH_MAP<string, off_t>  errors;
 
 string Util::toString( ) {
     ostringstream oss;
     string output;
     off_t  total_ops  = 0;
+    off_t  total_errs = 0;
     double total_time = 0.0;
 
     HASH_MAP<string,double>::iterator itr;
     HASH_MAP<string,off_t> ::iterator kitr;
     HASH_MAP<string,off_t> ::iterator count;
+    HASH_MAP<string,off_t> ::iterator err;
     for( itr = utimers.begin(); itr != utimers.end(); itr++ ) {
         count  = counters.find( itr->first );
-        output += timeToString( itr, count, &total_ops, &total_time );
+        err = errors.find( itr->first );
+        output += timeToString( itr, err, count, &total_errs, &total_ops, &total_time );
         if ( ( kitr = kbytes.find(itr->first) ) != kbytes.end() ) {
             output += bandwidthToString( itr, kitr );
         }
         output += "\n";
     }
-    oss << "Util Total Ops " << total_ops << " in " 
+    oss << "Util Total Errs " << total_errs << " from Ops " << total_ops << " in " 
         << std::setprecision(2) << std::fixed << total_time << "s\n";
     output += oss.str();
     return output;
@@ -135,19 +139,24 @@ string Util::bandwidthToString( HASH_MAP<string,double>::iterator itr,
 }
 
 string Util::timeToString( HASH_MAP<string,double>::iterator itr,
+                           HASH_MAP<string,off_t>::iterator eitr,
                            HASH_MAP<string,off_t>::iterator citr,
+                           off_t *total_errs,
                            off_t *total_ops,
                            double *total_time ) 
 {
     double value    = itr->second;
     off_t  count    = citr->second;
+    off_t  errs     = eitr->second;
     double avg      = (double) count / value;
     ostringstream oss;
 
+    *total_errs += errs;
     *total_ops  += count;
     *total_time += value;
 
-    oss << setw(12) << itr->first << ": " << setw(8) << count << " ops, " 
+    oss << setw(12) << itr->first << ": " << setw(8) << errs << " errs, " 
+        << setw(8) << count << " ops, " 
         << std::setprecision(2)
         << std::fixed
         << setw(8)
@@ -170,9 +179,10 @@ void Util::addBytes( string function, size_t size ) {
 }
 
 pthread_mutex_t time_mux;
-void Util::addTime( string function, double elapsed ) {
+void Util::addTime( string function, double elapsed, bool error ) {
     HASH_MAP<string,double>::iterator itr;
     HASH_MAP<string,off_t>::iterator two;
+    HASH_MAP<string,off_t>::iterator three;
         // plfs is hanging in here for some reason
         // is it a concurrency problem?
         // idk.  be safe and put it in a mux.  testing
@@ -181,14 +191,17 @@ void Util::addTime( string function, double elapsed ) {
         // also, if you're worried, just turn off
         // both util timing (-DUTIL) and -DNPLFS_TIMES
     pthread_mutex_lock( &time_mux );
-    itr = utimers.find( function );
-    two = counters.find( function );
+    itr   = utimers.find( function );
+    two   = counters.find( function );
+    three = errors.find( function );
     if ( itr == utimers.end( ) ) {
         utimers[function] = elapsed;
         counters[function] = 1;
+        if ( error ) errors[function] = 1;
     } else {
         utimers[function] += elapsed;
         counters[function] ++;
+        if ( error ) errors[function] ++;
     }
     pthread_mutex_unlock( &time_mux );
 }

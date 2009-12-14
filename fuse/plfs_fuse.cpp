@@ -41,7 +41,7 @@ using namespace std;
     #define START_TIMES double begin, end;  \
                         begin = Util::getTime();
     #define END_TIMES   end = Util::getTime(); \
-                        Util::addTime( __FUNCTION__, end-begin );
+                        Util::addTime( __FUNCTION__, end-begin, (ret<0) );
 #else
     #define START_TIMES
     #define END_TIMES
@@ -574,8 +574,10 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
     EXIT_IF_DEBUG;
     PLFS_ENTER_PID;
     Plfs_fd *pfd = NULL;
+    mode_t mode = getMode( strPath );
+    cerr << __FUNCTION__ << " opening with mode " << mode << endl;
     ret = plfs_open( &pfd, strPath.c_str(), fi->flags, 
-            fuse_get_context()->pid, getMode( strPath ) );
+            fuse_get_context()->pid, mode );
     if ( ret == 0 ) {
         fi->fh = (uint64_t)pfd;
         // if we want to, we can also stash this in global
