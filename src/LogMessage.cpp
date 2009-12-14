@@ -7,7 +7,7 @@
 using namespace std;
 #include "LogMessage.h"
 
-#define LOG_BUFFER_SZ 200
+#define LOG_BUFFER_SZ 1000
 
 ofstream        *log_stream;
 pthread_mutex_t  log_mutex;

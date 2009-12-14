@@ -34,7 +34,7 @@ using namespace std;
 
 #define DEBUGFILE ".plfsdebug"
 #define DEBUGLOG  ".plfslog"
-#define DEBUGFILESIZE 1048576
+#define DEBUGFILESIZE 4194304
 #define DANGLE_POSSIBILITY 1
 
 #ifdef PLFS_TIMES
