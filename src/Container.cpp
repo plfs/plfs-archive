@@ -402,7 +402,7 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
                 data_blocks += dropping_st.st_blocks;
                 data_size   += dropping_st.st_size;
             } else {
-                Index *index = new Index( path, SHARED_PID );
+                Index *index = new Index( path );
                 index->readIndex( dropping ); 
                 index_blocks     += bytesToBlocks( index->totalBytes() );
                 index_size        = max( index->lastOffset(), index_size );

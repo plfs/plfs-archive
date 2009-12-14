@@ -575,9 +575,15 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
     PLFS_ENTER_PID;
     Plfs_fd *pfd = NULL;
     ret = plfs_open( &pfd, strPath.c_str(), fi->flags, 
-            fuse_get_context()->pid, getMode( strPath ), true );
+            fuse_get_context()->pid, getMode( strPath ) );
     if ( ret == 0 ) {
         fi->fh = (uint64_t)pfd;
+        // if we want to, we can also stash this in global
+        // memory and share it with multiple pids
+        // they'll currently share a data file though
+        // in order for them each to have their own data
+        // file, we'll need to add a plfs_reopen / plfs_add_writer call
+        // which is trivial since WriteFile already supports that
     }
     // we can safely add more writers to an already open file
     // bec FUSE checks f_access before allowing an f_open

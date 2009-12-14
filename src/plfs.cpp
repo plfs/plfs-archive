@@ -116,7 +116,7 @@ plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
     // basically O_RDWR is possible but it can reduce read BW
 
     if ( index == NULL ) {
-        index = new Index( path, SHARED_PID );
+        index = new Index( path );
         if ( index ) {
             new_index_created = true;
             ret = Container::populateIndex( path, index );
@@ -152,8 +152,7 @@ plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
 }
 
 int
-plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode,
-        bool multiple_writers ) 
+plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
 {
     WriteFile *wf    = NULL;
     Index     *index = NULL;
@@ -175,7 +174,7 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode,
 
     if ( ret == 0 && (flags & O_WRONLY || flags & O_RDWR) ) {
         wf = new WriteFile( path, Util::hostname(), mode ); 
-        ret = wf->openIndex( multiple_writers ? SHARED_PID : pid );
+        ret = wf->openIndex( pid ); 
         if ( ret == 0 ) {
             ret = addWriter( wf, pid, path, mode );
         }
@@ -345,7 +344,7 @@ extendFile( Plfs_fd *of, string strPath, off_t offset ) {
     int ret = 0;
     bool newly_opened = false;
     WriteFile *wf = ( of && of->getWritefile() ? of->getWritefile() : NULL );
-    pid_t pid = ( of ? of->getPid() : SHARED_PID );
+    pid_t pid = ( of ? of->getPid() : 0 );
     if ( wf == NULL ) {
         mode_t mode = Container::getmode( strPath.c_str() ); 
         wf = new WriteFile( strPath.c_str(), Util::hostname(), mode );

@@ -47,6 +47,7 @@ int WriteFile::addWriter( pid_t pid ) {
     if ( fd < 0 ) {
         ret = -errno;
     } else {
+        cerr << __FILE__ << " mapped pid " << pid << " to fd " << fd << endl;
         fds[pid] = fd;
     }
     return ret;
@@ -55,9 +56,19 @@ int WriteFile::addWriter( pid_t pid ) {
 int WriteFile::getFd( pid_t pid ) {
     map<pid_t,int>::iterator itr;
     if ( (itr = fds.find( pid )) != fds.end() ) {
+        cerr << __FILE__ << " found fd " << itr->second << " from pid " 
+             << pid << endl;
         return itr->second;
     } else {
-        return -ENOENT;
+        if ( fds.size() > 0 ) {
+            cerr << __FILE__ << " WARNING pid " << pid << " is not mapped." 
+                 << " Borrowing fd " << fds.begin()->second << " from pid " 
+                 << fds.begin()->first << endl;
+            return fds.begin()->second;
+        } else {
+            cerr << __FILE__ << " ERROR no fd to give to pid " << pid << endl;
+            return -ENOENT;
+        }
     }
 }
 

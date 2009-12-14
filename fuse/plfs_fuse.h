@@ -11,27 +11,6 @@ class T;
 #include <vector>
 using namespace std;
 
-enum 
-DroppingLevel {
-    CONTAINER, HOST, PID
-};
-
-
-// ok, when we create a file, on which backend directory do we create it
-// (i.e. which metadata server)?
-// if we hash by path, we'll have an N-N open storm on a single backend
-// directory.  so instead hash by node for create and hash by path for
-// lookup.  This means that we'll have to eventually move the data or 
-// link to it or something
-// we've temporarily (?) turned off this dangling thing which was adding
-// lots of code complexity and complicating the separation of fuse and library
-enum
-FileLocation {
-    DANGLING_PATH,  // the dangling path accessed by hashing on node name
-    CANONICAL_PATH, // the canonical path accessed by hashing on file name
-    CURRENT_PATH,   // the current path (i.e. dangling until linked in)
-};
-
 struct dir_op {
     // could be compressed with a union
     DirectoryOperation   op;
@@ -51,8 +30,6 @@ typedef struct {
     bool   sync_on_close;
     vector< string >             backends;
     size_t subdirs;
-    DroppingLevel chunk_level;
-    DroppingLevel index_level;
 } Params;
 
 typedef struct {
@@ -65,9 +42,6 @@ typedef struct {
     string                    trashdir;
     Params                    params;
 } SharedState;
-
-#define SHARED_PID 0
-#define NOCREAT    0
 
 class Plfs : public fusexx::fuse<Plfs> {
 	public:

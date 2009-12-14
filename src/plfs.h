@@ -23,19 +23,14 @@ int plfs_chown( const char *path, uid_t, gid_t );
 int plfs_close( Plfs_fd * );
 
 /* plfs_create
-   you don't need to call this.  you can also pass O_CREAT to plfs_open
+   you don't need to call this, you can also pass O_CREAT to plfs_open
 */
 int plfs_create( const char *path, mode_t mode, int flags ); 
 
 /* plfs_open
-   multiple_writers is an advance indication as to whether multiple
-   writers will be added with plfs_add_writer.  It's fine to say yes
-   but then not do it.  However, if multiple writers on a single machine
-   will each have their own Plfs_fd object, then it is important to say
-   no here
 */
 int plfs_open( Plfs_fd **, const char *path, 
-        int flags, pid_t pid, mode_t, bool multiple_writers );
+        int flags, pid_t pid, mode_t );
 
 ssize_t plfs_read( Plfs_fd *, char *buf, size_t size, off_t offset );
 

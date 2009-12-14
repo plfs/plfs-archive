@@ -1,4 +1,4 @@
-PLFS_INSTALL_DIR = ..
+PLFS_INSTALL_DIR = ../src
 
 TARGET   = plfs_map
 CXXFLAGS = -I$(PLFS_INSTALL_DIR)
