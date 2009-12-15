@@ -103,6 +103,7 @@ class Plfs : public fusexx::fuse<Plfs> {
         static string readFilesToString();
         static string writeFilesToString();
         static mode_t getMode( string expanded );
+        static int getattr_helper( const char *path, struct stat *, Plfs_fd *);
 
             // is a set the best here?  doesn't need to be sorted.
             // just needs to be associative.  This needs to be static

@@ -339,9 +339,9 @@ plfs_getattr( Plfs_fd *of, const char *path, struct stat *stbuf ) {
             }
         }
     }
-    cerr << __FUNCTION__ << " of " << path << "(" 
-         << (of == NULL ? "closed" : "open") 
-         << ") size is " << stbuf->st_size << endl;
+    //cerr << __FUNCTION__ << " of " << path << "(" 
+    //     << (of == NULL ? "closed" : "open") 
+    //     << ") size is " << stbuf->st_size << endl;
 
     return ret;
 }

@@ -8,12 +8,15 @@ LOG      = /tmp/plfs.log
 # remove direct_io if you want to exec a PLFS file
 # but it makes the performance horrible because writes are split into 4K
 # as opposed to 128K with direct_io 
-#DIRECT_IO        = -o direct_io
+DIRECT_IO        = -o direct_io
+
 # single threaded makes debugging easier
-SINGLE_THREADED  = -s
+#SINGLE_THREADED  = -s
+
 PLFS_SHARED_ARGS = $(DIRECT_IO) $(SINGLE_THREADED) \
 				   -plfs_backend=$(PLFS_BACK) -plfs_subdirs=32 \
 				   -plfs_synconclose=1
+
 UNAME := $(shell uname)
 ifeq ($(UNAME), Darwin)
 	UMOUNT    = umount $(PLFS_MNT)

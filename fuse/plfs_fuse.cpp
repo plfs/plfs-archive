@@ -261,6 +261,7 @@ int Plfs::makePlfsFile( string expanded_path, mode_t mode, int flags ) {
         // so this is distributed across multi-nodes so the lock
         // doesn't fully help but it does help a little bit for multi-proc
         // on this node
+        // if the container has already been created, don't create it again
     double time_start = Util::getTime();
     Util::MutexLock( &shared.container_mutex );
     int extra_attempts = 0;
@@ -301,6 +302,16 @@ int Plfs::f_access(const char *path, int mask) {
 int Plfs::f_mknod(const char *path, mode_t mode, dev_t rdev) {
     PLFS_ENTER;
     ret = makePlfsFile( strPath.c_str(), mode, 0 );
+    if ( ret == 0 ) {
+        // we think we've made the file. Let's double check.
+        struct stat stbuf;
+        ret = f_getattr( path, &stbuf );
+        if ( ret != 0 ) {
+            cerr << "WTF? Just created file that doesn't exist?"
+                 << path << ": " << strerror(-ret) << endl;
+            exit( 0 );
+        }
+    }
     PLFS_EXIT;
 }
 
@@ -346,29 +357,47 @@ int Plfs::f_truncate( const char *path, off_t offset ) {
     PLFS_EXIT;
 }
 
+// a helper for f_getattr and f_fgetattr.  
+int Plfs::getattr_helper( const char *path, 
+        struct stat *stbuf, Plfs_fd *of )
+{
+    string expanded = expandPath( path );
+    int ret = plfs_getattr( of, expanded.c_str(), stbuf );
+    if ( ret == -ENOENT ) {
+        if ( isdebugfile( path ) ) {
+            stbuf->st_mode = S_IFREG | 0444;
+            stbuf->st_nlink = 1;
+            stbuf->st_size = DEBUGFILESIZE;
+            ret = 0; 
+        } else {
+            // let's remove this from our created containers
+            // just in case.  Normally we try to keep 
+            // created containers up to date ourselves
+            // but there is a chance that someone 
+            // mucked with the backend or something so
+            // we always want to make sure we now
+            // when a container doesn't exist
+            // this is because we once got in trouble 
+            // when we didn't do a good job keeping 
+            // created containers up to date and 
+            // mknod thought a container existed but it didn't
+            shared.createdContainers.erase( expanded );
+        }
+    }
+    return ret;
+}
+
 int Plfs::f_fgetattr(const char *path, struct stat *stbuf, 
         struct fuse_file_info *fi) 
 {
     PLFS_ENTER_PID; GET_OPEN_FILE;
-    ret = plfs_getattr( of, strPath.c_str(), stbuf );
-    if ( ret == -ENOENT && isdebugfile( path ) ) {
-        stbuf->st_mode = S_IFREG | 0444;
-        stbuf->st_nlink = 1;
-        stbuf->st_size = DEBUGFILESIZE;
-        ret = 0; 
-    }
+    ret = getattr_helper( path, stbuf, of );
     PLFS_EXIT;
 }
 
 int Plfs::f_getattr(const char *path, struct stat *stbuf) {
     PLFS_ENTER;
-    ret = plfs_getattr( NULL, strPath.c_str(), stbuf );
-    if ( ret == -ENOENT && isdebugfile( path ) ) {
-        stbuf->st_mode = S_IFREG | 0444;
-        stbuf->st_nlink = 1;
-        stbuf->st_size = DEBUGFILESIZE;
-        ret = 0; 
-    }
+    ret = getattr_helper( path, stbuf, NULL );
     PLFS_EXIT;
 }
 
@@ -867,5 +896,8 @@ int Plfs::f_rename( const char *path, const char *to ) {
     }
 
     ret = retValue( Util::Rename( strPath.c_str(), toPath.c_str() ) );
+    if ( ret == 0 ) {
+        shared.createdContainers.erase( strPath );
+    }
     PLFS_EXIT;
 }
