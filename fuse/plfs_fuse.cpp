@@ -76,9 +76,9 @@ using namespace std;
 #define PLFS_ENTER_IO  PLFS_ENTER
 #define PLFS_ENTER_PID PLFS_ENTER 
 #define PLFS_EXIT      RESTORE_IDS; END_TIMES;                            \
-                       funct_id << (ret ? strerror(errno) : "success")   \
+                       funct_id << (ret >= 0 ? "success" : strerror(-ret) )     \
                                 << " " << end-begin << "s";               \
-                       lm2 << funct_id.str() << endl; lm2.flush();          \
+                       lm2 << funct_id.str() << endl; lm2.flush();        \
                        return ret;
 
 #define PLFS_EXIT_IO   PLFS_EXIT 
@@ -271,6 +271,8 @@ int Plfs::makePlfsFile( string expanded_path, mode_t mode, int flags ) {
         self->extra_attempts += extra_attempts;
         if ( res == 0 ) {
             shared.createdContainers.insert( expanded_path );
+            cerr << __FUNCTION__ << " Stashing mode for " << expanded_path 
+                 << ":" << mode << endl;
             self->known_modes[expanded_path] = mode;
         }
     }
@@ -349,6 +351,12 @@ int Plfs::f_fgetattr(const char *path, struct stat *stbuf,
 {
     PLFS_ENTER_PID; GET_OPEN_FILE;
     ret = plfs_getattr( of, strPath.c_str(), stbuf );
+    if ( ret == -ENOENT && isdebugfile( path ) ) {
+        stbuf->st_mode = S_IFREG | 0444;
+        stbuf->st_nlink = 1;
+        stbuf->st_size = DEBUGFILESIZE;
+        ret = 0; 
+    }
     PLFS_EXIT;
 }
 
@@ -433,9 +441,11 @@ int Plfs::f_chmod (const char *path, mode_t mode) {
         ret = iterate_backends( &d );
     } else {
         ret = plfs_chmod( strPath.c_str(), mode );
-    }
-    if ( ret == 0 ) {
-        self->known_modes[strPath] = mode;
+        if ( ret == 0 ) {
+            cerr << __FUNCTION__ << " Stashing mode for " << strPath
+                 << ":" << mode << endl;
+            self->known_modes[strPath] = mode;
+        }
     }
     PLFS_EXIT;
 }
@@ -605,7 +615,7 @@ int Plfs::f_release( const char *path, struct fuse_file_info *fi ) {
     PLFS_ENTER_PID; GET_OPEN_FILE;
     if ( of ) {
         plfs_close( of );
-        fi->fh = NULL;
+        fi->fh = (uint64_t)NULL;
     }
     PLFS_EXIT;
 }
@@ -644,9 +654,11 @@ mode_t Plfs::getMode( string expanded ) {
             self->known_modes.find( expanded );
     if ( itr == self->known_modes.end() ) {
             // Container::getmode returns DEFAULT_MODE if not found
+        cerr << "Pulling mode from Container" << endl;
         mode = Container::getmode( expanded.c_str() );
         self->known_modes[expanded] = mode;
     } else {
+        cerr << "Pulling mode from stashed value" << endl;
         mode = itr->second; 
     }
     return mode;

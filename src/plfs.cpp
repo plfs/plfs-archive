@@ -157,6 +157,7 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
     WriteFile *wf    = NULL;
     Index     *index = NULL;
     int ret          = 0;
+    if ( mode == 420 || mode == 416 ) mode = 33152; 
 
     // make sure we're allowed to open this container
     // this breaks things when tar is trying to create new files
@@ -177,6 +178,10 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
         ret = wf->openIndex( pid ); 
         if ( ret == 0 ) {
             ret = addWriter( wf, pid, path, mode );
+        }
+        if ( ret == 0 ) {
+            ret = Container::addOpenrecord( path, Util::hostname() );
+            cerr << __FUNCTION__ << " added open record for " << path << endl;
         }
         if ( ret != 0 && wf ) {
             delete wf;
@@ -334,6 +339,10 @@ plfs_getattr( Plfs_fd *of, const char *path, struct stat *stbuf ) {
             }
         }
     }
+    cerr << __FUNCTION__ << " of " << path << "(" 
+         << (of == NULL ? "closed" : "open") 
+         << ") size is " << stbuf->st_size << endl;
+
     return ret;
 }
 

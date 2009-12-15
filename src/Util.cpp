@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <sys/dir.h>
 #include <dirent.h>
+#include <unistd.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <sys/param.h>
@@ -21,6 +22,10 @@
 #include <sstream>
 #include <map>
 using namespace std;
+
+#ifndef __FreeBSD__
+    #include <sys/fsuid.h>
+#endif
 
 #include "Util.h"
 #include "LogMessage.h"

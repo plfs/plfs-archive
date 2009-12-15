@@ -2,14 +2,17 @@ PLFS_INSTALL_DIR = ../src
 
 TARGET   = plfs
 CXXFLAGS = -I$(PLFS_INSTALL_DIR) -DPLFS_TIMES -DCOUNT_SKIPS -g -Wall
-LDFLAGS  = -L$(PLFS_INSTALL_DIR) -lplfs
+LDFLAGS  = -L$(PLFS_INSTALL_DIR) -lplfs 
 LOG      = /tmp/plfs.log
 
 # remove direct_io if you want to exec a PLFS file
 # but it makes the performance horrible because writes are split into 4K
 # as opposed to 128K with direct_io 
 #DIRECT_IO        = -o direct_io
-PLFS_SHARED_ARGS = $(DIRECT_IO) -plfs_backend=$(PLFS_BACK) -plfs_subdirs=32 \
+# single threaded makes debugging easier
+SINGLE_THREADED  = -s
+PLFS_SHARED_ARGS = $(DIRECT_IO) $(SINGLE_THREADED) \
+				   -plfs_backend=$(PLFS_BACK) -plfs_subdirs=32 \
 				   -plfs_synconclose=1
 UNAME := $(shell uname)
 ifeq ($(UNAME), Darwin)
@@ -42,7 +45,7 @@ endif
 all: $(TARGET)
 
 $(TARGET): plfs_fuse.o main.o
-	g++ $(LDFLAGS) -o $(TARGET) main.o plfs_fuse.o 
+	g++ -o $(TARGET) main.o plfs_fuse.o $(LDFLAGS)
 
 mount: $(TARGET) $(PLFS_MNT) $(PLFS_BACK)
 	./$(TARGET) -d $(PLFS_MNT) $(PLFS_ARGS)
