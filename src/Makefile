@@ -11,13 +11,13 @@ OBJS       = $(addsuffix .o, $(basename $(SRCS) ) )
 # add -DCOUNT_SKIPS to maintain a count of sequential / non-sequential IO 
 DEBUG   = -DNDEBUG -DPLFS_TIMES -DNUTIL -DINDEX_CONTAINS_TIMESTAMPS \
 	      -DCOUNT_SKIPS
-CFLAGS  = -g -Wall $(DEBUG) -D_FILE_OFFSET_BITS=64
+CXXFLAGS  = -g -Wall $(DEBUG) -D_FILE_OFFSET_BITS=64
 LDFLAGS = 
 
 UNAME		:= $(shell uname)
 
 ifeq ($(UNAME), Darwin)
-	CFLAGS += -D__FreeBSD__=10
+	CXXFLAGS += -D__FreeBSD__=10
 endif
 
 all: $(LIBRARY)
@@ -25,11 +25,5 @@ all: $(LIBRARY)
 $(LIBRARY): $(OBJS) 
 	ar rcs $@ $(OBJS) 
 
-%.o: %.C $(HDRS)
-	g++ $(CFLAGS) -o $@ -c $<
-
-%.o : %.cpp $(HDRS)
-	g++ $(CFLAGS) -o $@ -c $<
- 
 clean:
 	/bin/rm -f $(LIBRARY) *.o
