@@ -643,7 +643,7 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
 int Plfs::f_release( const char *path, struct fuse_file_info *fi ) {
     PLFS_ENTER_PID; GET_OPEN_FILE;
     if ( of ) {
-        plfs_close( of );
+        plfs_close( of, fuse_get_context()->pid );
         fi->fh = (uint64_t)NULL;
     }
     PLFS_EXIT;

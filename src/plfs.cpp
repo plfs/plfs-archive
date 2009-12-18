@@ -419,11 +419,13 @@ plfs_unlink( const char *path ) {
 }
 
 int
-plfs_close( Plfs_fd *pfd ) {
+plfs_close( Plfs_fd *pfd, pid_t pid ) {
     int ret = 0;
     WriteFile *wf    = pfd->getWritefile();
     Index     *index = pfd->getIndex();
     if ( wf ) {
+        // later we need to be smart in here and only close once
+        // the last pid is removed
         off_t  last_offset;
         size_t total_bytes;
         pfd->getMeta( &last_offset, &total_bytes );

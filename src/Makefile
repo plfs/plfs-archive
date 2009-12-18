@@ -1,4 +1,5 @@
 LIBRARY    = libplfs.a
+SLIB       = libplfs.so
 SRCS       = $(wildcard *.cpp) 
 HDRS       = $(wildcard *.h)
 OBJS       = $(addsuffix .o, $(basename $(SRCS) ) ) 
@@ -18,12 +19,19 @@ UNAME		:= $(shell uname)
 
 ifeq ($(UNAME), Darwin)
 	CXXFLAGS += -D__FreeBSD__=10
+	AR = libtool -static -o
+	SLIB = libplfs.1.dylib
+else 
+	AR = ar rcs 
 endif
 
-all: $(LIBRARY)
+all: $(LIBRARY) $(SLIB)
+
+$(SLIB): $(OBJS)
+	gcc -dynamiclib -Wl,-headerpad_max_install_names,-undefined,dynamic_lookup,-compatibility_version,1.0,-current_version,1.0,-install_name,./$@ -o $@ *.o
 
 $(LIBRARY): $(OBJS) 
-	ar rcs $@ $(OBJS) 
+	$(AR) $@ $(OBJS) 
 
 clean:
 	/bin/rm -f $(LIBRARY) *.o
