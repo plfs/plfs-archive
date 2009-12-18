@@ -20,25 +20,32 @@ void ADIOI_PLFS_Open(ADIO_File fd, int *error_code)
     fprintf( stderr, "%s: begin\n", myname );
 
     if (fd->perm == ADIO_PERM_NULL) {
-	old_mask = umask(022);
-	umask(old_mask);
-	perm = old_mask ^ 0666;
+        old_mask = umask(022);
+        umask(old_mask);
+        perm = old_mask ^ 0666;
     }
     else perm = fd->perm;
 
     amode = 0;//O_META;
     if (fd->access_mode & ADIO_RDONLY)
-	amode = amode | O_RDONLY;
+        amode = amode | O_RDONLY;
     if (fd->access_mode & ADIO_WRONLY)
-	amode = amode | O_WRONLY;
+        amode = amode | O_WRONLY;
     if (fd->access_mode & ADIO_RDWR)
-	amode = amode | O_RDWR;
+        amode = amode | O_RDWR;
     if (fd->access_mode & ADIO_EXCL)
-	amode = amode | O_EXCL;
+        amode = amode | O_EXCL;
 
     // MPI_File_open is a collective call so only create it once
     if (fd->access_mode & ADIO_CREATE) {
-        if ( rank == fd->hints->ranklist[0] ) {
+        // first create the top-level directory with just one proc
+        if ( rank == 0 ) {
+            err = plfs_create( fd->filename, perm, amode );
+        }
+        MPI_Bcast( &err, 1, MPI_INT, 0, fd->comm );
+
+        // then create the individual hostdirs with one proc per node
+        if ( err == 0 && rank != 0 && rank == fd->hints->ranklist[0] ) {
             err = plfs_create( fd->filename, perm, amode );
         }
         MPI_Bcast( &err, 1, MPI_INT, 0, fd->comm );
@@ -46,7 +53,7 @@ void ADIOI_PLFS_Open(ADIO_File fd, int *error_code)
 
     // handle any error from a create
     if ( err < 0 ) {
-	*error_code = MPIO_Err_create_code(MPI_SUCCESS, MPIR_ERR_RECOVERABLE,
+        *error_code = MPIO_Err_create_code(MPI_SUCCESS, MPIR_ERR_RECOVERABLE,
 					   myname, __LINE__, MPI_ERR_IO,
 					   "**io",
 					   "**io %s", strerror(-err));
