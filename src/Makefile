@@ -34,4 +34,4 @@ $(LIBRARY): $(OBJS)
 	$(AR) $@ $(OBJS) 
 
 clean:
-	/bin/rm -f $(LIBRARY) *.o
+	/bin/rm -f $(LIBRARY) $(SLIB) *.o
