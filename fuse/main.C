@@ -15,4 +15,3 @@ int main (int argc, char **argv) {
 	// required for static methods to access instance variables/ methods.
     return plfs.main (argc, argv, NULL, &plfs);
 }
-

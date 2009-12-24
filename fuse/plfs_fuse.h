@@ -32,17 +32,6 @@ typedef struct {
     size_t subdirs;
 } Params;
 
-typedef struct {
-    pthread_mutex_t           container_mutex;
-    pthread_mutex_t           fd_mutex;
-    pthread_mutex_t           index_mutex;
-    set< string >             createdContainers;
-    //HASH_MAP<string, Index *> read_files;
-    string                    myhost;
-    string                    trashdir;
-    Params                    params;
-} SharedState;
-
 class Plfs : public fusexx::fuse<Plfs> {
 	public:
 		Plfs (); // Constructor
@@ -81,7 +70,7 @@ class Plfs : public fusexx::fuse<Plfs> {
                 off_t, struct fuse_file_info *);
 
         // not overloaded.  something I added to parse command line args
-        static int init( int *argc, char **argv );
+        int init( int *argc, char **argv );
 
 	private:
         static int iterate_backends( dir_op *d );
@@ -94,14 +83,13 @@ class Plfs : public fusexx::fuse<Plfs> {
         static bool isdebugfile( const char*, const char * );
         static bool isdebugfile( const char* );
         static int writeDebug( char *buf, size_t, off_t, const char* );
-        //static WriteFile *getWriteFile( string, mode_t, bool ); 
+        static Plfs_fd *findOpenFile( string ); 
         //static int removeWriteFile( WriteFile *, string );
         //static int getIndex( string, mode_t, Index ** );
         //static int removeIndex( string, Index * );
         static const char *getPlfsArg( const char *, const char * );
         static string paramsToString( Params *p );
-        static string readFilesToString();
-        static string writeFilesToString();
+        static string openFilesToString();
         static mode_t getMode( string expanded );
         static int getattr_helper( const char *path, struct stat *, Plfs_fd *);
 
@@ -129,5 +117,12 @@ class Plfs : public fusexx::fuse<Plfs> {
             int bward_skips;
             int nonskip_writes;
         #endif
+        pthread_mutex_t           container_mutex;
+        pthread_mutex_t           fd_mutex;
+        pthread_mutex_t           index_mutex;
+        set< string >             createdContainers;
+        HASH_MAP<string, Plfs_fd *> open_files;
+        string                    myhost;
+        string                    trashdir;
+        Params                    params;
 };
-

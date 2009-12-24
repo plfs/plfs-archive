@@ -13,6 +13,14 @@ DIRECT_IO        = -o direct_io
 # single threaded makes debugging easier
 #SINGLE_THREADED  = -s
 
+# set values for mntpnt and backend
+ifndef PLFS_MNT
+    PLFS_MNT = /mnt/plfs
+endif
+ifndef PLFS_BACK
+    PLFS_BACK = /tmp/plfs.back
+endif
+
 PLFS_SHARED_ARGS = $(DIRECT_IO) $(SINGLE_THREADED) \
 				   -plfs_backend=$(PLFS_BACK) -plfs_subdirs=32 \
 				   -plfs_synconclose=1
@@ -36,14 +44,6 @@ ifndef PKG_CONFIG_PATH
     PKG_CONFIG_PATH = /etc:/usr/local/lib/pkgconfig/:
 endif
 export PKG_CONFIG_PATH
-
-# set values for mntpnt and backend
-ifndef PLFS_MNT
-    PLFS_MNT = /mnt/plfs
-endif
-ifndef PLFS_BACK
-    PLFS_BACK = /tmp/plfs.back
-endif
 
 all: $(TARGET)
 
