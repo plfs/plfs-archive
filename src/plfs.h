@@ -3,7 +3,13 @@
 
 #include <sys/types.h>
 
-class Plfs_fd;
+#ifdef __cplusplus 
+    extern "C" 
+    { 
+    class Plfs_fd;
+#else
+    typedef void * Plfs_fd;
+#endif
 
 /*
 
@@ -53,5 +59,9 @@ int plfs_unlink( const char *path );
 int plfs_utime( const char *path, struct utimbuf *ut );
 
 ssize_t plfs_write( Plfs_fd *, const char *, size_t, off_t, pid_t );
+
+#ifdef __cplusplus 
+    }
+#endif
 
 #endif
