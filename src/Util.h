@@ -50,8 +50,8 @@ class Util {
         static int Mkdir( const char*, mode_t );
         static int Mknod( const char *path, mode_t mode, dev_t dev );
         static int Mmap( void *, size_t, int, int, int, off_t , void ** );
-        static int MutexLock( pthread_mutex_t *mux );
-        static int MutexUnlock( pthread_mutex_t *mux );
+        static int MutexLock( pthread_mutex_t *mux, const char *whence );
+        static int MutexUnlock( pthread_mutex_t *mux, const char *whence );
         static int Open( const char*, int );
         static int Open( const char*, int, mode_t );
         static int Opendir( const char *dirname, DIR ** );

@@ -91,6 +91,10 @@ class Index : public Metadata {
 
         size_t totalBytes( );
 
+        void addReader( )     { readers++;          }
+        size_t removeReader() { return (--readers); }
+        size_t numReaders()   { return readers;     }
+
         int globalLookup( int *fd, off_t *chunk_off, size_t *length, 
                 off_t logical ); 
 
@@ -130,6 +134,7 @@ class Index : public Metadata {
         int    chunk_id;
         off_t  last_offset;
         size_t total_bytes;
+        size_t readers;
         int    fd;
 };
 

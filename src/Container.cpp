@@ -235,41 +235,49 @@ string Container::getOpenHostsDir( string path ) {
 
 // a function that reads the open hosts dir to discover which hosts currently
 // have the file open
+// now the open hosts file has a pid in it so we need to separate this out
 int Container::discoverOpenHosts( const char *path, set<string> *openhosts ) {
     struct dirent *dent = NULL;
     DIR *openhostsdir   = NULL; 
     Util::Opendir( (getOpenHostsDir(path)).c_str(), &openhostsdir );
     if ( openhostsdir == NULL ) return 0;
     while( (dent = readdir( openhostsdir )) != NULL ) {
+        string host;
         if ( ! strncmp( dent->d_name, ".", 1 ) ) continue;  // skip . and ..
+        host = dent->d_name;
+        host.erase( host.rfind("."), host.size() );
         cerr << "Host " <<dent->d_name <<" has open handle on " <<path <<endl;
-        openhosts->insert( dent->d_name );
+        openhosts->insert( host );
     }
     Util::Closedir( openhostsdir );
     return 0;
 }
 
-string Container::getOpenrecord( const char *path, const char *host ) {
-    string openrecord = getOpenHostsDir( path );
-    openrecord += "/";
-    openrecord += host;
-    return openrecord;
+string Container::getOpenrecord( const char *path, const char *host, pid_t pid){
+    ostringstream oss;
+    oss << getOpenHostsDir( path ) << "/" << host << "." << pid;
+    fprintf( stderr, "created open record path %s\n", oss.str().c_str() );
+    return oss.str();
 }
 
 // if this fails because the openhostsdir doesn't exist, then make it
 // and try again
-int Container::addOpenrecord( const char *path, const char *host ) {
-    string openrecord = getOpenrecord( path, host );
+int Container::addOpenrecord( const char *path, const char *host, pid_t pid ) {
+    string openrecord = getOpenrecord( path, host, pid );
     int ret = Util::Creat( openrecord.c_str(), DEFAULT_MODE );
     if ( ret != 0 && ( errno == ENOENT || errno == ENOTDIR ) ) {
         makeMeta(getOpenHostsDir(path), S_IFDIR, DEFAULT_MODE);
         ret = Util::Creat( openrecord.c_str(), DEFAULT_MODE );
     }
+    if ( ret != 0 ) {
+        fprintf( stderr, "Couldn't make openrecord %s: %s\n", 
+                openrecord.c_str(), strerror( errno ) );
+    }
     return ret;
 }
 
-int Container::removeOpenrecord( const char *path, const char *host ) {
-    string openrecord = getOpenrecord( path, host ); 
+int Container::removeOpenrecord( const char *path, const char *host, pid_t pid){
+    string openrecord = getOpenrecord( path, host, pid ); 
     return Util::Unlink( openrecord.c_str() );
 }
 
@@ -344,8 +352,8 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
             string host = fetchMeta( dent->d_name, 
                     &last_offset, &total_bytes, &time );
             if ( openHosts.find(host) != openHosts.end() ) {
-                cerr << "Can't use metafile " << dent->d_name << " because "
-                     << host << " has an open handle." << endl;
+                fprintf( stderr, "Can't use metafile %s because %s has an "
+                        " open handle.\n", dent->d_name, host.c_str() );
                 continue;
             }
             cerr << "Pulled meta " << last_offset << " " << total_bytes
@@ -368,6 +376,7 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
 
     // if we're using cached data we don't do this part unless there
     // were open hosts
+    // the way this works is we find each index file, then we find
     if ( openHosts.size() > 0 ) {
         string dropping; 
         blkcnt_t index_blocks = 0, data_blocks = 0;
@@ -377,7 +386,8 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
         {
             string host = hostFromChunk( dropping, prefix );
             if ( validMeta.find(host) != validMeta.end() ) {
-                cerr << "Used stashed stat info for " << host << endl;
+                fprintf( stderr, "Used stashed stat info for %s\n", 
+                        host.c_str() );
                 continue;
             } else {
                 //cerr << "Will aggregate stat info for " << host << endl;
@@ -399,9 +409,11 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
             stbuf->st_mtime = max( dropping_st.st_mtime, stbuf->st_mtime );
 
             if ( dropping.find(DATAPREFIX) != dropping.npos ) {
+                fprintf( stderr, "Getting stat info from data dropping\n" );
                 data_blocks += dropping_st.st_blocks;
                 data_size   += dropping_st.st_size;
             } else {
+                fprintf( stderr, "Getting stat info from index dropping\n" );
                 Index *index = new Index( path );
                 index->readIndex( dropping ); 
                 index_blocks     += bytesToBlocks( index->totalBytes() );
@@ -554,8 +566,8 @@ string Container::getHostDirPath( const char* expanded_path,
     ostringstream oss;
     size_t host_value = (hashValue( hostname ) % PLFS_SUBDIRS) + 1;
     oss << expanded_path << "/" << HOSTDIRPREFIX << host_value; 
-    fprintf( stderr, "%s : %s %s -> %s\n", 
-            __FUNCTION__, hostname, expanded_path, oss.str().c_str() );
+    //fprintf( stderr, "%s : %s %s -> %s\n", 
+    //        __FUNCTION__, hostname, expanded_path, oss.str().c_str() );
     return oss.str();
 }
 

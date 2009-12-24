@@ -151,6 +151,8 @@ plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
     return ret;
 }
 
+// pass in a NULL Plfs_fd to have one created for you
+// pass in a valid one to add more writers to it
 int
 plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
 {
@@ -173,30 +175,46 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
         ret = plfs_trunc( NULL, path, 0 );
     }
 
+    // this next chunk of code works similarly for writes and reads
+    // for writes, create a writefile if needed, otherwise add a new writer
+    // for reads, create an index if needed, otherwise add a new reader
     if ( ret == 0 && (flags & O_WRONLY || flags & O_RDWR) ) {
-        wf = new WriteFile( path, Util::hostname(), mode ); 
-        ret = wf->openIndex( pid ); 
-        if ( ret == 0 ) {
-            ret = addWriter( wf, pid, path, mode );
+        if ( *pfd ) {
+            wf = (*pfd)->getWritefile();
+        } 
+        if ( wf == NULL ) {
+            wf = new WriteFile( path, Util::hostname(), mode ); 
+            ret = wf->openIndex( pid ); 
         }
         if ( ret == 0 ) {
-            ret = Container::addOpenrecord( path, Util::hostname() );
-            cerr << __FUNCTION__ << " added open record for " << path << endl;
+            ret = addWriter( wf, pid, path, mode );
+            fprintf( stderr, "%s added writer: %d\n", __FUNCTION__, ret );
+            if ( ret > 0 ) ret = 0; // add writer returns # of current writers
         }
         if ( ret != 0 && wf ) {
             delete wf;
         }
     } else if ( ret == 0 ) {
-        index = new Index( path );  
-        int ret = Container::populateIndex( path, index );
-        if ( ret != 0 ) {
-            index = NULL;
-            fprintf( stderr, "WTF.  getIndex for %s failed\n", path );
+        if ( *pfd ) {
+            index = (*pfd)->getIndex();
+        }
+        if ( index == NULL ) {
+            index = new Index( path );  
+            ret = Container::populateIndex( path, index );
+        }
+        if ( ret == 0 ) {
+            index->addReader();
+        }
+        if ( ret != 0 && index ) {
+            delete index;
         }
     }
 
-    if ( ret == 0 ) {
+    if ( ret == 0 && ! *pfd ) {
         *pfd = new Plfs_fd( wf, index, pid, mode, path ); 
+        // we create one open record for all the pids using a file
+        ret = Container::addOpenrecord( path, Util::hostname(), pid );
+        //cerr << __FUNCTION__ << " added open record for " << path << endl;
     }
     return ret;
 }
@@ -209,9 +227,6 @@ plfs_write( Plfs_fd *pfd, const char *buf, size_t size, off_t offset, pid_t pid)
 
     cerr << "Write to " << pfd->getPath() << " offset " << offset << endl;
     ret = written = wf->write( buf, size, offset, pid );
-    if ( ret > 0 ) {
-        pfd->addWrite( offset, size ); // save metadata
-    }
 
     return ( ret >= 0 ? written : ret );
 }
@@ -419,26 +434,61 @@ plfs_unlink( const char *path ) {
 }
 
 int
+plfs_query( Plfs_fd *pfd, size_t *writers, size_t *readers ) {
+    WriteFile *wf = pfd->getWritefile();
+    Index     *ix = pfd->getIndex();
+    *writers = 0;   *readers = 0;
+
+    if ( wf ) {
+        *writers = wf->numWriters();
+    }
+
+    if ( ix ) {
+        *readers = ix->numReaders();
+    }
+    return 0;
+}
+
+// returns number of open handles or -errno
+int
 plfs_close( Plfs_fd *pfd, pid_t pid ) {
     int ret = 0;
     WriteFile *wf    = pfd->getWritefile();
     Index     *index = pfd->getIndex();
+    size_t writers = 0, readers = 0;
+
+    // clean up after writes
     if ( wf ) {
-        // later we need to be smart in here and only close once
-        // the last pid is removed
-        off_t  last_offset;
-        size_t total_bytes;
-        pfd->getMeta( &last_offset, &total_bytes );
-        Container::addMeta( last_offset, total_bytes, pfd->getPath(), 
-                Util::hostname() );
-        // with multiple non-connected pids per host (as ADIO will require)
-        // this open record will need a pid too probably
-        Container::removeOpenrecord( pfd->getPath(), Util::hostname() );
-        //ret = wf->Close();    // not sure if I need this.  
-        delete( wf );
-    } else if ( index ) {
-        delete( index );
+        writers = wf->removeWriter( pid );
+        if ( writers == 0 ) {
+            off_t  last_offset;
+            size_t total_bytes;
+            wf->getMeta( &last_offset, &total_bytes );
+            Container::addMeta( last_offset, total_bytes, pfd->getPath(), 
+                    Util::hostname() );
+            // the pfd remembers the first pid added which happens to be the
+            // one we used to create the open-record
+            Container::removeOpenrecord( pfd->getPath(), Util::hostname(), 
+                    pfd->getPid() );
+        } else if ( writers < 0 ) {
+            ret = writers;
+            writers = wf->numWriters();
+        } else if ( writers > 0 ) {
+            ret = 0;
+        }
     }
-    delete( pfd );
-    return ret;
+
+    // clean up after reads
+    if ( index ) {
+        readers = index->removeReader();
+    }
+
+    // clean up anything that isn't needed anymore
+    if ( readers == 0 && index ) delete index;
+    if ( writers == 0 && wf    ) delete wf;
+    if ( readers == 0 && writers == 0 ) delete pfd;
+
+    fprintf( stderr, "%s %s: %d readers, %d writers remaining\n",
+            __FUNCTION__, pfd->getPath(), readers, writers );
+    return ( ret < 0 ? ret : ( readers + writers ) );
 }

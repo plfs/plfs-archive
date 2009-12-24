@@ -15,10 +15,17 @@ using namespace std;
 WriteFile::WriteFile( string path, string hostname, 
         mode_t mode ) : Metadata::Metadata() 
 {
-    this->physical_path   = path;
-    this->hostname        = hostname;
-    this->index           = NULL;
-    this->mode            = mode;
+    this->physical_path     = path;
+    this->hostname          = hostname;
+    this->index             = NULL;
+    this->mode              = mode;
+    this->index_mux         = NULL;
+    // if synchronous index is false, writes will work
+    // but O_RDWR reads won't work, and not sure about
+    // stat'ing an open file
+    this->synchronous_index = true;
+    this->writers           = 0;
+    pthread_mutex_init( &data_mux, NULL );
 }
 
 WriteFile::~WriteFile() {
@@ -31,65 +38,123 @@ WriteFile::~WriteFile() {
 }
 
 int WriteFile::sync( pid_t pid ) {
-    int fd, ret; 
-    ret = fd = getFd( pid );
-    if ( fd >= 0 ) {
-        ret = Util::Fsync( fd );
+    int ret; 
+    OpenFd *ofd = getFd( pid );
+    if ( ofd == NULL ) {
+        ret = -ENOENT;
+    } else {
+        ret = Util::Fsync( ofd->fd );
+        if ( ret == 0 ) index->flush();
         if ( ret == 0 ) ret = Util::Fsync( index->getFd() );
         if ( ret != 0 ) ret = -errno;
     }
     return ret;
 }
 
+
+// returns -errno or number of writers
 int WriteFile::addWriter( pid_t pid ) {
     int ret = 0;
-    int fd = openDataFile( physical_path, hostname, pid, mode ); 
-    if ( fd < 0 ) {
-        ret = -errno;
+
+    Util::MutexLock(   &data_mux, __FUNCTION__ );
+    struct OpenFd *ofd = getFd( pid );
+    if ( ofd ) {
+        ofd->writers++;
     } else {
-        cerr << __FILE__ << " mapped pid " << pid << " to fd " << fd << endl;
-        fds[pid] = fd;
+        int fd = openDataFile( physical_path, hostname, pid, mode ); 
+        if ( fd >= 0 ) {
+            ofd = new struct OpenFd;
+            ofd->writers = 1;
+            ofd->fd = fd;
+            fds[pid] = ofd;
+        } else {
+            ret = -errno;
+        }
     }
+    if ( ret == 0 ) ret = ++writers;
+    if ( writers > 1 ) {
+        index_mux = new pthread_mutex_t;
+        pthread_mutex_init( index_mux, NULL );
+    }
+
+    fprintf( stderr, "%s on %s now has %d writers\n", 
+            __FUNCTION__, physical_path.c_str(), writers );
+    Util::MutexUnlock( &data_mux, __FUNCTION__ );
     return ret;
 }
 
-int WriteFile::getFd( pid_t pid ) {
-    map<pid_t,int>::iterator itr;
+size_t WriteFile::numWriters( ) {
+    return writers; 
+}
+
+struct OpenFd * WriteFile::getFd( pid_t pid ) {
+    map<pid_t,OpenFd*>::iterator itr;
+    struct OpenFd *ofd = NULL;
     if ( (itr = fds.find( pid )) != fds.end() ) {
-        cerr << __FILE__ << " found fd " << itr->second << " from pid " 
-             << pid << endl;
-        return itr->second;
+        ostringstream oss;
+        oss << __FILE__ << ":" << __FUNCTION__ << " found fd " 
+            << itr->second->fd << " with writers " 
+            << itr->second->writers
+            << " from pid " << pid << endl;
+        cerr << oss.str();
+        ofd = itr->second;
     } else {
         if ( fds.size() > 0 ) {
-            cerr << __FILE__ << " WARNING pid " << pid << " is not mapped." 
-                 << " Borrowing fd " << fds.begin()->second << " from pid " 
+            ostringstream oss;
+            // ideally instead of just taking a random pid, we'd rather
+            // try to find the parent pid and look for it
+            // we need this code because we've seen in FUSE that an open
+            // is done by a parent but then a write comes through as the child
+            oss  << __FILE__ << " WARNING pid " << pid << " is not mapped." 
+                 << " Borrowing fd " << fds.begin()->second->fd << " from pid " 
                  << fds.begin()->first << endl;
-            return fds.begin()->second;
+            cerr << oss.str();
+            ofd = fds.begin()->second;
         } else {
-            cerr << __FILE__ << " ERROR no fd to give to pid " << pid << endl;
-            return -ENOENT;
+            cerr << __FILE__ << " no fd to give to pid " << pid << endl;
+            ofd = NULL;
         }
     }
+    return ofd;
 }
 
+int WriteFile::closeFd( int fd ) {
+    map<int,string>::iterator paths_itr;
+    paths_itr = paths.find( fd );
+    string path = ( paths_itr == paths.end() ? "ENOENT?" : paths_itr->second );
+    int ret = Util::Close( fd );
+    fprintf( stderr, "%s:%s closed fd %d for %s: %d %s\n",
+            __FILE__, __FUNCTION__, fd, path.c_str(), ret, 
+            ( ret != 0 ? strerror(errno) : "success" ) );
+    paths.erase ( fd );
+    return ret;
+}
+
+// returns -errno or number of writers
 int WriteFile::removeWriter( pid_t pid ) {
     int ret = 0;
-    int fd  = getFd( pid );
-    if ( fd >= 0 ) {
-        ret = Util::Close( fd );
-        if ( ret == 0 ) {
-            fds.erase( pid );
-        }
-    } else {
+    Util::MutexLock(   &data_mux , __FUNCTION__);
+    struct OpenFd *ofd = getFd( pid );
+    if ( ofd == NULL ) {
         ret = -ENOENT;
+    } else {
+        writers--;  ofd->writers--;
+        if ( ofd->writers <= 0 ) {
+            ret = closeFd( ofd->fd );
+            fds.erase( pid );
+            free( ofd );
+        }
     }
-    return ret;
+    fprintf( stderr, "%s on %s now has %d writers: %d\n", 
+            __FUNCTION__, physical_path.c_str(), writers, ret );
+    Util::MutexUnlock( &data_mux, __FUNCTION__ );
+    return ( ret == 0 ? writers : ret );
 }
 
 int WriteFile::extend( off_t offset ) {
     // make a fake write
     if ( fds.begin() == fds.end() ) return -ENOENT;
-    pid_t p = fds.begin()->second;
+    pid_t p = fds.begin()->first;
     double ts = Util::getTime();
     index->addWrite( offset, 0, p, ts, ts );
     addWrite( offset, 0 );   // maintain metadata
@@ -97,21 +162,33 @@ int WriteFile::extend( off_t offset ) {
 }
 
 // we are currently doing synchronous index writing.
-// this is were to change it to buffer if you'd like
+// this is where to change it to buffer if you'd like
 // returns bytes written or -errno
 ssize_t WriteFile::write(const char *buf, size_t size, off_t offset, pid_t pid){
     int ret; ssize_t written;
-    int fd  = getFd( pid );
-    double begin, end;
-    begin = Util::getTime();
-    ret = written = ( size ? Util::Write( fd, buf, size ) : 0 );
-    end = Util::getTime();
-    if ( ret >= 0 ) {
-        index->addWrite( offset, ret, pid, begin, end );
-        ret = index->flush();
-        addWrite( offset, size );   // maintain metadata
+    OpenFd *ofd = getFd( pid );
+    if ( ofd == NULL ) {
+        ret = -ENOENT;
+    } else {
+        int fd = ofd->fd;
+        // write the data file
+        double begin, end;
+        begin = Util::getTime();
+        ret = written = ( size ? Util::Write( fd, buf, size ) : 0 );
+        end = Util::getTime();
+
+        // then the index
+        if ( ret >= 0 ) {
+            if ( index_mux ) Util::MutexLock(   index_mux , __FUNCTION__);
+            index->addWrite( offset, ret, pid, begin, end );
+            if ( synchronous_index ) ret = index->flush();  
+            if ( ret >= 0 )          addWrite( offset, size ); // metadata
+            if ( index_mux ) Util::MutexUnlock( index_mux, __FUNCTION__ );
+        }
     }
-    return ( ret == 0 ? written : -errno );
+
+    // return bytes written or error
+    return ( ret >= 0 ? written : -errno );
 }
 
 // returns 0 or -errno
@@ -128,7 +205,8 @@ int WriteFile::openIndex( pid_t pid ) {
 
 int WriteFile::closeIndex( ) {
     int ret = 0;
-    ret = Util::Close( index->getFd() );
+    ret = index->flush();
+    ret = closeFd( index->getFd() );
     delete( index );
     index = NULL;
     return ret;
@@ -137,15 +215,19 @@ int WriteFile::closeIndex( ) {
 // returns 0 or -errno
 int WriteFile::Close() {
     int failures = 0;
-    map<pid_t,int>::iterator itr;
+
+    Util::MutexLock(   &data_mux , __FUNCTION__);
+    map<pid_t,OpenFd *>::iterator itr;
         // these should already be closed here
         // from each individual pid's close but just in case
     for( itr = fds.begin(); itr != fds.end(); itr++ ) {
-        if ( Util::Close( itr->second ) != 0 ) {
+        if ( closeFd( itr->second->fd ) != 0 ) {
             failures++;
         }
     }
     fds.clear();
+    Util::MutexUnlock( &data_mux, __FUNCTION__ );
+
     return ( failures ? -EIO : 0 );
 }
 
@@ -171,7 +253,7 @@ int WriteFile::openFile( string physicalpath, mode_t mode ) {
     fprintf( stderr, "open %s : %d %s\n", physicalpath.c_str(), 
             fd, ( fd < 0 ? strerror(errno) : "" ) );
     if ( fd >= 0 ) paths[fd] = physicalpath;    // remember so restore works
-    return fd;
+    return ( fd >= 0 ? fd : -errno );
 }
 
 // if fuse::f_truncate is used, we will have open handles that get messed up
@@ -179,7 +261,7 @@ int WriteFile::openFile( string physicalpath, mode_t mode ) {
 // return 0 or -errno
 int WriteFile::restoreFds( ) {
     map<int,string>::iterator paths_itr;
-    map<pid_t, int>::iterator pids_itr;
+    map<pid_t, OpenFd *>::iterator pids_itr;
     int ret = 0;
     
     // first reset the index fd
@@ -190,7 +272,7 @@ int WriteFile::restoreFds( ) {
         if ( paths_itr == paths.end() ) return -ENOENT;
         string indexpath = paths_itr->second;
 
-        if ( Util::Close( index->getFd() ) != 0 )    return -errno;
+        if ( closeFd( index->getFd() ) != 0 )    return -errno;
         if ( (ret = openFile( indexpath, mode )) < 0 ) return -errno;
         index->resetFd( ret );
     }
@@ -198,12 +280,14 @@ int WriteFile::restoreFds( ) {
     // then the data fds
     for( pids_itr = fds.begin(); pids_itr != fds.end(); pids_itr++ ) {
 
-        paths_itr = paths.find( pids_itr->second );
+        paths_itr = paths.find( pids_itr->second->fd );
         if ( paths_itr == paths.end() ) return -ENOENT;
-        string datapath = paths_itr->second;
 
-        if ( Util::Close( pids_itr->second ) != 0 ) return -errno;
-        if ( (ret = openFile( datapath, mode )) < 0 ) return -errno;
+        string datapath = paths_itr->second;
+        if ( closeFd( pids_itr->second->fd ) != 0 ) return -errno;
+
+        pids_itr->second->fd = openFile( datapath, mode );
+        if ( pids_itr->second->fd < 0 ) return -errno;
     }
 
     // normally we return ret at the bottom of our functions but this
