@@ -5,10 +5,9 @@ LIBNAME     = /Users/johnbent/Testing/mpich_plfs/mpich-1.2.7/lib/libmpich.a
 srcdir      = /Users/johnbent/Testing/mpich_plfs/mpich-1.2.7/romio/adio/ad_plfs
 CC_SHL      = 
 SHLIBNAME   = /Users/johnbent/Testing/mpich_plfs/mpich-1.2.7/lib/libmpich
-PLFSLIB     = ~/Testing/plfs/branches/library/src
 
-INCLUDE_DIR = -I. -I${srcdir}/../include -I../include -I../../include  -I${srcdir}/../../../../include -I../../../../include -I$(PLFSLIB)
-CFLAGS      =  -DMPID_NO_FORTRAN  -I/Users/johnbent/Testing/plfs/branches/library/src -DUSE_SOCKLEN_T -DHAVE_MPICHCONF_H -DMPID_NO_FORTRAN  -I/Users/johnbent/Testing/plfs/branches/library/src -DUSE_SOCKLEN_T -DHAVE_MPICHCONF_H -DHAVE_ROMIOCONF_H $(INCLUDE_DIR)
+INCLUDE_DIR = -I. -I${srcdir}/../include -I../include -I../../include  -I${srcdir}/../../../../include -I../../../../include 
+CFLAGS      =  -DMPID_NO_FORTRAN -I/Users/johnbent/Testing/plfs/branches/library/src -DUSE_SOCKLEN_T -DHAVE_MPICHCONF_H -DMPID_NO_FORTRAN -I/Users/johnbent/Testing/plfs/branches/library/src -DUSE_SOCKLEN_T -DHAVE_MPICHCONF_H -DHAVE_ROMIOCONF_H $(INCLUDE_DIR)
 
 top_builddir  = /Users/johnbent/Testing/mpich_plfs/mpich-1.2.7/romio
 LIBTOOL       = 
