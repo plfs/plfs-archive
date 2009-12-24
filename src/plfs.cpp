@@ -489,6 +489,6 @@ plfs_close( Plfs_fd *pfd, pid_t pid ) {
     if ( readers == 0 && writers == 0 ) delete pfd;
 
     fprintf( stderr, "%s %s: %d readers, %d writers remaining\n",
-            __FUNCTION__, pfd->getPath(), readers, writers );
+            __FUNCTION__, pfd->getPath(), (int)readers, (int)writers );
     return ( ret < 0 ? ret : ( readers + writers ) );
 }

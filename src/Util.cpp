@@ -244,15 +244,20 @@ int Util::Truncate( const char *path, off_t length ) {
 
 int Util::MutexLock(  pthread_mutex_t *mux , const char * where ) {
     ENTER_MUX;
-    fprintf( stderr, "Locking mutex %x from %s\n", mux, where );
+    ostringstream os, os2;
+    os << "Locking mutex " << mux << " from " << where << endl;
+    cerr << os.str();
     pthread_mutex_lock( mux );
-    fprintf( stderr, "Locked  mutex %x from %s\n", mux, where );
+    os2 << "Locked mutex " << mux << " from " << where << endl;
+    cerr << os2.str();
     EXIT_UTIL;
 }
 
 int Util::MutexUnlock( pthread_mutex_t *mux, const char *where ) {
     ENTER_MUX;
-    fprintf( stderr, "Unlocking mutex %x from %s\n", mux, where );
+    ostringstream os;
+    os << "Unlocking mutex " << mux << " from " << where << endl;
+    cerr << os.str();
     pthread_mutex_unlock( mux );
     EXIT_UTIL;
 }
