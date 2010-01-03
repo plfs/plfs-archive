@@ -110,11 +110,11 @@ Index::Index( string logical ) : Metadata::Metadata() {
 }
 
 Index::~Index() {
-    fprintf( stderr, "Removing index on %s\n", logical_path.c_str() );
+    Util::Debug( stderr, "Removing index on %s\n", logical_path.c_str() );
     for( unsigned i = 0; i < chunk_map.size(); i++ ) {
         if ( chunk_map[i].fd > 0 ) {
-            cerr << "Closing fd " << chunk_map[i].fd << " for " 
-                 << chunk_map[i].path << endl;
+            Util::Debug( stderr, "Closing fd %d for %s\n",
+                    (int)chunk_map[i].fd, chunk_map[i].path.c_str() );
             Util::Close( chunk_map[i].fd );
         }
     }
@@ -248,7 +248,7 @@ int Index::readIndex( string hostindex ) {
     HostEntry *h_index = (HostEntry*)maddr;
     size_t entries     = length / sizeof(HostEntry); // shouldn't be partials
                                                      // but any will be ignored
-    cerr << "# There are " << entries << " in " << hostindex.c_str() << endl;
+    Util::Debug( stderr, "There are %d in %s\n", entries, hostindex.c_str() );
     for( size_t i = 0; i < entries; i++ ) {
         ContainerEntry c_entry;
         HostEntry      h_entry = h_index[i];
@@ -281,7 +281,6 @@ int Index::readIndex( string hostindex ) {
         chunk_offsets[chunkpath] += h_entry.length;
         last_offset = max( (off_t)(c_entry.logical_offset+c_entry.length),
                             last_offset );
-        //cerr << "Last offset for " << logical_path << " is now " << last_offset << endl;
         total_bytes += c_entry.length;
         int ret = insertGlobal( &c_entry );
         if ( ret != 0 ) {
@@ -483,8 +482,8 @@ int Index::chunkFound( int *fd, off_t *chunk_off, size_t *chunk_len,
             return -errno;
         } 
     }
-    cerr << "Will read from chunk " << cf_ptr->path 
-         << " at off " << *chunk_off << endl;
+    Util::Debug( stderr, "Will read from chunk %s at off %ld\n",
+            cf_ptr->path.c_str(), (long)*chunk_off );
     *fd = cf_ptr->fd;
     return 0;
 }
@@ -497,7 +496,8 @@ int Index::chunkFound( int *fd, off_t *chunk_off, size_t *chunk_len,
 int Index::globalLookup( int *fd, off_t *chunk_off, size_t *chunk_len, 
         off_t logical ) 
 {
-    cerr << "Look up " << logical << " in " << logical_path << endl; 
+    Util::Debug( stderr, "Look up %ld in %s\n", 
+            (long)logical, logical_path.c_str() );
     ContainerEntry entry, previous;
     MAP_ITR itr;
     MAP_ITR prev = (MAP_ITR)NULL;
@@ -527,12 +527,16 @@ int Index::globalLookup( int *fd, off_t *chunk_off, size_t *chunk_len,
         prev--;
     }
     entry = itr->second;
-    cerr << "Considering whether chunk " << entry 
-         << " contains " << logical << endl;
+    ostringstream oss;
+    oss << "Considering whether chunk " << entry 
+         << " contains " << logical; 
+    Util::Debug( stderr, "%s\n", oss.str().c_str() );
 
         // case 1 or 2
     if ( entry.contains( logical ) ) {
-        cerr << "FOUND(1): " << entry << " contains " << logical << endl;
+        ostringstream oss;
+        oss << "FOUND(1): " << entry << " contains " << logical;
+        Util::Debug( stderr, "%s\n", oss.str().c_str() );
         return chunkFound( fd, chunk_off, chunk_len, 
                 logical - entry.logical_offset, &entry );
     }
@@ -541,7 +545,9 @@ int Index::globalLookup( int *fd, off_t *chunk_off, size_t *chunk_len,
     if ( prev != (MAP_ITR)NULL ) {
         previous = prev->second;
         if ( previous.contains( logical ) ) {
-            cerr << "FOUND(2): " << previous << " contains " << logical << endl;
+            ostringstream oss;
+            oss << "FOUND(2): " << previous << " contains " << logical << endl;
+            Util::Debug( stderr, "%s\n", oss.str().c_str() );
             return chunkFound( fd, chunk_off, chunk_len, 
                 logical - previous.logical_offset, &previous );
         }
@@ -584,8 +590,8 @@ void Index::addWrite( off_t offset, size_t length, pid_t pid,
         && hostIndex[quant-1].logical_offset + (off_t)hostIndex[quant-1].length 
             == offset )
     {
-        cerr << "Merged new write with last at "  
-             << hostIndex[quant-1].logical_offset << endl;
+        Util::Debug( stderr, "Merged new write with last at %ld\n",
+             (long)hostIndex[quant-1].logical_offset ); 
         hostIndex[quant-1].length += length;
     } else {
         HostEntry entry;

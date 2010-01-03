@@ -68,6 +68,7 @@ class Util {
         static ssize_t Write( int, const void *, size_t );
 
             // other misc stuff
+        static void Debug( FILE *, const char *format, ... );
         static bool exists( const char* );
         static bool isDirectory( const char* );
         static double getTime();

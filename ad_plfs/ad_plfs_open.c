@@ -45,10 +45,13 @@ void ADIOI_PLFS_Open(ADIO_File fd, int *error_code)
         MPI_Bcast( &err, 1, MPI_INT, 0, fd->comm );
 
         // then create the individual hostdirs with one proc per node
+        // this fd->hints->ranklist thing doesn't work
+        /*
         if ( err == 0 && rank != 0 && rank == fd->hints->ranklist[0] ) {
             err = plfs_create( fd->filename, perm, amode );
         }
         MPI_Bcast( &err, 1, MPI_INT, 0, fd->comm );
+        */
     }
 
     // handle any error from a create

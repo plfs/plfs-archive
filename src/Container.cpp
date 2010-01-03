@@ -34,7 +34,6 @@ size_t Container::hashValue( const char *str ) {
     for( i = 0; i < strlen( str ); i++ ) {
         sum += (size_t)str[i];
     }
-    //cerr << __FUNCTION__ << " : " << str << " => " << sum << endl;
     return sum;
     /*
     #include <openssl/md5.h>
@@ -88,18 +87,23 @@ int Container::Chown( const char *path, uid_t uid, gid_t gid ) {
     return Container::Modify( CHOWN, path, uid, gid, NULL, 0 );  
 }
 
-int Container::Modify( DirectoryOperation type, const char *path,
-        uid_t uid, gid_t gid,
+int Container::Modify( DirectoryOperation type, 
+        const char *path,
+        uid_t uid, 
+        gid_t gid,
         const struct utimbuf *utbuf,
         mode_t mode )
 {
-    cerr << __FUNCTION__ << " on " << path << endl;
+    Util::Debug( stderr, "%s on %s\n", __FUNCTION__, path );
     struct dirent *dent = NULL;
     DIR *dir            = NULL; 
     int ret             = 0;
 
     Util::Opendir( path, &dir );
-    if ( dir == NULL ) { cerr << "wtf?" << endl; return 0; }
+    if ( dir == NULL ) { 
+        Util::Debug( stderr, "%s wtf\n", __FUNCTION__ );
+        return 0; 
+    }
     while( ret == 0 && (dent = readdir( dir )) != NULL ) {
         mode_t use_mode = mode;
         if ( ! strncmp( dent->d_name, ".", 1 ) ) continue;  // skip . and .. 
@@ -116,7 +120,7 @@ int Container::Modify( DirectoryOperation type, const char *path,
         } else if ( type == CHMOD ) {
             ret = Util::Chmod( full_path.c_str(), use_mode );
         }
-        cerr << "Modified dropping " << full_path << ": " << ret << endl; 
+        Util::Debug( stderr, "Modified dropping %s\n", full_path.c_str() );
     }
     Util::Closedir( dir );
     return ret;
@@ -130,7 +134,8 @@ int Container::populateIndex( const char *path, Index *index ) {
     
     DIR *td = NULL, *hd = NULL; struct dirent *tent = NULL;
     while((ret = nextdropping(path,&hostindex,INDEXPREFIX, &td,&hd,&tent))== 1){
-        //fprintf(stderr, "# need to build index from %s\n", hostindex.c_str());
+        //Util::Debug(stderr, "# need to build index from %s\n", 
+        // hostindex.c_str());
         ret = index->readIndex( hostindex );
         if ( ret != 0 ) break;
     }
@@ -198,7 +203,7 @@ int Container::addMeta( off_t last_offset, size_t total_bytes,
     string metafile;
     struct timeval time;
     if ( gettimeofday( &time, NULL ) != 0 ) {
-        fprintf( stderr, "WTF: gettimeofday in %s failed: %s\n",
+        Util::Debug( stderr, "WTF: gettimeofday in %s failed: %s\n",
                 __FUNCTION__, strerror(errno ) );
         return -errno;
     }
@@ -208,7 +213,7 @@ int Container::addMeta( off_t last_offset, size_t total_bytes,
         << time.tv_sec << "." << time.tv_usec << "."
         << host;
     metafile = oss.str();
-    cerr << "Creating metafile " << metafile << endl;
+    Util::Debug( stderr, "Creating metafile %s\n", metafile.c_str() );
     return ignoreNoEnt(Util::Creat( metafile.c_str(), DEFAULT_MODE ));
 }
 
@@ -246,7 +251,8 @@ int Container::discoverOpenHosts( const char *path, set<string> *openhosts ) {
         if ( ! strncmp( dent->d_name, ".", 1 ) ) continue;  // skip . and ..
         host = dent->d_name;
         host.erase( host.rfind("."), host.size() );
-        cerr << "Host " <<dent->d_name <<" has open handle on " <<path <<endl;
+        Util::Debug( stderr, "Host %s has open handle on %s\n", 
+                dent->d_name, path );
         openhosts->insert( host );
     }
     Util::Closedir( openhostsdir );
@@ -256,7 +262,7 @@ int Container::discoverOpenHosts( const char *path, set<string> *openhosts ) {
 string Container::getOpenrecord( const char *path, const char *host, pid_t pid){
     ostringstream oss;
     oss << getOpenHostsDir( path ) << "/" << host << "." << pid;
-    fprintf( stderr, "created open record path %s\n", oss.str().c_str() );
+    Util::Debug( stderr, "created open record path %s\n", oss.str().c_str() );
     return oss.str();
 }
 
@@ -270,7 +276,7 @@ int Container::addOpenrecord( const char *path, const char *host, pid_t pid ) {
         ret = Util::Creat( openrecord.c_str(), DEFAULT_MODE );
     }
     if ( ret != 0 ) {
-        fprintf( stderr, "Couldn't make openrecord %s: %s\n", 
+        Util::Debug( stderr, "Couldn't make openrecord %s: %s\n", 
                 openrecord.c_str(), strerror( errno ) );
     }
     return ret;
@@ -286,7 +292,7 @@ int Container::removeOpenrecord( const char *path, const char *host, pid_t pid){
 mode_t Container::getmode( const char *path ) {
     struct stat stbuf;
     if ( Util::Lstat( path, &stbuf ) < 0 ) {
-        cerr << "Failed to getmode for " << path << endl;
+        Util::Debug( stderr, "Failed to getmode for %s\n", path );
         return DEFAULT_MODE;
     } else {
         return fileMode(stbuf.st_mode);
@@ -320,7 +326,7 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
         // but get the permissions and stuff from the access file
     string accessfile = getAccessFilePath( path );
     if ( Util::Lstat( accessfile.c_str(), stbuf ) < 0 ) {
-        fprintf( stderr, "lstat of %s failed: %s\n",
+        Util::Debug( stderr, "lstat of %s failed: %s\n",
                 accessfile.c_str(), strerror( errno ) );
     }
     stbuf->st_size    = 0;  
@@ -349,16 +355,18 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
             off_t last_offset;
             size_t total_bytes;
             struct timespec time;
+            ostringstream oss;
             string host = fetchMeta( dent->d_name, 
                     &last_offset, &total_bytes, &time );
             if ( openHosts.find(host) != openHosts.end() ) {
-                fprintf( stderr, "Can't use metafile %s because %s has an "
+                Util::Debug( stderr, "Can't use metafile %s because %s has an "
                         " open handle.\n", dent->d_name, host.c_str() );
                 continue;
             }
-            cerr << "Pulled meta " << last_offset << " " << total_bytes
+            oss  << "Pulled meta " << last_offset << " " << total_bytes
                  << ", " << time.tv_sec << "." << time.tv_nsec 
                  << " on host " << host << endl;
+            Util::Debug( stderr, "%s", oss.str().c_str() );
 
             // oh, let's get rewrite correct.  if someone writes
             // a file, and they close it and then later they
@@ -386,11 +394,10 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
         {
             string host = hostFromChunk( dropping, prefix );
             if ( validMeta.find(host) != validMeta.end() ) {
-                fprintf( stderr, "Used stashed stat info for %s\n", 
+                Util::Debug( stderr, "Used stashed stat info for %s\n", 
                         host.c_str() );
                 continue;
             } else {
-                //cerr << "Will aggregate stat info for " << host << endl;
                 chunks++;
             }
 
@@ -400,7 +407,7 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
             struct stat dropping_st;
             if (Util::Lstat(dropping.c_str(), &dropping_st) < 0 ) {
                 ret = -errno;
-                fprintf( stderr, "lstat of %s failed: %s\n",
+                Util::Debug( stderr, "lstat of %s failed: %s\n",
                     dropping.c_str(), strerror( errno ) );
                 continue;   // shouldn't this be break?
             }
@@ -409,11 +416,11 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
             stbuf->st_mtime = max( dropping_st.st_mtime, stbuf->st_mtime );
 
             if ( dropping.find(DATAPREFIX) != dropping.npos ) {
-                fprintf( stderr, "Getting stat info from data dropping\n" );
+                Util::Debug( stderr, "Getting stat info from data dropping\n" );
                 data_blocks += dropping_st.st_blocks;
                 data_size   += dropping_st.st_size;
             } else {
-                fprintf( stderr, "Getting stat info from index dropping\n" );
+                Util::Debug(stderr, "Getting stat info from index dropping\n");
                 Index *index = new Index( path );
                 index->readIndex( dropping ); 
                 index_blocks     += bytesToBlocks( index->totalBytes() );
@@ -425,9 +432,11 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
         stbuf->st_blocks += max( data_blocks, index_blocks );
         stbuf->st_size   = max( stbuf->st_size, max( data_size, index_size ) );
     }
-    cerr << "Examined " << chunks << " droppings:"
+    ostringstream oss;
+    oss  << "Examined " << chunks << " droppings:"
          << path << " total size " << stbuf->st_size <<  ", usage "
          << stbuf->st_blocks << " at " << stbuf->st_blksize << endl;
+    Util::Debug( stderr, "%s", oss.str().c_str() );
     return ret;
 }
 
@@ -467,17 +476,17 @@ int Container::makeTopLevel( const char *expanded_path,
     string tmpName( strPath + "." + hostname ); 
     if ( Util::Mkdir( tmpName.c_str(), dirMode(mode) ) < 0 ) {
         if ( errno != EEXIST && errno != EISDIR ) {
-            fprintf( stderr, "Mkdir %s to %s failed: %s\n",
+            Util::Debug( stderr, "Mkdir %s to %s failed: %s\n",
                 tmpName.c_str(), expanded_path, strerror(errno) );
             return -errno;
         }
     }
     if ( makeMeta( getAccessFilePath(tmpName), S_IFREG, mode ) < 0 ) {
-        fprintf( stderr, "create access file in %s failed: %s\n",
+        Util::Debug( stderr, "create access file in %s failed: %s\n",
                 tmpName.c_str(), strerror(errno) );
         int saveerrno = errno;
         if ( Util::Rmdir( tmpName.c_str() ) != 0 ) {
-            fprintf( stderr, "rmdir of %s failed : %s\n",
+            Util::Debug( stderr, "rmdir of %s failed : %s\n",
                 tmpName.c_str(), strerror(errno) );
         }
         return -saveerrno;
@@ -492,7 +501,7 @@ int Container::makeTopLevel( const char *expanded_path,
     if ( Util::Rename( tmpName.c_str(), expanded_path ) < 0 ) {
         int saveerrno = errno;
         if ( Util::Rmdir( tmpName.c_str() ) < 0 ) {
-            fprintf( stderr, "rmdir of %s failed : %s\n",
+            Util::Debug( stderr, "rmdir of %s failed : %s\n",
                     tmpName.c_str(), strerror(errno) );
         }
         // probably what happened is some other node outraced us
@@ -504,7 +513,7 @@ int Container::makeTopLevel( const char *expanded_path,
         //if ( ! isContainer( expanded_path ) ) 
         if ( saveerrno != EEXIST && saveerrno != ENOTEMPTY 
                 && saveerrno != EISDIR && saveerrno != ENOENT ) {
-            fprintf( stderr, "rename %s to %s failed: %s\n",
+            Util::Debug( stderr, "rename %s to %s failed: %s\n",
                     tmpName.c_str(), expanded_path, strerror(saveerrno) );
             return -saveerrno;
         }
@@ -566,7 +575,7 @@ string Container::getHostDirPath( const char* expanded_path,
     ostringstream oss;
     size_t host_value = (hashValue( hostname ) % PLFS_SUBDIRS) + 1;
     oss << expanded_path << "/" << HOSTDIRPREFIX << host_value; 
-    //fprintf( stderr, "%s : %s %s -> %s\n", 
+    //Util::Debug( stderr, "%s : %s %s -> %s\n", 
     //        __FUNCTION__, hostname, expanded_path, oss.str().c_str() );
     return oss.str();
 }
@@ -608,12 +617,12 @@ int Container::createHelper( const char *expanded_path, const char *hostname,
     double begin_time, end_time;
     int res = 0;
     if ( ! isContainer( expanded_path ) ) {
-        fprintf( stderr, "Making top level container %s\n", expanded_path );
+        Util::Debug( stderr, "Making top level container %s\n", expanded_path );
         begin_time = time(NULL);
         res = makeTopLevel( expanded_path, hostname, mode );
         end_time = time(NULL);
         if ( end_time - begin_time > 2 ) {
-            fprintf( stderr, "WTF: TopLevel create of %s took %.2f\n", 
+            Util::Debug( stderr, "WTF: TopLevel create of %s took %.2f\n", 
                     expanded_path, end_time - begin_time );
         }
         if ( res != 0 ) return res;
@@ -671,7 +680,7 @@ int Container::nextdropping( string physical_path,
 {
     ostringstream oss;
     oss << "looking for nextdropping in " << physical_path << endl;
-    cerr << oss.str();
+    Util::Debug( stderr, "%s\n", oss.str().c_str() );
         // open it on the initial 
     if ( *topdir == NULL ) {
         Util::Opendir( physical_path.c_str(), topdir );
@@ -703,10 +712,11 @@ int Container::nextdropping( string physical_path,
     if ( *hostdir == NULL ) {
         Util::Opendir( hostpath.c_str(), hostdir );
         if ( *hostdir == NULL ) {
-            fprintf(stderr,"opendir %s: %s\n",hostpath.c_str(),strerror(errno));
+            Util::Debug(stderr,"opendir %s: %s\n",
+                    hostpath.c_str(),strerror(errno));
             return -errno;
         } else {
-            fprintf( stderr, "%s opened dir %s\n", 
+            Util::Debug( stderr, "%s opened dir %s\n", 
                     __FUNCTION__, hostpath.c_str() );
         }
     }
@@ -762,7 +772,8 @@ int Container::Truncate( const char *path, off_t offset ) {
             if ( strcmp( ".", tent->d_name ) && strcmp( "..", tent->d_name ) ) {
                 string metadropping = getMetaDirPath( path );
                 metadropping += "/"; metadropping += tent->d_name;
-                cerr << "Need to remove meta dropping: " << metadropping << endl;
+                Util::Debug( stderr, "Need to remove meta dropping %s\n",
+                        metadropping.c_str() );
                 Util::Unlink( metadropping.c_str() ); 
             }
         }

@@ -1,7 +1,9 @@
 #ifndef __PLFS_H_
 #define __PLFS_H_
 
+#include <sys/stat.h>
 #include <sys/types.h>
+#include <utime.h>
 
 #ifdef __cplusplus 
     extern "C" 
@@ -13,7 +15,8 @@
 
 /*
 
-   All PLFS functions return 0 or -errno
+   All PLFS functions return 0 or -errno, except write and read which return
+   the number of bytes or -errno
 
    This code does allow for multiple threads to share a single Plfs_fd ptr
    To add more threads to a Plfs_fd ptr, just call plfs_open multiple times.

@@ -29,7 +29,7 @@ WriteFile::WriteFile( string path, string hostname,
 }
 
 WriteFile::~WriteFile() {
-    fprintf( stderr, "Delete self %s\n", physical_path.c_str() );
+    Util::Debug( stderr, "Delete self %s\n", physical_path.c_str() );
     Close();
     if ( index ) {
         closeIndex();
@@ -77,7 +77,7 @@ int WriteFile::addWriter( pid_t pid ) {
         pthread_mutex_init( index_mux, NULL );
     }
 
-    fprintf( stderr, "%s on %s now has %d writers\n", 
+    Util::Debug( stderr, "%s on %s now has %d writers\n", 
             __FUNCTION__, physical_path.c_str(), writers );
     Util::MutexUnlock( &data_mux, __FUNCTION__ );
     return ret;
@@ -96,7 +96,7 @@ struct OpenFd * WriteFile::getFd( pid_t pid ) {
             << itr->second->fd << " with writers " 
             << itr->second->writers
             << " from pid " << pid << endl;
-        cerr << oss.str();
+        Util::Debug( stderr, "%s", oss.str().c_str() );
         ofd = itr->second;
     } else {
         if ( fds.size() > 0 ) {
@@ -105,13 +105,13 @@ struct OpenFd * WriteFile::getFd( pid_t pid ) {
             // try to find the parent pid and look for it
             // we need this code because we've seen in FUSE that an open
             // is done by a parent but then a write comes through as the child
-            oss  << __FILE__ << " WARNING pid " << pid << " is not mapped." 
-                 << " Borrowing fd " << fds.begin()->second->fd << " from pid " 
-                 << fds.begin()->first << endl;
-            cerr << oss.str();
+            Util::Debug( stderr, "%s WARNING pid %d is not mapped. "
+                    "Borrowing fd %d from pid %d\n",
+                    __FILE__, (int)pid, (int)fds.begin()->second->fd,
+                    (int)fds.begin()->first );
             ofd = fds.begin()->second;
         } else {
-            cerr << __FILE__ << " no fd to give to pid " << pid << endl;
+            Util::Debug(stderr, "%s no fd to give to %d\n", __FILE__, (int)pid);
             ofd = NULL;
         }
     }
@@ -123,7 +123,7 @@ int WriteFile::closeFd( int fd ) {
     paths_itr = paths.find( fd );
     string path = ( paths_itr == paths.end() ? "ENOENT?" : paths_itr->second );
     int ret = Util::Close( fd );
-    fprintf( stderr, "%s:%s closed fd %d for %s: %d %s\n",
+    Util::Debug( stderr, "%s:%s closed fd %d for %s: %d %s\n",
             __FILE__, __FUNCTION__, fd, path.c_str(), ret, 
             ( ret != 0 ? strerror(errno) : "success" ) );
     paths.erase ( fd );
@@ -145,7 +145,7 @@ int WriteFile::removeWriter( pid_t pid ) {
             free( ofd );
         }
     }
-    fprintf( stderr, "%s on %s now has %d writers: %d\n", 
+    Util::Debug( stderr, "%s on %s now has %d writers: %d\n", 
             __FUNCTION__, physical_path.c_str(), writers, ret );
     Util::MutexUnlock( &data_mux, __FUNCTION__ );
     return ( ret == 0 ? writers : ret );
@@ -250,7 +250,7 @@ int WriteFile::openDataFile(string path, string host, pid_t p, mode_t m){
 int WriteFile::openFile( string physicalpath, mode_t mode ) {
     int flags = O_WRONLY | O_APPEND | O_CREAT;
     int fd = Util::Open( physicalpath.c_str(), flags, mode );
-    fprintf( stderr, "open %s : %d %s\n", physicalpath.c_str(), 
+    Util::Debug( stderr, "open %s : %d %s\n", physicalpath.c_str(), 
             fd, ( fd < 0 ? strerror(errno) : "" ) );
     if ( fd >= 0 ) paths[fd] = physicalpath;    // remember so restore works
     return ( fd >= 0 ? fd : -errno );

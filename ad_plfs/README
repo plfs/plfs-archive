@@ -10,7 +10,7 @@ A couple of possible optimizations.
    rereading them is not a big deal and the space overhead of redundant
    copies is also probably not a big deal.
 
-4) On the open, we could have just one rank create the openhost file.
+4) On the open, we are already just one rank per node create the openhost file.
 
 5) On the close, we could have just one rank create the metadata file
    by doing reduces on everyone's total data and last offset.

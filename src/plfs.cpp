@@ -103,6 +103,7 @@ read_helper( Index *index, char *buf, size_t size, off_t offset ) {
     return ret;
 }
 
+// returns -errno or bytes read
 ssize_t 
 plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
 	int ret = 0;
@@ -153,6 +154,9 @@ plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
 
 // pass in a NULL Plfs_fd to have one created for you
 // pass in a valid one to add more writers to it
+// one problem is that we fail if we're asked to overwrite a normal file
+// another problem is that if concurrent procs open a file w/ O_TRUNC flag,
+// then some proc's data and index droppings might be removed by someone else
 int
 plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
 {
@@ -177,19 +181,23 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
 
     // this next chunk of code works similarly for writes and reads
     // for writes, create a writefile if needed, otherwise add a new writer
+    // create the write index file after the write data file so that the
+    // hostdir is created
     // for reads, create an index if needed, otherwise add a new reader
     if ( ret == 0 && (flags & O_WRONLY || flags & O_RDWR) ) {
+        bool newly_created = false;
         if ( *pfd ) {
             wf = (*pfd)->getWritefile();
         } 
         if ( wf == NULL ) {
             wf = new WriteFile( path, Util::hostname(), mode ); 
-            ret = wf->openIndex( pid ); 
+            newly_created = true;
         }
         if ( ret == 0 ) {
             ret = addWriter( wf, pid, path, mode );
-            fprintf( stderr, "%s added writer: %d\n", __FUNCTION__, ret );
+            Util::Debug( stderr, "%s added writer: %d\n", __FUNCTION__, ret );
             if ( ret > 0 ) ret = 0; // add writer returns # of current writers
+            if ( ret == 0 && newly_created ) ret = wf->openIndex( pid ); 
         }
         if ( ret != 0 && wf ) {
             delete wf;
@@ -225,7 +233,8 @@ plfs_write( Plfs_fd *pfd, const char *buf, size_t size, off_t offset, pid_t pid)
     int ret = 0; ssize_t written;
     WriteFile *wf = pfd->getWritefile();
 
-    cerr << "Write to " << pfd->getPath() << " offset " << offset << endl;
+    Util::Debug( stderr, "Write to %s, offset %ld\n", 
+            pfd->getPath(), (long)offset );
     ret = written = wf->write( buf, size, offset, pid );
 
     return ( ret >= 0 ? written : ret );
@@ -256,14 +265,14 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
     DIR *dir;
     struct dirent *ent;
     int ret = 0;
-    fprintf( stderr, "%s on %s\n", __FUNCTION__, path );
+    Util::Debug( stderr, "%s on %s\n", __FUNCTION__, path );
 
     dir = opendir( path );
     if ( dir == NULL ) return -errno;
 
     while( (ent = readdir( dir ) ) != NULL ) {
         if ( ! strcmp(ent->d_name, ".") || ! strcmp(ent->d_name, "..") ) {
-            //fprintf( stderr, "skipping %s\n", ent->d_name );
+            //Util::Debug( stderr, "skipping %s\n", ent->d_name );
             continue;
         }
         if ( ! strcmp(ent->d_name, ACCESSFILE ) && truncate_only ) {
@@ -281,7 +290,7 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
                 continue;
             }
         } else {
-            //fprintf( stderr, "unlinking %s\n", ent->d_name );
+            //Util::Debug( stderr, "unlinking %s\n", ent->d_name );
             if ( Util::Unlink( child.c_str() ) != 0 ) {
                 // ENOENT would be OK, could mean that an openhosts dropping
                 // was removed on another host or something
@@ -488,7 +497,7 @@ plfs_close( Plfs_fd *pfd, pid_t pid ) {
     if ( writers == 0 && wf    ) delete wf;
     if ( readers == 0 && writers == 0 ) delete pfd;
 
-    fprintf( stderr, "%s %s: %d readers, %d writers remaining\n",
+    Util::Debug( stderr, "%s %s: %d readers, %d writers remaining\n",
             __FUNCTION__, pfd->getPath(), (int)readers, (int)writers );
     return ( ret < 0 ? ret : ( readers + writers ) );
 }

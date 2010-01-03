@@ -19,10 +19,12 @@ class Metadata {
         total_bytes += bytes;
         last_offset = ( offset + (off_t)bytes > last_offset 
                             ? offset + bytes : last_offset );
+        /*
         ostringstream oss;
         oss << this << " set last_offset " << last_offset 
              << ", set total_bytes " << total_bytes << endl;
         cerr << oss.str();
+        */
         synced = false;
     }
 
@@ -45,9 +47,11 @@ class Metadata {
         *offset = last_offset;
         *bytes  = total_bytes;
         ostringstream oss;
+        /*
         oss << this << " last_offset " << last_offset 
              << ", total_bytes " << total_bytes << endl;
         cerr << oss.str();
+        */
     }
 
     int incrementOpens( int amount ) {
