@@ -43,13 +43,11 @@ size_t Container::hashValue( const char *str ) {
     */
 }
 
-// our simple rule currently is a directory with S_ISUID set
-// maybe change it to just be a directory with some magic string
-// in the name.  The problem with the S_ISUID bit is that it
-// makes makeTopLevel much more complicated
-// the problem with the magic string is it screws up readdir
-// it's really convenient that the name of the user's logical file
-// is the same name as the container
+// our simple rule currently is a directory with an access file in it 
+// and not the S_ISUID bit.  The problem with the S_ISUID bit was that it
+// makes makeTopLevel much more complicated and S_ISUID isn't available
+// everywhere.
+// when we make containers, we mkdir tmp, creat access, rename tmp 
 bool Container::isContainer( const char *physical_path ) {
     struct stat buf;
     string accessfile = getAccessFilePath(physical_path); 
