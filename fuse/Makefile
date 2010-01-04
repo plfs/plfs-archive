@@ -10,6 +10,9 @@ LOG      = /tmp/plfs.log
 # as opposed to 128K with direct_io 
 DIRECT_IO        = -o direct_io
 
+# ALLOW_OTHER is needed to run as root to allow other users to see the mount
+ALLOW_OTHER      = -o allow_other
+
 # single threaded makes debugging easier
 #SINGLE_THREADED  = -s
 
@@ -21,7 +24,7 @@ ifndef PLFS_BACK
     PLFS_BACK = /tmp/plfs.back
 endif
 
-PLFS_SHARED_ARGS = $(DIRECT_IO) $(SINGLE_THREADED) \
+PLFS_SHARED_ARGS = $(DIRECT_IO) $(SINGLE_THREADED) $(ALLOW_OTHER) \
 				   -plfs_backend=$(PLFS_BACK) -plfs_subdirs=32 \
 				   -plfs_synconclose=1
 
