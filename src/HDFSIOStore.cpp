@@ -242,3 +242,135 @@ int HDFSIOStore::Lstat(const char* path, struct stat* buf)
 
     return 0;
 }
+
+/**
+ * A bit easier than Creat since directory creation is pretty straightforward.
+ */
+int HDFSIOStore::Mkdir(const char* path, mode_t mode)
+{
+    if (hdfsCreateDirectory(fs, path)) {
+        return -1;
+    }
+
+    return hdfsChmod(fs, path, mode));
+}
+
+/**
+ * We just create a regular file with this, ignoring dev.
+ * So it's just a call to Creat.
+ */
+int HDFSIOStore::Mknod(const char* path, mode_t mode, dev_t dev) 
+{
+    return Creat(path, mode);
+}
+
+/**
+ * MMap is fairly awkward and will go away in favor of a call to replace it
+ * for the one task we use it for: Efficiently reading in the index file.
+ */
+void* HDFSIOStore::Mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset) 
+{
+    int bytes_read=0;
+    char* buffer;
+    hdfsFile openFile = GetFileFromMap(fd);
+    
+    if (!openFile) {
+        errno = EBADF;
+        return NULL;
+    }
+
+    // We ignore most of the values passed in.
+    // Allocate enough space for the lenth.
+    char* buffer = new char[len];
+
+    if (!buffer) {
+        return NULL;
+    }
+    // Try to read in the file.
+    while (bytes_read < len) {
+        int res = hdfsPread(fs, openFile, offset+bytes_read, 
+                            buffer+bytes_read, len-bytes_read);
+        if (res == -1) {
+            // An error in reading.
+            delete[] buffer;
+            return NULL;
+        }
+        bytes_read += res;
+    }
+
+    return buffer;
+}
+
+/**
+ * Open is only tricky because HDFS does not support certain modes of operation.
+ * For example, we read or write--not both.
+ * It really only supports O_RDONLY and O_WRONLY and O_WRONLY|APPEND.
+ */
+int HDFSIOStore::Open(const char* path, int flags)
+{
+    // TODO: More thought into what the flags should do.
+    int new_flags;
+    hdfsFile openFile;
+    int fd;
+
+    if (flags & O_RDONLY) {
+        new_flags = O_RDONLY;
+    } else if (flags & O_WRONLY) {
+        new_flags = O_WRONLY;
+    } else {
+        errno = ENOTSUP;
+        return -1;
+    }
+    openFile = hdfsOpenFile(fs, path, new_flags, 0, 0, 0);
+    
+    if (!openFile) {
+        return -1;
+    }
+
+    fd = AddFileToMap(openFile);
+    return fd;
+}
+
+/**
+ * As the previous open, but with a chmod as well.
+ */
+int HDFSIOStore::Open(const char* path, int flags, mode_t mode)
+{
+    int fd = Open(path, flags);
+    Chmod(path, mode);
+
+    return fd;
+}
+
+/**
+ * Opendir. A bit of abuse here... The DIR* functions don't 
+ * return a pointer to a directory stream. Instead they return a
+ * pointer to a struct openDir, which we use to satisfy future
+ * requests.
+ */
+DIR* HDFSIOStore::Opendir(const char *name) 
+{
+    openDir* dir = new openDir;
+    // I assume new returns NULL on error.
+    if (!dir)
+        return dir;
+    dir->curEntry = 0;
+    // We have space to remember the directory. Now slurp in all its files.
+    dir->infos = hdfsListDirectory(fs, name, &dir->numEntries);
+    if (!dir->infos) {
+        delete dir;
+        return NULL;
+    }
+
+    return (DIR*)dir;
+}
+
+ssize_t HDFSIOStore::Pread(int fd, void* buf, size_t count, off_t offset)
+{
+    hdfsFile openFile = GetFileFromMap(fd);
+    if (!openFile) {
+        errno = EBADF;
+        return -1;
+    }
+    return hdfsPread(fs, openFile, offset, buf, count);
+}
