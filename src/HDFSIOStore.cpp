@@ -158,5 +158,87 @@ int HDFSIOStore::Fsync(int fd)
  */
 int HDFSIOStore::Lseek(int fd, off_t offset, int whence)
 {
+    tOffset new_offset;
+    hdfsFile openFile = GetFileFromMap(fd);
+    if (!openFile) {
+        errno = EBADF;
+        return -1;
+    }
+    switch (whence)  {
+    case SEEK_SET:
+        new_offset = offset;
+        break;
+    case SEEK_CUR:
+        new_offset = hdfsTell(fs, openFile) + offset;
+        break;
+    case SEEK_END:
+        // I'm not entirely sure about this call. I'm assuming hdfsAvailable()
+        // returns the total number of bytes remaining in the file. If it's
+        // less, then this calculation will be wrong. We can definitely get
+        // the size through a hdfsGetPathInfo() call. However, this requires
+        // a path, not an hdfsFile. This would require storing paths in our
+        // map as well. At this point, I'm reluctant to do that.
+        new_offset = hdfsTell(fs, openFile) + hdfsAvailable(fs, openFile) + offset;
+        break;
+    }
 
+    if (hdfsSeek(fs, openFile, new_offset)) {
+        return -1;
+    } 
+    return new_offset;
+}
+
+/**
+ * Lstat. This one is mostly a matter of datat structure conversion to keep everything
+ * right.
+ */
+int HDFSIOStore::Lstat(const char* path, struct stat* buf)
+{
+    hdfsFileInfo* hdfsInfo = hdfsGetPathInfo(fs, path);
+    if (!hdfsInfo) {
+        errno = ENOENT;
+        return -1;
+    }
+    // Maybe the Hadoop users are the names of an actual user of the system!
+    // If so, use that. Otherwise, we'll use 0 for both, which should correspond
+    // to root.
+    struct group* group_s = getgrnam(hdfsInfo->mGroup);
+    struct passwd* passwd_s = getpwnam(hdfsInfo->mOwner); 
+
+    buf->st_dev = 0;
+    buf->st_ino = 0; // I believe this is ignored by FUSE.
+
+    // We need the mode to be both the permissions and some additional info,
+    // based on whether it's a directory of a file.
+    buf->mode = hdfsInfo->mPermissions;
+    if (hdfsInfo->mKind == kObjectKindFile) {
+        buf->mode |= S_IFREG;
+    } else {
+        buf->mode |= S_IFDIR;
+    }
+        
+    if (passwd_s)
+        buf->st_uid = passwd_s->pw_uid;
+    else
+        buf->st_uid = 0;
+    if (group_s)
+        buf->st_gid = group_s->gr_gid;
+    else
+        buf->st_gid = 0;
+    buf->st_rdev = 0; // I'm not sure about this one!
+    buf->st_size = hdfsInfo->mSize;
+    buf->st_blksize = hdfsInfo->mBlockSize;
+    // This is supposed to indicate the actual number of sectors allocated
+    // to the file, and is used to calculate storage capacity consumed per
+    // File. Files might have holes, but on HDFS we lie about this anyway.
+    // So I'm just returning the size/512. Note that if this is supposed to
+    // represent storage consumed, it's actually 3 times this due to replication.
+    buf->st_blocks = hdfsInfo->mSize/512; 
+    buf->st_atime = hdfs->mLastAccess;
+    buf->st_mtime = hdfs->mLastMod;
+    // This one's a total lie. There's no tracking of metadata change time
+    // in HDFS, so we'll just use the modification time again.
+    buf->st_ctime = hdfs->mLastMod;
+
+    return 0;
 }
