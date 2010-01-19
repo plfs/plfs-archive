@@ -265,6 +265,7 @@ void* HDFSIOStore::Mmap(void *addr, size_t len, int prot, int flags, int fd, off
  * Open is only tricky because HDFS does not support certain modes of operation.
  * For example, we read or write--not both.
  * It really only supports O_RDONLY and O_WRONLY and O_WRONLY|APPEND.
+ * (And the last one not really)
  */
 int HDFSIOStore::Open(const char* path, int flags)
 {
@@ -380,6 +381,7 @@ ssize_t HDFSIOStore::Read(int fd, void *buf, size_t count)
  * Readdir. Remember that the dirp is actually struct openDir*. We cast it
  * and then fill in the struct dirent curEntry embedded in it, using the
  * hdfsFileInfo* infos array and the curEntryNum count.  
+ * Then we return the address of that embedded struct dirent.
  * One annoying feature: The mName field of file info is the FULL PATH. So
  * we have to strip it.
  */
