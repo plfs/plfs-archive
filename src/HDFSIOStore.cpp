@@ -284,6 +284,7 @@ int HDFSIOStore::Open(const char* path, int flags)
     openFile = hdfsOpenFile(fs, path, new_flags, 0, 0, 0);
     
     if (!openFile) {
+        std::cout << "Disaster trying to open " << path << "\n";
         return -1;
     }
 

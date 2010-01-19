@@ -187,6 +187,7 @@ void *Index::mapIndex( string hostindex, int *fd, off_t *length ) {
     void *addr;
     *fd = Util::Open( hostindex.c_str(), O_RDONLY );
     if ( *fd < 0 ) {
+        Util::Debug( stderr, "Couldn't open index %s\n", hostindex.c_str());
         return NULL;
     }
     // lseek doesn't always see latest data if panfs hasn't flushed
@@ -194,6 +195,7 @@ void *Index::mapIndex( string hostindex, int *fd, off_t *length ) {
     // created.  
     Util::Lseek( *fd, 0, SEEK_END, length );
     if ( *length <= 0 ) {
+        Util::Debug( stderr, "Problem seeking to end of index file %s\n", hostindex.c_str());
         return NULL;
     }
 
@@ -212,6 +214,7 @@ int Index::readIndex( string hostindex ) {
 
     maddr = mapIndex( hostindex, &fd, &length );
     if( ! maddr ) {
+        Util::Debug( stderr, "Couldn't map index %s\n", hostindex.c_str());
         return cleanupReadIndex( fd, maddr, length, 0, "mapIndex",
             hostindex.c_str() );
     }

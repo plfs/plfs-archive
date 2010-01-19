@@ -2,7 +2,8 @@ LIBRARY    = libplfs.a
 SRCS       = $(wildcard *.cpp) 
 HDRS       = $(wildcard *.h)
 OBJS       = $(addsuffix .o, $(basename $(SRCS) ) ) 
-
+HADOOP_CXXFLAGS	= -I/home/milop/hadoop/hadoop-0.20.1/src/c++/libhdfs/ -I/usr/lib/jvm/java-6-sun/include -I/usr/lib/jvm/java-6-sun/include/linux
+HADOOP_LDFLAGS = -L/home/milop/hadoop/hadoop-0.20.1/src/c++/install/lib -L/usr/lib/jvm/java-6-sun-1.6.0.15/jre/lib/amd64/server/ -lhdfs -ljvm
 # put -DNDEBUG in to turn off assertions, this can make a big difference
 # as many of the asserts are doing stats
 # put -DNUTIL in to turn off timing in Util
@@ -12,8 +13,8 @@ OBJS       = $(addsuffix .o, $(basename $(SRCS) ) )
 # add -DVERBOSE to get verbose output
 DEBUG   =  -DPLFS_TIMES -DNUTIL -DINDEX_CONTAINS_TIMESTAMPS \
 	      -DCOUNT_SKIPS -DVERBOSE
-CXXFLAGS  = -g -Wall $(DEBUG) -D_FILE_OFFSET_BITS=64 -I/home/milop/hadoop/hadoop-0.20.1/src/c++/libhdfs/ -I/usr/lib/jvm/java-6-sun/include -I/usr/lib/jvm/java-6-sun/include/linux
-LDFLAGS = -lpthread -L/home/milop/hadoop/hadoop-0.20.1/src/c++/install/lib -L/usr/lib/jvm/java-6-sun-1.6.0.15/jre/lib/amd64/server/ -lhdfs -ljvm
+CXXFLAGS  = -g -Wall $(DEBUG) -D_FILE_OFFSET_BITS=64 $(HADOOP_CXXFLAGS)
+LDFLAGS = -lpthread $(HADOOP_LDFLAGS)
 
 
 
