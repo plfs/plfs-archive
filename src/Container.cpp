@@ -663,6 +663,7 @@ struct dirent *Container::getnextent( DIR *dir, const char *prefix ) {
     struct dirent *next = NULL;
     do {
         next = Util::ioStore->Readdir( dir );
+        if (next) Util::Debug( stderr, "Processing entry %s\n", next->d_name);
     } while( next && prefix && 
             strncmp( next->d_name, prefix, strlen(prefix) ) != 0 );
     return next;
@@ -683,7 +684,10 @@ int Container::nextdropping( string physical_path,
         // open it on the initial 
     if ( *topdir == NULL ) {
         Util::Opendir( physical_path.c_str(), topdir );
-        if ( *topdir == NULL ) return -errno;
+        if ( *topdir == NULL ) {
+            Util::Debug( stderr, "Error opening topdir for %s\n", physical_path.c_str());
+            return -errno;
+        }
     }
 
         // make sure topent is valid
@@ -691,6 +695,7 @@ int Container::nextdropping( string physical_path,
             // here is where nextdropping is specific to HOSTDIR
         *topent = getnextent( *topdir, HOSTDIRPREFIX );
         if ( *topent == NULL ) {
+            Util::Debug( stderr, "Done with entries\n");
             // all done
             Util::Closedir( *topdir );
             *topdir = NULL;

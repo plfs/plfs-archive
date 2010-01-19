@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <iostream>
 #include <sys/types.h>
 #include <grp.h>
 #include <pwd.h>
@@ -346,6 +347,7 @@ ssize_t HDFSIOStore::Pread(int fd, void* buf, size_t count, off_t offset)
         errno = EBADF;
         return -1;
     }
+    std::cout << "Reading " << count << "bytes\n";
     return hdfsPread(fs, openFile, offset, buf, count);
 }
 
@@ -369,6 +371,7 @@ ssize_t HDFSIOStore::Read(int fd, void *buf, size_t count)
         errno = EBADF;
         return -1;
     }
+    std::cout << "Reading " << count << "bytes\n";
     return hdfsRead(fs, openFile, buf, count);
 }
 
@@ -376,9 +379,12 @@ ssize_t HDFSIOStore::Read(int fd, void *buf, size_t count)
  * Readdir. Remember that the dirp is actually struct openDir*. We cast it
  * and then fill in the struct dirent curEntry embedded in it, using the
  * hdfsFileInfo* infos array and the curEntryNum count.  
+ * One annoying feature: The mName field of file info is the FULL PATH. So
+ * we have to strip it.
  */
 struct dirent *HDFSIOStore::Readdir(DIR *dirp)
 {
+    char* lastComponent; // For locating the last part of the string name.
     struct openDir* dir = (struct openDir*)dirp;
     if (dir->curEntryNum == dir->numEntries) {
         // We've read all the entries! Return NULL.
@@ -393,7 +399,16 @@ struct dirent *HDFSIOStore::Readdir(DIR *dirp)
     dir->curEntry.d_reclen = sizeof(struct dirent);
     dir->curEntry.d_type = (dir->infos[dir->curEntryNum].mKind == kObjectKindFile
                             ? DT_REG : DT_DIR);
-    strncpy(dir->curEntry.d_name, dir->infos[dir->curEntryNum].mName, NAME_MAX);
+
+    lastComponent = strrchr(dir->infos[dir->curEntryNum].mName, '/');
+    if (!lastComponent) { 
+        // No slash in the path. Just use the whole thing.
+        lastComponent = dir->infos[dir->curEntryNum].mName;
+    } else {
+        // We want everything AFTER the slash.
+        lastComponent++;
+    }
+    strncpy(dir->curEntry.d_name, lastComponent, NAME_MAX);
     // NAME_MAX does not include the terminating null and if we copy
     // the max number of characters, strncpy won't place it, so set it manually.
     dir->curEntry.d_name[NAME_MAX] = '\0';
@@ -403,11 +418,11 @@ struct dirent *HDFSIOStore::Readdir(DIR *dirp)
 }
 
 /**
- * Rename. A wrapper around the hdfs move call, really.
+ * Rename. A wrapper around the hdfs rename call, really.
  */
 int HDFSIOStore::Rename(const char *oldpath, const char *newpath)
 {
-    return hdfsMove(fs, oldpath, fs, newpath);
+    return hdfsRename(fs, oldpath, newpath);
 }
 
 /**
@@ -468,7 +483,7 @@ int HDFSIOStore::Stat(const char* path, struct stat* buf)
     // This one's a total lie. There's no tracking of metadata change time
     // in HDFS, so we'll just use the modification time again.
     buf->st_ctime = hdfsInfo->mLastMod;
-
+    hdfsFreeFileInfo(hdfsInfo, 1);
     return 0;
 }
 

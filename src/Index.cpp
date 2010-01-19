@@ -512,6 +512,8 @@ int Index::globalLookup( int *fd, off_t *chunk_off, size_t *chunk_len,
 
         // zero length file, nothing to see here, move along
     if ( global_index.size() == 0 ) {
+        Util::Debug( stderr, "Zero sized index in %s\n",
+                     logical_path.c_str());
         *fd = -1;
         *chunk_len = 0;
         return 0;

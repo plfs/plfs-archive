@@ -26,6 +26,7 @@
 */
 
 void plfs_posix_init();
+void plfs_hdfs_init(const char* host, int port);
 void plfs_store_delete();
 int plfs_access( const char *path, int mask );
 
