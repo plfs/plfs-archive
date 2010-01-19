@@ -1,17 +1,19 @@
-#ifndef _POSIX_IOSTORE_H_
-#define _POSIX_IOSTORE_H_
+#ifndef _HDFSIOSTORE_H_
+#define _HDFSIOSTORE_H_
 
+#include <map>
 #include <fcntl.h>
 #include <stdio.h>
 #include <sys/mman.h>
+#include <dirent.h>
 #include <pthread.h>
 #include "IOStore.h"
 #include "hdfs.h"
 
-/* An implementation of the IOStore for standard filesystems */
-/* Since in POSIX, all these calls are basically pass straight through, the functions */
-/* are done here as inline. */
-class PosixIOStore: public IOStore {
+using namespace std;
+
+/* An implementation of the IOStore for HDFS */
+class HDFSIOStore: public IOStore {
 public:
     int Access(const char *path, int amode);    
     int Chmod(const char* path, mode_t mode);
@@ -53,15 +55,16 @@ protected:
     struct openDir {
         hdfsFileInfo* infos;
         int numEntries;
-        int curEntry;
+        int curEntryNum;
+        struct dirent curEntry; // For returning readdir results.
     };
     
     // To assign unique fds.
     pthread_mutex_t fd_count_mutex;
     int fd_count;
     int AddFileToMap(hdfsFile file);
-    hdfsFile HDFSIOStore::GetFileFromMap(int fd);
-    void HDFSIOStore::RemoveFileFromMap(int fd);
+    hdfsFile GetFileFromMap(int fd);
+    void RemoveFileFromMap(int fd);
 private:
     // Declared but not defined, so illegal to call. We only want proper invocations of
     // our other constructor above.

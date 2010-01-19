@@ -9,12 +9,13 @@
 #include "OpenFile.h"
 #include "hdfs.h"
 #include "PosixIOStore.h"
+#include "HDFSIOStore.h"
 
 void plfs_posix_init() {
     Util::ioStore = new PosixIOStore;
 }
 
-void plufs_hdfs_init(const char* host, int port) {
+void plfs_hdfs_init(const char* host, int port) {
     Util::ioStore = new HDFSIOStore(host, port);
 }
 

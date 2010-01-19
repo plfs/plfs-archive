@@ -2,6 +2,7 @@
 #include <sys/types.h>
 #include <grp.h>
 #include <pwd.h>
+#include <string.h>
 #include "HDFSIOStore.h"
 
 
@@ -17,7 +18,7 @@ HDFSIOStore::HDFSIOStore(const char* host, int port)
     fs = hdfsConnect(hostName, portNum);
 
     // Initialize our mutex for protecting the fd count.
-    pthread_mutex_init(&fd_count_mutex);
+    pthread_mutex_init(&fd_count_mutex, NULL);
 }
 
 /**
@@ -97,7 +98,7 @@ int HDFSIOStore::Chown(const char *path, uid_t owner, gid_t group)
  * Close. Simple: Look up the hdfsFile in the map, close it if it exists,
  * and remove it from the map.
  */
-int HDFSIOSTORE::Close(int fd) 
+int HDFSIOStore::Close(int fd) 
 {
     int ret;
     hdfsFile openFile;
@@ -121,6 +122,7 @@ int HDFSIOStore::Closedir(DIR* dirp)
     struct openDir *theDir = (struct openDir*)dirp;
     hdfsFreeFileInfo(theDir->infos, theDir->numEntries);
     delete theDir;
+    return 0;
 }
 
 /**
@@ -155,8 +157,12 @@ int HDFSIOStore::Fsync(int fd)
 /**
  * Lseek. Ugh. The tricky part here is the whence parameter.
  * HDFS provides with a seek that only works for an absolute byte offset.
+ * The TRICKIER part is this will fail on files open for writes.
+ * There's no way around this limitation in HDFS, but fortunately in 
+ * PLFS we never update inplace, but always write to the end. So hopefully
+ * it won't arise.
  */
-int HDFSIOStore::Lseek(int fd, off_t offset, int whence)
+off_t HDFSIOStore::Lseek(int fd, off_t offset, int whence)
 {
     tOffset new_offset;
     hdfsFile openFile = GetFileFromMap(fd);
@@ -189,58 +195,11 @@ int HDFSIOStore::Lseek(int fd, off_t offset, int whence)
 }
 
 /**
- * Lstat. This one is mostly a matter of datat structure conversion to keep everything
- * right.
+ * Lstat. With no symbolic links in HDFS, this is just a call to Stat().
  */
 int HDFSIOStore::Lstat(const char* path, struct stat* buf)
 {
-    hdfsFileInfo* hdfsInfo = hdfsGetPathInfo(fs, path);
-    if (!hdfsInfo) {
-        errno = ENOENT;
-        return -1;
-    }
-    // Maybe the Hadoop users are the names of an actual user of the system!
-    // If so, use that. Otherwise, we'll use 0 for both, which should correspond
-    // to root.
-    struct group* group_s = getgrnam(hdfsInfo->mGroup);
-    struct passwd* passwd_s = getpwnam(hdfsInfo->mOwner); 
-
-    buf->st_dev = 0;
-    buf->st_ino = 0; // I believe this is ignored by FUSE.
-
-    // We need the mode to be both the permissions and some additional info,
-    // based on whether it's a directory of a file.
-    buf->mode = hdfsInfo->mPermissions;
-    if (hdfsInfo->mKind == kObjectKindFile) {
-        buf->mode |= S_IFREG;
-    } else {
-        buf->mode |= S_IFDIR;
-    }
-        
-    if (passwd_s)
-        buf->st_uid = passwd_s->pw_uid;
-    else
-        buf->st_uid = 0;
-    if (group_s)
-        buf->st_gid = group_s->gr_gid;
-    else
-        buf->st_gid = 0;
-    buf->st_rdev = 0; // I'm not sure about this one!
-    buf->st_size = hdfsInfo->mSize;
-    buf->st_blksize = hdfsInfo->mBlockSize;
-    // This is supposed to indicate the actual number of sectors allocated
-    // to the file, and is used to calculate storage capacity consumed per
-    // File. Files might have holes, but on HDFS we lie about this anyway.
-    // So I'm just returning the size/512. Note that if this is supposed to
-    // represent storage consumed, it's actually 3 times this due to replication.
-    buf->st_blocks = hdfsInfo->mSize/512; 
-    buf->st_atime = hdfs->mLastAccess;
-    buf->st_mtime = hdfs->mLastMod;
-    // This one's a total lie. There's no tracking of metadata change time
-    // in HDFS, so we'll just use the modification time again.
-    buf->st_ctime = hdfs->mLastMod;
-
-    return 0;
+    return Stat(path, buf);
 }
 
 /**
@@ -252,7 +211,7 @@ int HDFSIOStore::Mkdir(const char* path, mode_t mode)
         return -1;
     }
 
-    return hdfsChmod(fs, path, mode));
+    return hdfsChmod(fs, path, mode);
 }
 
 /**
@@ -270,7 +229,7 @@ int HDFSIOStore::Mknod(const char* path, mode_t mode, dev_t dev)
  */
 void* HDFSIOStore::Mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset) 
 {
-    int bytes_read=0;
+    size_t bytes_read=0;
     char* buffer;
     hdfsFile openFile = GetFileFromMap(fd);
     
@@ -281,7 +240,7 @@ void* HDFSIOStore::Mmap(void *addr, size_t len, int prot, int flags, int fd, off
 
     // We ignore most of the values passed in.
     // Allocate enough space for the lenth.
-    char* buffer = new char[len];
+    buffer = new char[len];
 
     if (!buffer) {
         return NULL;
@@ -347,14 +306,26 @@ int HDFSIOStore::Open(const char* path, int flags, mode_t mode)
  * return a pointer to a directory stream. Instead they return a
  * pointer to a struct openDir, which we use to satisfy future
  * requests.
+ * NOTE:
+ * There's a slight issue I have with this code--the allocation is
+ * in the memory space of the FUSE client, not the application. If the
+ * application exits before calling Closedir(), it's a memory leak.
+ * I'm not sure what the appropriate technique around this is; even if
+ * we reslurp in the entire directory on every call to readdir so we
+ * don't need to keep around the array of all file infos, we still need
+ * some place to store our counter.
+ * One way around this is to replace the entire readdir logic of Util
+ * and Container with functionality that stores the contents of the
+ * directory in some buffer, and let the higher level manage it. Not
+ * sure how that would work with readdir fuse calls, however.
  */
 DIR* HDFSIOStore::Opendir(const char *name) 
 {
     openDir* dir = new openDir;
     // I assume new returns NULL on error.
     if (!dir)
-        return dir;
-    dir->curEntry = 0;
+        return NULL;
+    dir->curEntryNum = 0;
     // We have space to remember the directory. Now slurp in all its files.
     dir->infos = hdfsListDirectory(fs, name, &dir->numEntries);
     if (!dir->infos) {
@@ -365,6 +336,9 @@ DIR* HDFSIOStore::Opendir(const char *name)
     return (DIR*)dir;
 }
 
+/**
+ * Pread. A simple wrapper around the HDFS call.
+ */
 ssize_t HDFSIOStore::Pread(int fd, void* buf, size_t count, off_t offset)
 {
     hdfsFile openFile = GetFileFromMap(fd);
@@ -373,4 +347,207 @@ ssize_t HDFSIOStore::Pread(int fd, void* buf, size_t count, off_t offset)
         return -1;
     }
     return hdfsPread(fs, openFile, offset, buf, count);
+}
+
+/**
+ * Pwrite. There is no pwrite in HDFS, since we can only write to the end of a
+ * file. So this will always fail.
+ */
+ssize_t HDFSIOStore::Pwrite(int fd, const void* buf, size_t count, off_t offset) 
+{
+    errno = ENOTSUP;
+    return -1;
+}
+
+/**
+ * Read. A simple wrapper around the HDFS call.
+ */
+ssize_t HDFSIOStore::Read(int fd, void *buf, size_t count)
+{
+    hdfsFile openFile = GetFileFromMap(fd);
+    if (!openFile) {
+        errno = EBADF;
+        return -1;
+    }
+    return hdfsRead(fs, openFile, buf, count);
+}
+
+/**
+ * Readdir. Remember that the dirp is actually struct openDir*. We cast it
+ * and then fill in the struct dirent curEntry embedded in it, using the
+ * hdfsFileInfo* infos array and the curEntryNum count.  
+ */
+struct dirent *HDFSIOStore::Readdir(DIR *dirp)
+{
+    struct openDir* dir = (struct openDir*)dirp;
+    if (dir->curEntryNum == dir->numEntries) {
+        // We've read all the entries! Return NULL.
+        return NULL;
+    }
+
+    // Fill in the struct dirent curEntry field.
+    dir->curEntry.d_ino = 0; // No inodes in HDFS.
+    // I'm not sure how offset is used in this context. Technically
+    // only d_name is required in non-Linux deployments.
+    dir->curEntry.d_off = 0;
+    dir->curEntry.d_reclen = sizeof(struct dirent);
+    dir->curEntry.d_type = (dir->infos[dir->curEntryNum].mKind == kObjectKindFile
+                            ? DT_REG : DT_DIR);
+    strncpy(dir->curEntry.d_name, dir->infos[dir->curEntryNum].mName, NAME_MAX);
+    // NAME_MAX does not include the terminating null and if we copy
+    // the max number of characters, strncpy won't place it, so set it manually.
+    dir->curEntry.d_name[NAME_MAX] = '\0';
+    
+    dir->curEntryNum++;
+    return &dir->curEntry;
+}
+
+/**
+ * Rename. A wrapper around the hdfs move call, really.
+ */
+int HDFSIOStore::Rename(const char *oldpath, const char *newpath)
+{
+    return hdfsMove(fs, oldpath, fs, newpath);
+}
+
+/**
+ * Rmdir. HDFS doesn't distinguish between deleting a file and a directory.
+ */
+int HDFSIOStore::Rmdir(const char* path)
+{
+    return hdfsDelete(fs, path);
+}
+/**
+ * Stat. This one is mostly a matter of datat structure conversion to keep everything
+ * right.
+ */
+int HDFSIOStore::Stat(const char* path, struct stat* buf)
+{
+    hdfsFileInfo* hdfsInfo = hdfsGetPathInfo(fs, path);
+    if (!hdfsInfo) {
+        errno = ENOENT;
+        return -1;
+    }
+    // Maybe the Hadoop users are the names of an actual user of the system!
+    // If so, use that. Otherwise, we'll use 0 for both, which should correspond
+    // to root.
+    struct group* group_s = getgrnam(hdfsInfo->mGroup);
+    struct passwd* passwd_s = getpwnam(hdfsInfo->mOwner); 
+
+    buf->st_dev = 0; // Unused by FUSE, I believe.
+    buf->st_ino = 0; // There are no inode numbers in HDFS.
+
+    // We need the mode to be both the permissions and some additional info,
+    // based on whether it's a directory of a file.
+    buf->st_mode = hdfsInfo->mPermissions;
+    if (hdfsInfo->mKind == kObjectKindFile) {
+        buf->st_mode |= S_IFREG;
+    } else {
+        buf->st_mode |= S_IFDIR;
+    }
+        
+    if (passwd_s)
+        buf->st_uid = passwd_s->pw_uid;
+    else
+        buf->st_uid = 0;
+    if (group_s)
+        buf->st_gid = group_s->gr_gid;
+    else
+        buf->st_gid = 0;
+    buf->st_rdev = 0; // Hopefully unused.
+    buf->st_size = hdfsInfo->mSize;
+    buf->st_blksize = hdfsInfo->mBlockSize;
+    // This is supposed to indicate the actual number of sectors allocated
+    // to the file, and is used to calculate storage capacity consumed per
+    // File. Files might have holes, but on HDFS we lie about this anyway.
+    // So I'm just returning the size/512. Note that if this is supposed to
+    // represent storage consumed, it's actually 3 times this due to replication.
+    buf->st_blocks = hdfsInfo->mSize/512; 
+    buf->st_atime = hdfsInfo->mLastAccess;
+    buf->st_mtime = hdfsInfo->mLastMod;
+    // This one's a total lie. There's no tracking of metadata change time
+    // in HDFS, so we'll just use the modification time again.
+    buf->st_ctime = hdfsInfo->mLastMod;
+
+    return 0;
+}
+
+/** 
+ * Symlink. HDFS does not support hard or soft links. So we set errno and return.
+ */
+int HDFSIOStore::Symlink(const char* oldpath, const char* newpath)
+{
+    errno = EPERM; // According to POSIX spec, this is the proper code.
+    return -1;
+}
+
+/**
+ * Truncate. In HDFS, we can truncate a file to 0 by re-opening it for O_WRONLY.
+ * I'm not sure how this will behave if it's attempted on a file already open.
+ * Truncating to anything larger than 0 but smaller than the filesize is impossible.
+ * Increasing the filesize can be accomplished by writing 0's to the end of the file,
+ * but this requires HDFS to support append, which has always been on and off again
+ * functionality in HDFS.
+ * For these reasons, we're only supporting it for lengths of 0.
+ */
+int HDFSIOStore::Truncate(const char* path, off_t length)
+{
+    hdfsFile truncFile;
+    if (length > 0) {
+        errno = EINVAL; // EFBIG is also an option.
+        return -1;
+    }
+    // Make sure the file exists. A truncate call should not CREATE a new
+    // file.
+    // BUG: This should really be made atomic with the open call. Otherwise
+    // the following sequence is possible:
+    // 1. Thread A calls truncate() on 'foo'. It does the hdfsExists() check
+    // below and determines that the file exists.
+    // 2. Thread B begins running and deletes 'foo'.
+    // 3. Thread A begins running again and performs the truncating open call.
+    // This creates a new zero-length file.
+    // This situation can be avoided with a mutex controlling delete and truncate,
+    // but for the time being, I think this is too expensive for the behavior
+    // benefits.
+    if (!hdfsExists(fs, path)) {
+        errno = ENOENT;
+        return -1;
+    }
+    // Attempt to open the file to truncate it.
+    truncFile = hdfsOpenFile(fs, path, O_WRONLY, 0, 0, 0);
+    if (!truncFile) {
+        return -1;
+    }
+
+    hdfsCloseFile(fs, truncFile);
+    return 0;
+}
+
+/**
+ * Unlink. HDFS lacks the concept of links, so this is really just a delete.
+ */
+int HDFSIOStore::Unlink(const char* path)
+{
+    return hdfsDelete(fs, path);
+}
+
+/**
+ * Utime. More translation mostly.
+ */
+int HDFSIOStore::Utime(const char* filename, const struct utimbuf *times)
+{
+    return hdfsUtime(fs, filename, times->modtime, times->actime);
+}
+
+/**
+ * Write. Similar to read; just lookup the file and issue the write.
+ */
+ssize_t HDFSIOStore::Write(int fd, const void* buf, size_t len)
+{
+    hdfsFile openFile = GetFileFromMap(fd);
+    if (!openFile) {
+        errno = EBADF;
+        return -1;
+    }
+    return hdfsWrite(fs, openFile, buf, len);
 }
