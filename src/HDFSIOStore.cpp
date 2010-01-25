@@ -274,14 +274,17 @@ int HDFSIOStore::Open(const char* path, int flags)
     hdfsFile openFile;
     int fd;
 
-    if (flags & O_RDONLY) {
+    if (flags == O_RDONLY) {
         new_flags = O_RDONLY;
-    } else if (flags & O_WRONLY) {
+    } else if (flags & O_WRONLY)  {
         new_flags = O_WRONLY;
     } else {
+        std::cout << "Unsupported flags.\n";
         errno = ENOTSUP;
         return -1;
     }
+
+
     openFile = hdfsOpenFile(fs, path, new_flags, 0, 0, 0);
     
     if (!openFile) {
