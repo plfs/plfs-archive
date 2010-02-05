@@ -3,13 +3,9 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <iostream>
-//#include "plfs.h"
-//#include "PosixIOStore.h"
-//#include "Util.h"
 #include "hdfs.h"
 
 int main(int argc, char **argv) {
-    Plfs_fd *myFile = NULL;
     char *dataBuffer = "Hello PLFS!\n"; // 12 chars + null
     char *indexBuffer = "00.00.12"; // A fake representation of an index entry. 8 + null.
     char inputBuffer[13];
