@@ -14,16 +14,16 @@ int main() {
     plfs_hdfs_init("default", 0);
     //plfs_posix_init();
     std::cout << "Inited\n";
-    plfs_create("./foo2", 0777, 0);
+    plfs_create("./foo4", 0777, 0);
     std::cout << "Created.\n";
-    plfs_open(&myFile, "./foo2", O_WRONLY, 2, 0777);
+    plfs_open(&myFile, "./foo4", O_WRONLY, 2, 0777);
     std::cout << "Opened for write.\n";
     plfs_write (myFile, "Hello World\n", 12, 0, 2);
     std::cout << "Written.\n";
     plfs_close(myFile, 2);
     std::cout << "Closed.\n";
     myFile = NULL;
-    if (plfs_open(&myFile, "./foo2", O_RDONLY, 2, 0777)) {
+    if (plfs_open(&myFile, "./foo4", O_RDONLY, 2, 0777)) {
         std::cout << "Failed to open for read!\n";
     } else {
         std::cout << "Opened for read.\n";
