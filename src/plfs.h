@@ -1,6 +1,7 @@
 #ifndef __PLFS_H_
 #define __PLFS_H_
 
+#include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <utime.h>

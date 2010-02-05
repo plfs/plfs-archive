@@ -142,7 +142,7 @@ int WriteFile::removeWriter( pid_t pid ) {
         if ( ofd->writers <= 0 ) {
             ret = closeFd( ofd->fd );
             fds.erase( pid );
-            free( ofd );
+            delete( ofd );
         }
     }
     Util::Debug( stderr, "%s on %s now has %d writers: %d\n", 

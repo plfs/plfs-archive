@@ -82,6 +82,7 @@ int Container::Utime( const char *path, const struct utimbuf *buf ) {
 }
 
 int Container::Chown( const char *path, uid_t uid, gid_t gid ) {
+    Util::Debug( stderr, "Chowning to %d:%d\n", uid, gid );
     return Container::Modify( CHOWN, path, uid, gid, NULL, 0 );  
 }
 
@@ -111,6 +112,7 @@ int Container::Modify( DirectoryOperation type,
             if ( ret != 0 ) break;
             use_mode = dirMode( mode );
         }
+	errno = 0;
         if ( type == UTIME ) {
             ret = Util::Utime( full_path.c_str(), utbuf );
         } else if ( type == CHOWN ) {
@@ -118,7 +120,8 @@ int Container::Modify( DirectoryOperation type,
         } else if ( type == CHMOD ) {
             ret = Util::Chmod( full_path.c_str(), use_mode );
         }
-        Util::Debug( stderr, "Modified dropping %s\n", full_path.c_str() );
+        Util::Debug( stderr, "Modified dropping %s: %s\n", 
+		full_path.c_str(), strerror(errno) );
     }
     Util::Closedir( dir );
     return ret;

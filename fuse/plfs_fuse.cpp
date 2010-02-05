@@ -40,10 +40,14 @@ using namespace std;
 
 // the reason we need this struct is because we want to know the original
 // pid at the f_release bec fuse_get_context->pid returns 0 in the f_release
+// and the original uid and gid because these are also 0 in the f_release
 // each open gets a unique one of these but they share the internal Plfs_fd
+// we also want to set and restore the uid and the gid
 struct OpenFile {
     Plfs_fd *pfd;
     pid_t    pid;
+    uid_t    uid;
+    gid_t    gid;
 };
 
 #ifdef PLFS_TIMES
@@ -647,6 +651,8 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
         struct OpenFile *of = new OpenFile;
         of->pfd = pfd;
         of->pid = fuse_get_context()->pid;
+        of->uid = fuse_get_context()->uid; 
+        of->gid = fuse_get_context()->gid; 
         fi->fh = (uint64_t)of;
         if ( newly_created ) {
             fprintf( stderr, "%s adding open file for %s\n", __FUNCTION__,
@@ -675,6 +681,8 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
 int Plfs::f_release( const char *path, struct fuse_file_info *fi ) {
     PLFS_ENTER_PID; GET_OPEN_FILE;
     if ( of ) {
+        Util::Setfsuid( openfile->uid );
+        Util::Setfsgid( openfile->gid );
         Util::MutexLock( &self->fd_mutex, __FUNCTION__ );
         int remaining = plfs_close( of, openfile->pid );
         fi->fh = (uint64_t)NULL;
@@ -721,10 +729,10 @@ mode_t Plfs::getMode( string expanded ) {
         cerr << "Pulling mode from Container" << endl;
         mode = Container::getmode( expanded.c_str() );
         self->known_modes[expanded] = mode;
-        whence = "container";
+        whence = (char*)"container";
     } else {
         mode = itr->second; 
-        whence = "stashed value";
+        whence = (char*)"stashed value";
     }
     fprintf( stderr, "%s pulled mode %d from %s\n", __FUNCTION__, mode, whence);
     return mode;

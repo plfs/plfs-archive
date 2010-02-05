@@ -6,6 +6,8 @@
 #include "Util.h"
 #include "OpenFile.h"
 
+#include <limits>
+
 // a shortcut for functions that are expecting zero
 int 
 retValue( int res ) {

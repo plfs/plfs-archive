@@ -572,7 +572,9 @@ gid_t Util::Getgid() {
 int Util::Setfsgid( gid_t g ) {
     ENTER_UTIL;
     #ifndef __FreeBSD__
+    errno = 0;
     ret = setfsgid( g );
+    Util::Debug( stderr, "Set gid %d: %s\n", g, strerror(errno) ); 
     #endif
     EXIT_UTIL;
 }
@@ -580,7 +582,9 @@ int Util::Setfsgid( gid_t g ) {
 int Util::Setfsuid( uid_t u ) {
     ENTER_UTIL;
     #ifndef __FreeBSD__
+    errno = 0;
     ret = setfsuid( u );
+    Util::Debug( stderr, "Set uid %d: %s\n", u, strerror(errno) ); 
     #endif
     EXIT_UTIL;
 }
