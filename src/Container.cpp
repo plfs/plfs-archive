@@ -680,7 +680,7 @@ int Container::nextdropping( string physical_path,
         DIR **topdir, DIR **hostdir, struct dirent **topent ) 
 {
     ostringstream oss;
-    oss << "looking for nextdropping in " << physical_path << endl;
+    oss << "looking for nextdropping in " << physical_path; 
     Util::Debug( stderr, "%s\n", oss.str().c_str() );
         // open it on the initial 
     if ( *topdir == NULL ) {

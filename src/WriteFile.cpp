@@ -172,11 +172,19 @@ int WriteFile::extend( off_t offset ) {
 // this is where to change it to buffer if you'd like
 // returns bytes written or -errno
 ssize_t WriteFile::write(const char *buf, size_t size, off_t offset, pid_t pid){
-    int ret; ssize_t written;
+    int ret = 0; 
+    ssize_t written;
     OpenFd *ofd = getFd( pid );
     if ( ofd == NULL ) {
-        ret = -ENOENT;
-    } else {
+        // we used to return -ENOENT here but we can get here legitimately 
+        // when a parent opens a file and a child writes to it.
+        // so when we get here, we need to add a child datafile
+        ret = addWriter( pid );
+        if ( ret > 0 ) {
+            ofd = getFd( pid );
+        }
+    }
+    if ( ofd && ret >= 0 ) {
         int fd = ofd->fd;
         // write the data file
         double begin, end;

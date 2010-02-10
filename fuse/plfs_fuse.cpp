@@ -116,13 +116,14 @@ split(const std::string &s, const char delim, std::vector<std::string> &elems) {
 // we need to know this since file ops are handled by PLFS
 // but directory ops need to be handled here since we have
 // the multiple backend feature
+// we can't just stat the thing ourselves bec it could be a PLFS container
+// which looks like a directory to us
 bool Plfs::isDirectory( string path ) {
-    bool isdir = false;
-    struct stat buf;
-    if ( plfs_getattr( NULL, path.c_str(), &buf ) == 0 ) {
-        isdir = ( buf.st_mode & S_IFDIR );
+    if ( is_plfs_file( path.c_str() ) ) {
+        return false;
+    } else {
+        return Util::isDirectory( path.c_str() );
     }
-    return isdir;
 }
 
 // set this up to parse command line args
@@ -247,8 +248,10 @@ string Plfs::expandPath( const char *path ) {
     string dangle_path( self->params.backends[hash_by_node] + "/" + path );
     string canonical_path( self->params.backends[hash_by_path] + "/" + path );
     // stop doing the dangling stuff for now
+    /*
     fprintf( stderr, "%s: %s -> %s\n", 
             __FUNCTION__, path, canonical_path.c_str() );
+    */
     return canonical_path;
 }
 
