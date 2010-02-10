@@ -644,6 +644,8 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
     pfd = findOpenFile( strPath );
     if ( ! pfd ) newly_created = true;
 
+    // every proc that opens a file creates a unique OpenFile but they share
+    // a Plfs_fd
     ret = plfs_open( &pfd, strPath.c_str(), fi->flags, 
             fuse_get_context()->pid, mode );
 
@@ -680,6 +682,8 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
 // shoot.  the release is tricky bec it might not pass the correct pid
 int Plfs::f_release( const char *path, struct fuse_file_info *fi ) {
     PLFS_ENTER_PID; GET_OPEN_FILE;
+    // there is one 'Plfs_fd *of' shared by multiple procs
+    // each proc has its own 'OpenFile openfile'
     if ( of ) {
         Util::Setfsuid( openfile->uid );
         Util::Setfsgid( openfile->gid );
@@ -914,13 +918,16 @@ int Plfs::f_rename( const char *path, const char *to ) {
     PLFS_ENTER;
     string toPath   = expandPath( to );
 
-    if ( ! isDirectory(strPath.c_str() ) ) {
+    if ( is_plfs_file( toPath.c_str() ) ) {
         // we can't just call rename bec it won't trash a dir in the toPath
         // so in case the toPath is a container, do this
         // this might fail with ENOENT but that's fine
         plfs_unlink( toPath.c_str() );
     }
 
+       // when I do a cvs co plfs, it dies here
+        // it creates a CVS/Entries.Backup file, then opens it, then
+        // renames it to CVS/Entries, and then 
     Plfs_fd *pfd = findOpenFile( strPath );
     if ( pfd ) {
         fprintf( stderr, "WTF?  Rename open file\n" );

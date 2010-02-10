@@ -26,6 +26,8 @@
 
 */
 
+int is_plfs_file( const char *path );
+
 int plfs_access( const char *path, int mask );
 
 int plfs_chmod( const char *path, mode_t mode );

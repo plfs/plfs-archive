@@ -99,6 +99,10 @@ struct OpenFd * WriteFile::getFd( pid_t pid ) {
         Util::Debug( stderr, "%s", oss.str().c_str() );
         ofd = itr->second;
     } else {
+        /*
+           // I think this code is a mistake.  We were doing it once
+           // when a child was writing to a file that the parent opened
+           // but shouldn't it be OK to just give the child a new datafile?
         if ( fds.size() > 0 ) {
             ostringstream oss;
             // ideally instead of just taking a random pid, we'd rather
@@ -114,6 +118,9 @@ struct OpenFd * WriteFile::getFd( pid_t pid ) {
             Util::Debug(stderr, "%s no fd to give to %d\n", __FILE__, (int)pid);
             ofd = NULL;
         }
+        */
+        Util::Debug(stderr, "%s no fd to give to %d\n", __FILE__, (int)pid);
+        ofd = NULL;
     }
     return ofd;
 }

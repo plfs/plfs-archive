@@ -39,6 +39,11 @@ plfs_chown( const char *path, uid_t u, gid_t g ) {
 }
 
 int
+is_plfs_file( const char *path ) {
+    return Container::isContainer( path );
+}
+
+int
 plfs_access( const char *path, int mask ) {
     int ret = -1;
     if ( Container::isContainer( path ) ) {

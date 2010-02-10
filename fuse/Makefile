@@ -8,10 +8,10 @@ LOG      = /tmp/plfs.log
 # remove direct_io if you want to exec a PLFS file
 # but it makes the performance horrible because writes are split into 4K
 # as opposed to 128K with direct_io 
-DIRECT_IO        = -o direct_io
+#DIRECT_IO        = -o direct_io
 
 # ALLOW_OTHER is needed to run as root to allow other users to see the mount
-ALLOW_OTHER      = -o allow_other
+#ALLOW_OTHER      = -o allow_other
 
 # single threaded makes debugging easier
 #SINGLE_THREADED  = -s
