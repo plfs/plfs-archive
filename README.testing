@@ -1,0 +1,18 @@
+We need to write a test suite but in the meantime, 
+here is the list of functionality tests that should 
+be performed before committing.  We also should add
+some performance testing.
+
+1) Run 'make test' in the fuse dir.
+
+2) Create a file and make sure all the files in
+the container have the appropriate permissions.
+
+3) Chgrp the file and make sure all the files in
+the container have the appropriate permissions.
+
+4) cd into the mountpoint, co the plfs src,
+make the SC paper into a pdf, open the pdf
+
+5) run fs_test with N-1 strided and touch -2 and
+check -2 with at least 2 procs
