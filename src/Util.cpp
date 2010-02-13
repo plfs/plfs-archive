@@ -392,7 +392,7 @@ bool Util::isDirectory( const char *path ) {
     bool exists = false;
     struct stat buf;
     if ( stat( path, &buf ) == 0 ) {
-        exists = ( buf.st_mode & S_IFDIR );
+        exists = S_ISDIR(buf.st_mode); //( buf.st_mode & S_IFDIR );
     }
     ret = exists;
     EXIT_UTIL;

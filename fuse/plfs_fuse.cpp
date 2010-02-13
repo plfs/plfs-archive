@@ -146,6 +146,7 @@ int Plfs::init( int *argc, char **argv ) {
     params.bufferindex   = true;
     params.subdirs       = 32;
     params.sync_on_close = false;
+    params.direct_io     = 0;
 
         // modify argc to remove -plfs args so that fuse proper doesn't see them
     int removed_args = 0;
@@ -169,6 +170,9 @@ int Plfs::init( int *argc, char **argv ) {
         if ( (value = getPlfsArg( "plfs_subdirs", argv[i] )) ) {
             params.subdirs = atoi( value );
             removed_args++;
+        }
+        if ( strstr( argv[i], "direct_io" ) ) {
+            params.direct_io = 1;
         }
     }
     *argc -= removed_args;
@@ -316,9 +320,12 @@ int Plfs::f_access(const char *path, int mask) {
 
 int Plfs::f_mknod(const char *path, mode_t mode, dev_t rdev) {
     PLFS_ENTER;
+
     ret = makePlfsFile( strPath.c_str(), mode, 0 );
     if ( ret == 0 ) {
         // we think we've made the file. Let's double check.
+        // this is probably unnecessary.
+        /*
         struct stat stbuf;
         ret = f_getattr( path, &stbuf );
         if ( ret != 0 ) {
@@ -326,6 +333,7 @@ int Plfs::f_mknod(const char *path, mode_t mode, dev_t rdev) {
                  << path << ": " << strerror(-ret) << endl;
             exit( 0 );
         }
+        */
     }
     PLFS_EXIT;
 }
@@ -400,6 +408,13 @@ int Plfs::getattr_helper( const char *path,
             // mknod thought a container existed but it didn't
             self->createdContainers.erase( expanded );
         }
+    }
+
+    // ok, we've done the getattr, if we're running in direct_io mode
+    // and it's a file, let's lie and turn off the exec bit so that 
+    // users will be explicitly disabled from trying to exec plfs files
+    if ( ret == 0 && self->params.direct_io && S_ISREG(stbuf->st_mode) ) {
+        stbuf->st_mode &= ( ~S_IXUSR & ~S_IXGRP & ~S_IXOTH );
     }
     return ret;
 }
@@ -890,6 +905,7 @@ string Plfs::paramsToString( Params *p ) {
     oss << "BufferIndex: "      << p->bufferindex << endl
         << "ContainerSubdirs: " << p->subdirs     << endl
         << "SyncOnClose: "      << p->sync_on_close     << endl
+        << "Executable bit: "   << ! p->direct_io << endl
         << "Backends: "
         ;
     vector<string>::iterator itr;

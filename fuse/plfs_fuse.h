@@ -28,6 +28,7 @@ struct dir_op {
 typedef struct {
     bool   bufferindex;
     bool   sync_on_close;
+    bool   direct_io;
     vector< string >             backends;
     size_t subdirs;
 } Params;
