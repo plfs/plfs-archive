@@ -33,6 +33,7 @@ addWriter( WriteFile *wf, pid_t pid, const char *path, mode_t mode ) {
     return ret;
 }
 
+// this requires that the supplementary groups for the user are set
 int 
 plfs_chown( const char *path, uid_t u, gid_t g ) {
     return Container::Chown( path, u, g );

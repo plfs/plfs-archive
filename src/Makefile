@@ -11,7 +11,7 @@ VERSION    = $(shell /usr/bin/svnversion ..)
 # add -DINDEX_CONTAINS_TIMESTAMPS to allow trace vizualization
 # add -DCOUNT_SKIPS to maintain a count of sequential / non-sequential IO 
 # add -DVERBOSE to get verbose output
-DEBUG   = -DVERBOSE -DNDEBUG -DPLFS_TIMES -DNUTIL -DINDEX_CONTAINS_TIMESTAMPS \
+DEBUG   = -DNDEBUG -DPLFS_TIMES -DNUTIL -DINDEX_CONTAINS_TIMESTAMPS \
 	      -DCOUNT_SKIPS 
 CXXFLAGS  = -g -Wall $(DEBUG) -D_FILE_OFFSET_BITS=64 -DVERSION=$(VERSION)
 LDFLAGS = -lpthread

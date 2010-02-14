@@ -93,6 +93,8 @@ class Plfs : public fusexx::fuse<Plfs> {
         static string openFilesToString();
         static mode_t getMode( string expanded );
         static int getattr_helper( const char *path, struct stat *, Plfs_fd *);
+        static int get_groups( vector<gid_t> * );
+        static int discover_groups( vector<gid_t> *, uid_t );
 
             // is a set the best here?  doesn't need to be sorted.
             // just needs to be associative.  This needs to be static

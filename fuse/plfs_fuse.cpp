@@ -24,6 +24,8 @@
 #include <sys/statvfs.h>
 #include <sys/time.h>
 #include <time.h>
+#include <pwd.h>
+#include <grp.h>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -61,7 +63,7 @@ struct OpenFile {
 #endif
 
 #ifdef __FreeBSD__
-    #define SAVE_IDS
+    #define SAVE_IDS 
     #define RESTORE_IDS 
 #else
     #include <sys/fsuid.h>  
@@ -510,19 +512,76 @@ int Plfs::f_chmod (const char *path, mode_t mode) {
     }
     PLFS_EXIT;
 }
+
+// fills the set of supplementary groups of the effective uid
+int Plfs::get_groups( vector<gid_t> *vec ) {
+    int ngroups = getgroups (NULL, 0);
+    gid_t *groups = new gid_t[ngroups];
+    //(gid_t *) malloc(ngroups * sizeof (gid_t));
+    int val = getgroups (ngroups, groups);
+    for( int i = 0; i < val; i++ ) {
+        vec->push_back( groups[i] );
+    }
+    delete groups; 
+    return ( val >= 0 ? 0 : -errno );
+}
+
+// fills the set of supplementary groups of a uid 
+int Plfs::discover_groups( vector<gid_t> *vec, uid_t uid ) {
+    char *username;
+    struct passwd *pwd;
+    pwd      = getpwuid( uid );
+    username = pwd->pw_name;
+
+        // read the groups to discover the memberships of the caller
+    struct group *grp;
+    char         **members;
+    setgrent();
+    while( (grp = getgrent()) != NULL ) {
+        members = grp->gr_mem;
+        while (*members) {
+            if ( strcmp( *(members), username ) == 0 ) {
+                vec->push_back( grp->gr_gid );
+            }
+            members++;
+        }
+    }
+    endgrent();
+    return 0;
+}
 		    
+// this is the only function where we have to do something before we
+// call PLFS_ENTER, we have to store the orig_groups of root, and we have
+// to set the supplementary groups of the caller
 int Plfs::f_chown (const char *path, uid_t uid, gid_t gid ) { 
+    vector<gid_t> orig_groups, user_groups;
+    int ret2;
+    get_groups( &orig_groups ); 
+    discover_groups( &user_groups, fuse_get_context()->uid );
+    ret2 =setgroups( user_groups.size(), (const gid_t*)&(user_groups.front()) );
     PLFS_ENTER;
-    if ( isDirectory( strPath ) ) {
+
+    if ( ret2 == 0 && isDirectory( strPath ) ) {
         dir_op d;
         d.path = path;
         d.op   = CHOWN;
         d.u    = uid;
         d.g    = gid;
         ret = iterate_backends( &d );
-    } else {
+    } else if ( ret2 == 0 ) {
         ret = retValue( plfs_chown( strPath.c_str(), uid, gid ) );  
     }
+
+    if ( ret2 != 0 ) ret = -errno;
+
+            // restore the original groups
+    ret2 = setgroups( orig_groups.size(), (const gid_t*)&(orig_groups.front()));
+    if ( ret2 != 0 ) {
+        self->wtfs++;
+        fprintf( stderr, "WTF? Couldn't restore orig groups: %s\n",
+                strerror( errno ) );
+    }
+
     PLFS_EXIT;
 }
 
@@ -905,6 +964,7 @@ string Plfs::paramsToString( Params *p ) {
     oss << "BufferIndex: "      << p->bufferindex << endl
         << "ContainerSubdirs: " << p->subdirs     << endl
         << "SyncOnClose: "      << p->sync_on_close     << endl
+        << "Direct IO: "        << p->direct_io << endl
         << "Executable bit: "   << ! p->direct_io << endl
         << "Backends: "
         ;
@@ -944,9 +1004,10 @@ int Plfs::f_rename( const char *path, const char *to ) {
         plfs_unlink( toPath.c_str() );
     }
 
-       // when I do a cvs co plfs, it dies here
+        // when I do a cvs co plfs, it dies here
         // it creates a CVS/Entries.Backup file, then opens it, then
         // renames it to CVS/Entries, and then 
+        // we need to figure out how to do rename on an open file....
     Plfs_fd *pfd = findOpenFile( strPath );
     if ( pfd ) {
         fprintf( stderr, "WTF?  Rename open file\n" );
