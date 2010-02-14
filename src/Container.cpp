@@ -595,9 +595,10 @@ mode_t Container::fileMode( mode_t mode ) {
 // so use this to get the mode to pass to the mkdir
 // need to add S_IWUSR to the flag incase a file has --r--r--r
 //    the file can be --r--r--r but the top level dir can't
+// also need to make it a dir and need to make exec by all
 mode_t Container::dirMode( mode_t mode ) {
     int filemask = ~(S_IFREG);
-    mode = ( mode & filemask ) | S_IWUSR | S_IXUSR | S_IXGRP | S_IFDIR;
+    mode = ( mode & filemask ) | S_IWUSR | S_IXUSR | S_IXGRP | S_IFDIR | S_IXOTH;
     return mode;
 }
 

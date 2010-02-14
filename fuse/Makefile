@@ -11,7 +11,10 @@ LOG      = /tmp/plfs.log
 DIRECT_IO        = -o direct_io
 
 # ALLOW_OTHER is needed to run as root to allow other users to see the mount
-ALLOW_OTHER      = -o allow_other
+UID := $(shell whoami)
+ifeq ($(UID), root)
+	ALLOW_OTHER      = -o allow_other
+endif
 
 # single threaded makes debugging easier
 #SINGLE_THREADED  = -s

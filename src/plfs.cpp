@@ -229,7 +229,10 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
     if ( ret == 0 && ! *pfd ) {
         *pfd = new Plfs_fd( wf, index, pid, mode, path ); 
         // we create one open record for all the pids using a file
-        ret = Container::addOpenrecord( path, Util::hostname(), pid );
+        // only create the open record for files opened for writing
+        if ( wf ) {
+            ret = Container::addOpenrecord( path, Util::hostname(), pid );
+        }
         //cerr << __FUNCTION__ << " added open record for " << path << endl;
     }
     return ret;

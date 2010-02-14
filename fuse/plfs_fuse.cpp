@@ -62,19 +62,29 @@ struct OpenFile {
     #define END_TIMES
 #endif
 
+#define SAVE_GROUPS    vector<gid_t> orig_groups, user_groups;                 \
+                       get_groups( &orig_groups );                             \
+                       discover_groups(&user_groups,fuse_get_context()->uid);  \
+                       setgroups( user_groups.size(),                          \
+                              (const gid_t*)&(user_groups.front()) ); 
+
+#define RESTORE_GROUPS setgroups( orig_groups.size(),                         \
+                                (const gid_t*)&(orig_groups.front()));
+
 #ifdef __FreeBSD__
     #define SAVE_IDS 
     #define RESTORE_IDS 
 #else
     #include <sys/fsuid.h>  
-    #define SAVE_IDS   uid_t save_uid = Util::Getuid();                   \
-                       gid_t save_gid = Util::Getgid();                   \
-                       Util::Setfsuid( fuse_get_context()->uid );         \
-                       Util::Setfsgid( fuse_get_context()->gid );
+    #define SAVE_IDS   uid_t save_uid = Util::Getuid();                        \
+                       gid_t save_gid = Util::Getgid();                        \
+                       Util::Setfsuid( fuse_get_context()->uid );              \
+                       Util::Setfsgid( fuse_get_context()->gid );              
 
-    #define RESTORE_IDS Util::Setfsuid(save_uid); Util::Setfsgid(save_gid);
+    #define RESTORE_IDS Util::Setfsuid(save_uid); Util::Setfsgid(save_gid);   
 #endif
 
+#define PLFS_ENTER_GROUP SAVE_GROUPS; PLFS_ENTER;
 
 #define PLFS_ENTER string strPath  = expandPath( path );               \
                    ostringstream funct_id;                             \
@@ -91,11 +101,14 @@ struct OpenFile {
 
 #define PLFS_ENTER_IO  PLFS_ENTER
 #define PLFS_ENTER_PID PLFS_ENTER 
-#define PLFS_EXIT      RESTORE_IDS; END_TIMES;                              \
-                       funct_id << (ret >= 0 ? "success" : strerror(-ret) ) \
+
+#define PLFS_EXIT_ALL  funct_id << (ret >= 0 ? "success" : strerror(-ret) ) \
                                 << " " << end-begin << "s";                 \
                        lm2 << funct_id.str() << endl; lm2.flush();          \
                        return ret;
+
+#define PLFS_EXIT       RESTORE_IDS; END_TIMES; PLFS_EXIT_ALL;
+#define PLFS_EXIT_GROUP RESTORE_IDS; RESTORE_GROUPS; END_TIMES; PLFS_EXIT_ALL;
 
 #define PLFS_EXIT_IO   PLFS_EXIT 
 
@@ -554,35 +567,23 @@ int Plfs::discover_groups( vector<gid_t> *vec, uid_t uid ) {
 // call PLFS_ENTER, we have to store the orig_groups of root, and we have
 // to set the supplementary groups of the caller
 int Plfs::f_chown (const char *path, uid_t uid, gid_t gid ) { 
-    vector<gid_t> orig_groups, user_groups;
-    int ret2;
-    get_groups( &orig_groups ); 
-    discover_groups( &user_groups, fuse_get_context()->uid );
-    ret2 =setgroups( user_groups.size(), (const gid_t*)&(user_groups.front()) );
-    PLFS_ENTER;
+    PLFS_ENTER_GROUP;
 
-    if ( ret2 == 0 && isDirectory( strPath ) ) {
+    if ( isDirectory( strPath ) ) {
         dir_op d;
         d.path = path;
         d.op   = CHOWN;
         d.u    = uid;
         d.g    = gid;
         ret = iterate_backends( &d );
-    } else if ( ret2 == 0 ) {
+    } else {
         ret = retValue( plfs_chown( strPath.c_str(), uid, gid ) );  
     }
 
-    if ( ret2 != 0 ) ret = -errno;
+    // restore the original groups when we leave
+    //setgroups( orig_groups.size(), (const gid_t*)&(orig_groups.front()));
 
-            // restore the original groups
-    ret2 = setgroups( orig_groups.size(), (const gid_t*)&(orig_groups.front()));
-    if ( ret2 != 0 ) {
-        self->wtfs++;
-        fprintf( stderr, "WTF? Couldn't restore orig groups: %s\n",
-                strerror( errno ) );
-    }
-
-    PLFS_EXIT;
+    PLFS_EXIT_GROUP;
 }
 
 // in order to distribute metadata load across multiple MDS, maintain a
