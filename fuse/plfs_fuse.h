@@ -94,7 +94,7 @@ class Plfs : public fusexx::fuse<Plfs> {
         static mode_t getMode( string expanded );
         static int getattr_helper( const char *path, struct stat *, Plfs_fd *);
         static int get_groups( vector<gid_t> * );
-        static int discover_groups( vector<gid_t> *, uid_t );
+        static int discover_groups( vector<gid_t> **, uid_t );
 
             // is a set the best here?  doesn't need to be sorted.
             // just needs to be associative.  This needs to be static
@@ -120,12 +120,13 @@ class Plfs : public fusexx::fuse<Plfs> {
             int bward_skips;
             int nonskip_writes;
         #endif
-        pthread_mutex_t           container_mutex;
-        pthread_mutex_t           fd_mutex;
-        pthread_mutex_t           index_mutex;
-        set< string >             createdContainers;
+        pthread_mutex_t             container_mutex;
+        pthread_mutex_t             fd_mutex;
+        pthread_mutex_t             group_mutex;
+        map< uid_t, vector<gid_t>*> memberships;
+        set< string >               createdContainers;
         HASH_MAP<string, Plfs_fd *> open_files;
-        string                    myhost;
-        string                    trashdir;
-        Params                    params;
+        string                      myhost;
+        string                      trashdir;
+        Params                      params;
 };

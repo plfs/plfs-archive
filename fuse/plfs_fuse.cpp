@@ -62,11 +62,12 @@ struct OpenFile {
     #define END_TIMES
 #endif
 
-#define SAVE_GROUPS    vector<gid_t> orig_groups, user_groups;                 \
+#define SAVE_GROUPS    vector<gid_t> orig_groups;                              \
+                       vector<gid_t> *user_groups;                             \
                        get_groups( &orig_groups );                             \
                        discover_groups(&user_groups,fuse_get_context()->uid);  \
-                       setgroups( user_groups.size(),                          \
-                              (const gid_t*)&(user_groups.front()) ); 
+                       setgroups( user_groups->size(),                         \
+                              (const gid_t*)&(user_groups->front()) ); 
 
 #define RESTORE_GROUPS setgroups( orig_groups.size(),                         \
                                 (const gid_t*)&(orig_groups.front()));
@@ -84,9 +85,10 @@ struct OpenFile {
     #define RESTORE_IDS Util::Setfsuid(save_uid); Util::Setfsgid(save_gid);   
 #endif
 
-#define PLFS_ENTER_GROUP SAVE_GROUPS; PLFS_ENTER;
+//#define PLFS_ENTER_GROUP SAVE_GROUPS; PLFS_ENTER;
 
-#define PLFS_ENTER string strPath  = expandPath( path );               \
+#define PLFS_ENTER SAVE_GROUPS;                                        \
+                   string strPath  = expandPath( path );               \
                    ostringstream funct_id;                             \
                    LogMessage lm, lm2;                                 \
                    START_TIMES;                                        \
@@ -107,8 +109,8 @@ struct OpenFile {
                        lm2 << funct_id.str() << endl; lm2.flush();          \
                        return ret;
 
-#define PLFS_EXIT       RESTORE_IDS; END_TIMES; PLFS_EXIT_ALL;
-#define PLFS_EXIT_GROUP RESTORE_IDS; RESTORE_GROUPS; END_TIMES; PLFS_EXIT_ALL;
+#define PLFS_EXIT       RESTORE_IDS; RESTORE_GROUPS; END_TIMES; PLFS_EXIT_ALL;
+//#define PLFS_EXIT_GROUP RESTORE_IDS; RESTORE_GROUPS; END_TIMES; PLFS_EXIT_ALL;
 
 #define PLFS_EXIT_IO   PLFS_EXIT 
 
@@ -222,7 +224,7 @@ int Plfs::init( int *argc, char **argv ) {
         // init our mutex
     pthread_mutex_init( &(container_mutex), NULL );
     pthread_mutex_init( &(fd_mutex), NULL );
-    pthread_mutex_init( &(index_mutex), NULL );
+    pthread_mutex_init( &(group_mutex), NULL );
 
         // we used to make a trash container but now that we moved to library, 
         // fuse layer doesn't handle silly rename
@@ -540,26 +542,55 @@ int Plfs::get_groups( vector<gid_t> *vec ) {
 }
 
 // fills the set of supplementary groups of a uid 
-int Plfs::discover_groups( vector<gid_t> *vec, uid_t uid ) {
+// I'm not sure right now and am doing testing.  hopefully I come back
+// and clean up this comment but as of right now we are doing this at
+// every entry point in PLFS_ENTER which makes this a very frequent
+// operation.  I tried this once w/out a mutex and it seemed to make it
+// segfault.  I'm scared that getgrent is not thread-safe so now this is
+// in a mutex which seems ugly since it happens at every PLFS_ENTER.  So
+// if we indeed execute this code at every PLFS_ENTER, we should probably
+// consider caching mappings of uid's to group lists and we should probably
+// also remember the age of each cache entry so that we periodically forget
+// old cachings.  ugh.
+// yes, it really needs the mutex, ugh.  let's try caching!
+// ok, this all seems good.  I've now added caching.  Later, we'll have
+// to add something to invalidate the cache entries.  At first I was just
+// thinking about maintaining a timestamp for each entry but that's maybe
+// a pain.  Prolly easier to just maintain a single timestamp for the whole
+// cache and periodically flush it.  Wonder if querying time all the time
+// will be a problem?  ugh.
+int Plfs::discover_groups( vector<gid_t> **retvec, uid_t uid ) {
     char *username;
     struct passwd *pwd;
-    pwd      = getpwuid( uid );
-    username = pwd->pw_name;
+    map<uid_t, vector<gid_t> *>::iterator itr =
+            self->memberships.find( uid );
+    if ( itr == self->memberships.end() ) {
+        vector<gid_t> *vec = new vector<gid_t>;
+        pwd      = getpwuid( uid );
+        username = pwd->pw_name;
 
-        // read the groups to discover the memberships of the caller
-    struct group *grp;
-    char         **members;
-    setgrent();
-    while( (grp = getgrent()) != NULL ) {
-        members = grp->gr_mem;
-        while (*members) {
-            if ( strcmp( *(members), username ) == 0 ) {
-                vec->push_back( grp->gr_gid );
+            // read the groups to discover the memberships of the caller
+        struct group *grp;
+        char         **members;
+
+        Util::MutexLock( &self->group_mutex, __FUNCTION__ );
+        setgrent();
+        while( (grp = getgrent()) != NULL ) {
+            members = grp->gr_mem;
+            while (*members) {
+                if ( strcmp( *(members), username ) == 0 ) {
+                    vec->push_back( grp->gr_gid );
+                }
+                members++;
             }
-            members++;
         }
+        endgrent();
+        Util::MutexUnlock( &self->group_mutex, __FUNCTION__ );
+        self->memberships[uid] = vec;
+        *retvec = vec;
+    } else {
+        *retvec = itr->second;
     }
-    endgrent();
     return 0;
 }
 		    
@@ -567,7 +598,7 @@ int Plfs::discover_groups( vector<gid_t> *vec, uid_t uid ) {
 // call PLFS_ENTER, we have to store the orig_groups of root, and we have
 // to set the supplementary groups of the caller
 int Plfs::f_chown (const char *path, uid_t uid, gid_t gid ) { 
-    PLFS_ENTER_GROUP;
+    PLFS_ENTER;
 
     if ( isDirectory( strPath ) ) {
         dir_op d;
@@ -583,7 +614,7 @@ int Plfs::f_chown (const char *path, uid_t uid, gid_t gid ) {
     // restore the original groups when we leave
     //setgroups( orig_groups.size(), (const gid_t*)&(orig_groups.front()));
 
-    PLFS_EXIT_GROUP;
+    PLFS_EXIT;
 }
 
 // in order to distribute metadata load across multiple MDS, maintain a
