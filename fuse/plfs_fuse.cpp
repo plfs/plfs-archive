@@ -559,6 +559,10 @@ int Plfs::get_groups( vector<gid_t> *vec ) {
 // a pain.  Prolly easier to just maintain a single timestamp for the whole
 // cache and periodically flush it.  Wonder if querying time all the time
 // will be a problem?  ugh.
+//
+// HEY!  HEY!  When we can get fuse 2.8.XX, we can throw some of this crap
+// away since Miklos has added fuse_getgroups which does this all for us!
+// http://article.gmane.org/gmane.comp.file-systems.fuse.devel/7952
 int Plfs::discover_groups( vector<gid_t> **retvec, uid_t uid ) {
     char *username;
     struct passwd *pwd;
