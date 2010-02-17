@@ -1,7 +1,13 @@
 PLFS_INSTALL_DIR = ../src
 
+# get the svnversion info to put into .plfsdebug
+SVN_VERSION := $(shell svnversion ..)
+TAG_VERSION := $(shell cat ../VERSION)
+
+
 TARGET   = plfs
-CXXFLAGS = -I$(PLFS_INSTALL_DIR) -DPLFS_TIMES -DCOUNT_SKIPS -g -Wall
+CXXFLAGS = -I$(PLFS_INSTALL_DIR) -DPLFS_TIMES -DCOUNT_SKIPS -g -Wall \
+		   -DSVN_VERSION=$(SVN_VERSION) -DTAG_VERSION=$(TAG_VERSION)
 LDFLAGS  = -L$(PLFS_INSTALL_DIR) -lplfs 
 LOG      = /tmp/plfs.log
 
@@ -51,7 +57,7 @@ ifndef PKG_CONFIG_PATH
 endif
 export PKG_CONFIG_PATH
 
-all: $(TARGET)
+all: $(TARGET) 
 
 $(TARGET): plfs_fuse.o main.o
 	g++ -o $(TARGET) main.o plfs_fuse.o $(LDFLAGS)

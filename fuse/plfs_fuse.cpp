@@ -36,8 +36,13 @@ using namespace std;
 
 #define DEBUGFILE ".plfsdebug"
 #define DEBUGLOG  ".plfslog"
-#define DEBUGFILESIZE 4194304
+#define DEBUGFILESIZE 4096
+#define DEBUGLOGSIZE  4194304
 #define DANGLE_POSSIBILITY 1
+
+// macros for turning a DEFINE into a string
+#define STR_EXPAND(tok) #tok
+#define STR(tok) STR_EXPAND(tok)
 
 
 // the reason we need this struct is because we want to know the original
@@ -407,7 +412,9 @@ int Plfs::getattr_helper( const char *path,
         if ( isdebugfile( path ) ) {
             stbuf->st_mode = S_IFREG | 0444;
             stbuf->st_nlink = 1;
-            stbuf->st_size = DEBUGFILESIZE;
+            stbuf->st_size = ( isdebugfile( path, DEBUGFILE ) ?
+                                DEBUGFILESIZE :
+                                DEBUGLOGSIZE );
             ret = 0; 
         } else {
             // let's remove this from our created containers
@@ -939,9 +946,11 @@ int Plfs::writeDebug( char *buf, size_t size, off_t offset, const char *path ) {
 
         // make sure we don't allow them to read more than we have
     size_t validsize; 
-    if ( size + offset > DEBUGFILESIZE ) {
-        if ( DEBUGFILESIZE > offset ) {
-            validsize = DEBUGFILESIZE - offset;
+    off_t maxsize = ( isdebugfile( path, DEBUGFILE ) 
+            ? DEBUGFILESIZE : DEBUGLOGSIZE );
+    if ( off_t(size + offset) > maxsize ) {
+        if ( maxsize > offset ) {
+            validsize = maxsize - offset;
         } else {
             validsize = 0;
         }
@@ -949,13 +958,14 @@ int Plfs::writeDebug( char *buf, size_t size, off_t offset, const char *path ) {
         validsize = size;
     }
 
-    char *tmpbuf = new char[DEBUGFILESIZE];
+    char *tmpbuf = new char[maxsize];
     int  ret;
     memset( buf, 0, size );
-    memset( tmpbuf, 0, DEBUGFILESIZE );
+    memset( tmpbuf, 0, maxsize );
 
     if ( isdebugfile( path, DEBUGFILE ) ) {
         ret = snprintf( tmpbuf, DEBUGFILESIZE, 
+                "Version %s (SVN %s)\n"
                 "Hostname %s, %.2f Uptime\n"
                 "%s"
                 "%s"
@@ -969,6 +979,7 @@ int Plfs::writeDebug( char *buf, size_t size, off_t offset, const char *path ) {
                 "%d sequential writes to datafiles\n"
         #endif 
                 "%s",
+                STR(TAG_VERSION), STR(SVN_VERSION),
                 self->myhost.c_str(), 
                 Util::getTime() - self->begin_time,
                 paramsToString(&(self->params)).c_str(),
@@ -984,13 +995,18 @@ int Plfs::writeDebug( char *buf, size_t size, off_t offset, const char *path ) {
 		#endif
                 openFilesToString().c_str() );
     } else {
-        ret = snprintf(tmpbuf, DEBUGFILESIZE, "%s", LogMessage::Dump().c_str());
+        ret = snprintf(tmpbuf, maxsize, "%s", LogMessage::Dump().c_str());
     }
-    if ( ret >= DEBUGFILESIZE ) {
+    if ( ret >= maxsize ) {
         LogMessage lm;
         lm << "WARNING:  DEBUGFILESIZE is too small" << endl;
         lm.flush();
     }
+    // this next line is nice, it makes the reading of the debug files
+    // really fast since they only read the size of the file
+    // but for some reason it crashes when the size > 4096....
+    //validsize = strlen( &(tmpbuf[offset]) );
+
     memcpy( buf, (const void*)&(tmpbuf[offset]), validsize );
     delete tmpbuf;
     return validsize; 
