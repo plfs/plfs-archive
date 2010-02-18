@@ -69,6 +69,7 @@ class Util {
 
             // other misc stuff
         static void Debug( FILE *, const char *format, ... );
+        static void Debug( FILE *, const char *format, va_list );
         static bool exists( const char* );
         static bool isDirectory( const char* );
         static double getTime();

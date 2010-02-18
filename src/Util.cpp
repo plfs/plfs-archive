@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <errno.h>
 #include "COPYRIGHT.h"
 #include <string>
@@ -106,12 +107,26 @@ void
 Util::Debug( FILE *fp, const char *format, ... ) {
     va_list args;
     va_start(args, format);
-    vfprintf(fp, format, args);
+    Util::Debug( fp, format, args);
     va_end( args );
 }
 #else
 void Util::Debug( FILE *fp, const char *format, ... ) { return; }
 #endif
+
+void
+Util::Debug( FILE *fp, const char *format, va_list args ) {
+    static FILE *debugfile = NULL;
+    static bool init = 0;
+    if ( ! init ) {
+        init = 1;
+        if ( getenv( "PLFS_DEBUG" ) ) {
+            debugfile = fopen( getenv("PLFS_DEBUG"), "w" );
+        }
+    }
+    vfprintf( (debugfile?debugfile:fp), format, args);
+    fflush( (debugfile?debugfile:fp) );
+}
 
 // initialize static variables
 HASH_MAP<string, double> utimers;

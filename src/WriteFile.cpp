@@ -96,7 +96,7 @@ struct OpenFd * WriteFile::getFd( pid_t pid ) {
             << itr->second->fd << " with writers " 
             << itr->second->writers
             << " from pid " << pid << endl;
-        Util::Debug( stderr, "%s", oss.str().c_str() );
+        //Util::Debug( stderr, "%s", oss.str().c_str() );
         ofd = itr->second;
     } else {
         /*

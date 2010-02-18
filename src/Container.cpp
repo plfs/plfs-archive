@@ -480,6 +480,14 @@ int Container::makeTopLevel( const char *expanded_path,
             Util::Debug( stderr, "Mkdir %s to %s failed: %s\n",
                 tmpName.c_str(), expanded_path, strerror(errno) );
             return -errno;
+        } else if ( errno == EEXIST ) {
+            if ( ! Container::isContainer(tmpName.c_str() ) ) {
+                Util::Debug( stderr, "Mkdir %s to %s failed: %s\n",
+                    tmpName.c_str(), expanded_path, strerror(errno) );
+            } else {
+                Util::Debug( stderr, "%s is already a container.\n",
+                        tmpName.c_str() );
+            }
         }
     }
     if ( makeMeta( getAccessFilePath(tmpName), S_IFREG, mode ) < 0 ) {

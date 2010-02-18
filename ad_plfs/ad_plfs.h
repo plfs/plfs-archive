@@ -34,9 +34,9 @@ void ADIOI_PLFS_WriteContig(ADIO_File fd, void *buf, int count,
                       MPI_Datatype datatype, int file_ptr_type,
                       ADIO_Offset offset, ADIO_Status *status, int
 		      *error_code);   
-/*
 void ADIOI_PLFS_Fcntl(ADIO_File fd, int flag, ADIO_Fcntl_t *fcntl_struct, int
 		*error_code); 
+/*
 void ADIOI_PLFS_WriteStrided(ADIO_File fd, void *buf, int count,
 		       MPI_Datatype datatype, int file_ptr_type,
 		       ADIO_Offset offset, ADIO_Status *status, int

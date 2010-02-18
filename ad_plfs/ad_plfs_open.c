@@ -17,7 +17,7 @@ void ADIOI_PLFS_Open(ADIO_File fd, int *error_code)
 
     MPI_Comm_rank( fd->comm, &rank );
     static char myname[] = "ADIOI_PLFS_OPEN";
-    fprintf( stderr, "%s: begin\n", myname );
+    plfs_debug( stderr, "%s: begin (%d)\n", myname, rank );
 
     if (fd->perm == ADIO_PERM_NULL) {
         old_mask = umask(022);
@@ -37,13 +37,10 @@ void ADIOI_PLFS_Open(ADIO_File fd, int *error_code)
         amode = amode | O_EXCL;
 
     // MPI_File_open is a collective call so only create it once
+    // unless comm = MPI_COMM_SELF in which case
+    // it appears that ad_common only passes the ADIO_CREATE to 0
     if (fd->access_mode & ADIO_CREATE) {
-        // first create the top-level directory with just one proc
-        if ( rank == 0 ) {
-            err = plfs_create( fd->filename, perm, amode );
-        }
-        MPI_Bcast( &err, 1, MPI_INT, 0, fd->comm );
-
+        err = plfs_create( fd->filename, perm, amode );
         // then create the individual hostdirs with one proc per node
         // this fd->hints->ranklist thing doesn't work
         /*
@@ -60,7 +57,7 @@ void ADIOI_PLFS_Open(ADIO_File fd, int *error_code)
 					   myname, __LINE__, MPI_ERR_IO,
 					   "**io",
 					   "**io %s", strerror(-err));
-        fprintf( stderr, "%s: failure on create\n", myname );
+        plfs_debug( stderr, "%s: failure on create\n", myname );
         return;
     }
 
@@ -73,9 +70,9 @@ void ADIOI_PLFS_Open(ADIO_File fd, int *error_code)
 					   myname, __LINE__, MPI_ERR_IO,
 					   "**io",
 					   "**io %s", strerror(-err));
-        fprintf( stderr, "%s: failure\n", myname );
+        plfs_debug( stderr, "%s: failure\n", myname );
     } else {
-        fprintf( stderr, "%s: Success!\n", myname );
+        plfs_debug( stderr, "%s: Success (%d)!\n", myname, rank );
         fd->fs_ptr = pfd;
         *error_code = MPI_SUCCESS;
     }

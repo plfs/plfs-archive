@@ -6,6 +6,7 @@
 #include "Util.h"
 #include "OpenFile.h"
 
+#include <stdarg.h>
 #include <limits>
 
 // a shortcut for functions that are expecting zero
@@ -42,6 +43,14 @@ plfs_chown( const char *path, uid_t u, gid_t g ) {
 int
 is_plfs_file( const char *path ) {
     return Container::isContainer( path );
+}
+
+void 
+plfs_debug( FILE *fp, const char *format, ... ) {
+    va_list args;
+    va_start(args, format);
+    Util::Debug(fp, format, args);
+    va_end( args );
 }
 
 int
@@ -346,6 +355,7 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
 int 
 plfs_getattr( Plfs_fd *of, const char *path, struct stat *stbuf ) {
     int ret = 0;
+    if ( path == NULL && of ) path = of->getPath();
     if ( ! Container::isContainer( path ) ) {
         ret = retValue( Util::Lstat( path, stbuf ) );
     } else {

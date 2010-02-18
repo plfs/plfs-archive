@@ -13,7 +13,7 @@ VERSION    = $(shell /usr/bin/svnversion ..)
 # add -DVERBOSE to get verbose output
 DEBUG   = -DVERBOSE -DNDEBUG -DPLFS_TIMES -DNUTIL -DINDEX_CONTAINS_TIMESTAMPS \
 	      -DCOUNT_SKIPS 
-CXXFLAGS  = -g -Wall $(DEBUG) -D_FILE_OFFSET_BITS=64 -DVERSION=$(VERSION)
+CXXFLAGS  = -g -Wall $(DEBUG) -fPIC -D_FILE_OFFSET_BITS=64 -DVERSION=$(VERSION)
 LDFLAGS = -lpthread
 
 UNAME		:= $(shell uname)
@@ -23,6 +23,9 @@ ifeq ($(UNAME), Darwin)
 endif
 
 all: $(LIBRARY)
+
+mpi: $(LIBRARY)
+	cd $(HOME)/openmpi/openmpi-1.3.3; ./gg-insert-plfs
 
 $(LIBRARY): $(OBJS) 
 	@echo $(VERSION)

@@ -318,7 +318,8 @@ int Index::handleOverlap( ContainerEntry *g_entry,
         global_index.erase( insert_ret.first );
         insert_ret = insertGlobalEntry( g_entry ); 
         if ( insert_ret.second == false ) {
-            cerr << "WTF? Deleted old entry but couldn't insert new" << endl;
+            Util::Debug( stderr, 
+                    "WTF? Deleted old entry but couldn't insert new" );
             return -1;
         }
 
@@ -330,8 +331,10 @@ int Index::handleOverlap( ContainerEntry *g_entry,
             pair< map<off_t,ContainerEntry>::iterator, bool > insert_old;
             insert_old = insertGlobalEntry( &old );
             if ( insert_old.second == false ) {
-                cerr << "Adjusted old entry " << old << " but couldn't insert" 
+                ostringstream oss;
+                oss << "Adjusted old entry " << old << " but couldn't insert" 
                      << endl;
+                Util::Debug( stderr, "%s\n", oss.str().c_str() );
                 return -1;
             }
         }
@@ -392,8 +395,10 @@ int Index::insertGlobal( ContainerEntry *g_entry ) {
     //     << logical_path << endl;
     ret = insertGlobalEntry( g_entry ); 
     if ( ret.second == false ) {
-        cerr << "overlap(1) at " << *g_entry << " with " << ret.first->second 
+        ostringstream oss;
+        oss << "overlap(1) at " << *g_entry << " with " << ret.first->second 
              << endl;
+        Util::Debug( stderr, "%s\n", oss.str().c_str() );
         overlap  = true;
         inserted = false;
     } 
@@ -403,17 +408,23 @@ int Index::insertGlobal( ContainerEntry *g_entry ) {
     next = ret.first; next++;
     prev = ret.first; prev--;
     if ( next != global_index.end() && g_entry->overlap( next->second ) ) {
-        cerr << "overlap2 at " << *g_entry << " and " <<next->second <<endl;
+        ostringstream oss;
+        oss << "overlap2 at " << *g_entry << " and " <<next->second <<endl;
+        Util::Debug( stderr, "%s\n", oss.str().c_str() );
         overlap = true;
     }
     if (ret.first!=global_index.begin() && prev->second.overlap(*g_entry) ){
-        cerr << "overlap3 at " << *g_entry << " and " <<prev->second <<endl;
+        ostringstream oss;
+        oss << "overlap3 at " << *g_entry << " and " <<prev->second <<endl;
+        Util::Debug( stderr, "%s\n", oss.str().c_str() );
         overlap = true;
     }
 
     if ( overlap ) {
-        cerr << __FUNCTION__ << " of " << logical_path << " trying to insert "
+        ostringstream oss;
+        oss << __FUNCTION__ << " of " << logical_path << " trying to insert "
             << "overlap at " << g_entry->logical_offset << endl;
+        Util::Debug( stderr, "%s\n", oss.str().c_str() );
         return handleOverlap( g_entry, ret );
     } else {
             // might as well try to merge any potentially adjoining regions
@@ -442,15 +453,17 @@ int Index::cleanupReadIndex( int fd, void *maddr, off_t length, int ret,
 {
     int ret2 = 0, ret3 = 0;
     if ( ret < 0 ) {
-        fprintf( stderr, "WTF.  readIndex failed during %s on %s: %s\n",
+        Util::Debug( stderr, "WTF.  readIndex failed during %s on %s: %s\n",
                 last_func, indexfile, strerror( errno ) );
     }
 
     if ( maddr != NULL ) {
         ret2 = munmap( maddr, length );
         if ( ret2 < 0 ) {
-            cerr << "WTF. readIndex failed during munmap of "  << indexfile 
+            ostringstream oss;
+            oss << "WTF. readIndex failed during munmap of "  << indexfile 
                  << " (" << length << "): " << strerror(errno) << endl;
+            Util::Debug( stderr, "%s\n", oss.str().c_str() );
             ret = ret2; // set to error
         }
     }
@@ -458,7 +471,8 @@ int Index::cleanupReadIndex( int fd, void *maddr, off_t length, int ret,
     if ( fd > 0 ) {
         ret3 = Util::Close( fd );
         if ( ret3 < 0 ) {
-            fprintf( stderr, "WTF. readIndex failed during close of %s: %s\n",
+            Util::Debug( stderr, 
+                    "WTF. readIndex failed during close of %s: %s\n",
                     indexfile, strerror( errno ) );
             ret = ret3; // set to error
         }
@@ -477,7 +491,7 @@ int Index::chunkFound( int *fd, off_t *chunk_off, size_t *chunk_len,
     if( cf_ptr->fd < 0 ) {
         cf_ptr->fd = Util::Open(cf_ptr->path.c_str(), O_RDONLY);
         if ( cf_ptr->fd < 0 ) {
-            fprintf( stderr, "WTF? Open of %s: %s\n", 
+            Util::Debug( stderr, "WTF? Open of %s: %s\n", 
                     cf_ptr->path.c_str(), strerror(errno) );
             return -errno;
         } 
@@ -558,7 +572,9 @@ int Index::globalLookup( int *fd, off_t *chunk_off, size_t *chunk_len,
 
         // case 4: within a hole
     if ( logical < entry.logical_offset ) {
-        cerr << "FOUND(4): " << logical << " is in a hole" << endl;
+        ostringstream oss;
+        oss << "FOUND(4): " << logical << " is in a hole" << endl;
+        Util::Debug( stderr, "%s\n", oss.str().c_str() );
         off_t remaining_hole_size = entry.logical_offset - logical;
         *fd = -1;
         *chunk_len = remaining_hole_size;
@@ -566,7 +582,9 @@ int Index::globalLookup( int *fd, off_t *chunk_off, size_t *chunk_len,
     }
 
         // case 3: off the end of the file
-    cerr << "FOUND(3): " << logical << " is beyond the end of the file" << endl;
+    oss.str("");    // stupid way to clear the buffer
+    oss << "FOUND(3): " << logical << " is beyond the end of the file" << endl;
+    Util::Debug( stderr, "%s\n", oss.str().c_str() );
     *fd = -1;
     *chunk_len = 0;
     return 0;

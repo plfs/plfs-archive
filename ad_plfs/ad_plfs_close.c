@@ -12,6 +12,7 @@ void ADIOI_PLFS_Close(ADIO_File fd, int *error_code)
 {
     int err, rank;
     static char myname[] = "ADIOI_PLFS_CLOSE";
+    plfs_debug( stderr, "%s: begin\n", myname );
 
     MPI_Comm_rank( fd->comm, &rank );
     err = plfs_close(fd->fs_ptr, rank);

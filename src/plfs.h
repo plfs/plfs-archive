@@ -1,6 +1,8 @@
 #ifndef __PLFS_H_
 #define __PLFS_H_
 
+#include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -40,6 +42,8 @@ int plfs_close( Plfs_fd *, pid_t );
    you don't need to call this, you can also pass O_CREAT to plfs_open
 */
 int plfs_create( const char *path, mode_t mode, int flags ); 
+
+void plfs_debug( FILE *, const char *format, ... );
 
 /* plfs_open
 */
