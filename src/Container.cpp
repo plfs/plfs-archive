@@ -507,38 +507,49 @@ int Container::makeTopLevel( const char *expanded_path,
     // this just moves the bottleneck to the isDirectory
     // plus scared it could double it if they were both slow...
     //if ( ! isDirectory( expanded_path ) ) 
-    if ( Util::Rename( tmpName.c_str(), expanded_path ) < 0 ) {
-        int saveerrno = errno;
-        if ( Util::Rmdir( tmpName.c_str() ) < 0 ) {
-            Util::Debug( stderr, "rmdir of %s failed : %s\n",
-                    tmpName.c_str(), strerror(errno) );
-        }
-        // probably what happened is some other node outraced us
-        // if it is here now as a container, that's what happened
-        // this check for whether it's a container might be slow
-        // if worried about that, change it to check saveerrno
-        // if it's something like EEXIST or ENOTEMPTY or EISDIR
-        // then that probably means the same thing 
-        //if ( ! isContainer( expanded_path ) ) 
-        if ( saveerrno != EEXIST && saveerrno != ENOTEMPTY 
-                && saveerrno != EISDIR && saveerrno != ENOENT ) {
-            Util::Debug( stderr, "rename %s to %s failed: %s\n",
-                    tmpName.c_str(), expanded_path, strerror(saveerrno) );
-            return -saveerrno;
-        }
-    } else {
-        // we made the top level container
-        // this is like the only time we know that we won the global race
-        // hmmm, any optimizations we could make here?
-        // make the metadir after we do the rename so that all nodes
-        // don't make an extra unnecessary dir, but this does create
-        // a race if someone wants to use the meta dir and it doesn't
-        // exist, so we need to make sure we never assume the metadir
-        if ( makeMeta( getMetaDirPath( strPath ), S_IFDIR, DEFAULT_MODE ) < 0 ){
-            return -errno;
-        }
-        if ( makeMeta( getOpenHostsDir(strPath), S_IFDIR, DEFAULT_MODE ) < 0 ) {
-            return -errno;
+    int attempts = 0;
+    while (attempts < 2 ) {
+        attempts++;
+        if ( Util::Rename( tmpName.c_str(), expanded_path ) < 0 ) {
+            int saveerrno = errno;
+            Util::Debug( stderr, "rename of %s -> %s failed: %s\n",
+                tmpName.c_str(), expanded_path, strerror(errno) );
+            if ( saveerrno == ENOTDIR ) {
+                // there's a normal file where we want to make our container
+                Util::Unlink( expanded_path );
+                continue;
+            }
+            if ( Util::Rmdir( tmpName.c_str() ) < 0 ) {
+                Util::Debug( stderr, "rmdir of %s failed : %s\n",
+                        tmpName.c_str(), strerror(errno) );
+            }
+            // probably what happened is some other node outraced us
+            // if it is here now as a container, that's what happened
+            // this check for whether it's a container might be slow
+            // if worried about that, change it to check saveerrno
+            // if it's something like EEXIST or ENOTEMPTY or EISDIR
+            // then that probably means the same thing 
+            //if ( ! isContainer( expanded_path ) ) 
+            if ( saveerrno != EEXIST && saveerrno != ENOTEMPTY 
+                    && saveerrno != EISDIR && saveerrno != ENOENT ) {
+                Util::Debug( stderr, "rename %s to %s failed: %s\n",
+                        tmpName.c_str(), expanded_path, strerror(saveerrno) );
+                return -saveerrno;
+            }
+        } else {
+            // we made the top level container
+            // this is like the only time we know that we won the global race
+            // hmmm, any optimizations we could make here?
+            // make the metadir after we do the rename so that all nodes
+            // don't make an extra unnecessary dir, but this does create
+            // a race if someone wants to use the meta dir and it doesn't
+            // exist, so we need to make sure we never assume the metadir
+            if ( makeMeta(getMetaDirPath(strPath), S_IFDIR, DEFAULT_MODE ) < 0){
+                return -errno;
+            }
+            if ( makeMeta( getOpenHostsDir(strPath), S_IFDIR, DEFAULT_MODE)< 0){
+                return -errno;
+            }
         }
     }
     return 0;
