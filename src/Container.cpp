@@ -213,7 +213,8 @@ int Container::addMeta( off_t last_offset, size_t total_bytes,
         << host;
     metafile = oss.str();
     Util::Debug( stderr, "Creating metafile %s\n", metafile.c_str() );
-    return ignoreNoEnt(Util::Creat( metafile.c_str(), DEFAULT_MODE ));
+    int ret = Util::Creat( metafile.c_str(), DEFAULT_MODE );
+	
 }
 
 string Container::fetchMeta( string metafile_name, 

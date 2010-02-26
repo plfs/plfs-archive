@@ -27,13 +27,16 @@ HDFSIOStore::HDFSIOStore(const char* host, int port)
  * it is removed on close.
  * Returns the new fd on success, -1 on error.
  */
-int HDFSIOStore::AddFileToMap(hdfsFile file)
+int HDFSIOStore::AddFileToMap(hdfsFile file, string &path)
 {
     int fd;
+    struct openFile of;
+    of.file = file;
+    of.path = path;
     pthread_mutex_lock(&fd_count_mutex);
     fd = fd_count++;
     pthread_mutex_unlock(&fd_count_mutex);
-    fdMap[fd] = file;
+    fdMap[fd] = of;
 
     return fd;
 }
@@ -52,12 +55,22 @@ void HDFSIOStore::RemoveFileFromMap(int fd)
  */
 hdfsFile HDFSIOStore::GetFileFromMap(int fd)
 {
-    map<int, hdfsFile>::iterator it;
+    map<int, openFile>::iterator it;
     it= fdMap.find(fd);
     if (it == fdMap.end()) {
         return NULL;
     }
-    return it->second;
+    return it->second.file;
+}
+
+string* HDFSIOStore::GetPathFromMap(int fd)
+{
+    map<int, openFile>::iterator it;
+    it= fdMap.find(fd);
+    if (it == fdMap.end()) {
+        return NULL;
+    }
+    return &it->second.path;
 }
 
 /**
@@ -68,7 +81,7 @@ hdfsFile HDFSIOStore::GetFileFromMap(int fd)
 int HDFSIOStore::Access(const char* path, int mode) 
 {
     // hdfsExists says it returns 0 on success, but I believe this to be wrong documentation.
-    if ((mode & F_OK) && !hdfsExists(fs, path)) {
+    if ((mode & F_OK) && hdfsExists(fs, path)) {
         errno = ENOENT;
         return -1;
     }
@@ -77,7 +90,7 @@ int HDFSIOStore::Access(const char* path, int mode)
 
 int HDFSIOStore::Chmod(const char* path, mode_t mode) 
 {
-    return hdfsChmod(fs, path, mode);
+    return 0; //hdfsChmod(fs, path, mode);
 }
 
 /**
@@ -103,14 +116,38 @@ int HDFSIOStore::Close(int fd)
 {
     int ret;
     hdfsFile openFile;
+    string* open_path;
+
     openFile = GetFileFromMap(fd);
+    std::cout << "Closing " << fd << "\n";
     if (!openFile) {
+        std::cout << "Error looking it up in map.\n";
         errno = ENOENT;
         return -1;
     }
+    std::cout << "FD " << fd << " corresponds to hdfsFile " << openFile << "\n";
+    if (hdfsFlush(fs, openFile)) {
+        std::cout << "Error flushing file.\n";
+        return -1;
+    }
     ret = hdfsCloseFile(fs, openFile);
-    if (!ret)
-        RemoveFileFromMap(fd);
+    if (ret) {
+        std::cout << "Error closing hdfsFile\n";
+        return ret;
+    }
+
+    /*    // DEBUGGING: Try to re-open the file to debug close error.
+    open_path = GetPathFromMap(fd);
+    std::cout << "Re-opening " << open_path << "\n";
+    openFile = hdfsOpenFile(fs, open_path->c_str(), O_RDONLY,0,0,0);
+    if (!openFile) {
+        std::cout << "Error re-opening the file!" << errno << "\n";
+    } else {
+        std::cout << "Could successfully re-open. Interesting....\n";
+        hdfsCloseFile(fs, openFile);
+    }
+    */
+    RemoveFileFromMap(fd);
     return ret;
 }
 
@@ -135,13 +172,14 @@ int HDFSIOStore::Closedir(DIR* dirp)
 int HDFSIOStore::Creat(const char*path, mode_t mode)
 {
     int fd;
+    string path_string(path);
     hdfsFile file = hdfsOpenFile(fs, path, O_WRONLY, 0, 0, 0);
     if (!file)
         return -1;
-    hdfsChmod(fs, path, mode);
+    //hdfsChmod(fs, path, mode);
     
     // We've created the file, set its mode. Now add it to map!
-    fd = AddFileToMap(file);
+    fd = AddFileToMap(file, path_string);
     return fd;
 }
 
@@ -273,7 +311,8 @@ int HDFSIOStore::Open(const char* path, int flags)
     int new_flags;
     hdfsFile openFile;
     int fd;
-
+    string path_string(path);
+    
     if (flags == O_RDONLY) {
         new_flags = O_RDONLY;
     } else if (flags & O_WRONLY)  {
@@ -284,15 +323,23 @@ int HDFSIOStore::Open(const char* path, int flags)
         return -1;
     }
 
-
+    std::cout << "Attempting open on " << path << "\n";
+    if (hdfsExists(fs, path)) {
+        std::cout << "Doesn't exist yet....\n";
+    } else {
+        hdfsFileInfo* info = hdfsGetPathInfo(fs, path);
+        std::cout << "Exists and has " << info->mSize << " bytes\n";
+        hdfsFreeFileInfo(info, 1);
+    }
     openFile = hdfsOpenFile(fs, path, new_flags, 0, 0, 0);
     
     if (!openFile) {
         std::cout << "Disaster trying to open " << path << "\n";
         return -1;
     }
+    fd = AddFileToMap(openFile, path_string);
 
-    fd = AddFileToMap(openFile);
+    std::cout << "Opened fd " << fd << "with secret file " << openFile << "\n";
     return fd;
 }
 
@@ -530,7 +577,7 @@ int HDFSIOStore::Truncate(const char* path, off_t length)
     // This situation can be avoided with a mutex controlling delete and truncate,
     // but for the time being, I think this is too expensive for the behavior
     // benefits.
-    if (!hdfsExists(fs, path)) {
+    if (hdfsExists(fs, path)) { // -1 if it doesn't exist.
         errno = ENOENT;
         return -1;
     }

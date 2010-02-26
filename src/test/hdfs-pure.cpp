@@ -13,6 +13,7 @@ int main(int argc, char **argv) {
 
     hdfsFile indexFile;
     hdfsFile dataFile;
+    hdfsFile otherFile;
 
     if (argc != 2) {
         std::cout << "Usage: " << argv[0] << "<path to test file>\n";
@@ -25,7 +26,13 @@ int main(int argc, char **argv) {
     hdfsFS fs = hdfsConnect("default", 0);
 
     // Make the directory/container
-    if (hdfsCreateDirectory(fs, argv[1])) {
+    if (hdfsCreateDirectory(fs, "tempDir")) {
+        std::cout << "Error creating container directory.\n";
+        return -1;
+    }
+
+	// rename the thing
+    if (hdfsRename(fs, "tempDir", argv[1])) {
         std::cout << "Error creating container directory.\n";
         return -1;
     }
@@ -63,6 +70,14 @@ int main(int argc, char **argv) {
         std::cout << "Error closing indexfile.\n";
         return -1;
     }
+    otherFile = hdfsOpenFile(fs, "blah", O_WRONLY, 0,0,0);
+
+    if (!otherFile) {
+        std::cout << "Couldn't open extraneous file.\n";
+        return -1;
+    } else {
+        std::cout << "Could open extraneous file!\n";
+    }
 
     // Re-open for read.
     indexFile = hdfsOpenFile(fs, "index", O_RDONLY, 0, 0, 0);
@@ -84,5 +99,8 @@ int main(int argc, char **argv) {
         return -1;
     }
 
+
+    std::cout << inputBuffer << "\n";
+    std::cout <<"interesting.\n";
     return 0;
 }

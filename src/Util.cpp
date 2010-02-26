@@ -331,7 +331,7 @@ int Util::Creat( const char *path, mode_t mode ) {
     ENTER_PATH;
     ret = ioStore->Creat( path, mode );
     if ( ret > 0 ) {
-        ret = close( ret );
+        ret = ioStore->Close(ret); 
     }
     EXIT_UTIL;
 }

@@ -47,7 +47,11 @@ public:
     HDFSIOStore(const char* host, int port);
 protected:
     hdfsFS fs; // The hdfs filesystem object for this object.
-    map<int, hdfsFile> fdMap; // Maps from int file descriptors to HDFS files.
+    struct openFile {
+        hdfsFile file;
+        string path;
+    };
+    map<int, struct openFile> fdMap; // Maps from int file descriptors to HDFS files.
     const char* hostName;
     int portNum;
 
@@ -62,8 +66,9 @@ protected:
     // To assign unique fds.
     pthread_mutex_t fd_count_mutex;
     int fd_count;
-    int AddFileToMap(hdfsFile file);
+    int AddFileToMap(hdfsFile file, string& path);
     hdfsFile GetFileFromMap(int fd);
+    string* GetPathFromMap(int fd);
     void RemoveFileFromMap(int fd);
 private:
     // Declared but not defined, so illegal to call. We only want proper invocations of
