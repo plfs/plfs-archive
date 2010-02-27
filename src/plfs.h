@@ -52,6 +52,8 @@ int plfs_open( Plfs_fd **, const char *path,
 
 ssize_t plfs_read( Plfs_fd *, char *buf, size_t size, off_t offset );
 
+int plfs_rename( Plfs_fd *, const char *from, const char *to );
+
 /* Plfs_fd can be NULL */
 int plfs_getattr( Plfs_fd *, const char *path, struct stat *stbuf );
 

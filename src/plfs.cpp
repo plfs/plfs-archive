@@ -169,6 +169,15 @@ plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
     return ret;
 }
 
+int
+plfs_rename( Plfs_fd *pfd, const char *from, const char *to ) {
+    int ret = retValue( Util::Rename( from, to ) );
+    if ( ret == 0 && pfd ) {
+        pfd->setPath( to );
+    }
+    return ret;
+}
+
 // pass in a NULL Plfs_fd to have one created for you
 // pass in a valid one to add more writers to it
 // one problem is that we fail if we're asked to overwrite a normal file

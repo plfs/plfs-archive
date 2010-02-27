@@ -58,8 +58,7 @@ struct OpenFile {
 };
 
 #ifdef PLFS_TIMES
-    #define START_TIMES double begin, end;  \
-                        begin = Util::getTime();
+    #define START_TIMES double begin, end; begin = Util::getTime();
     #define END_TIMES   end = Util::getTime(); \
                         Util::addTime( __FUNCTION__, end-begin, (ret<0) );
 #else
@@ -67,57 +66,43 @@ struct OpenFile {
     #define END_TIMES
 #endif
 
-#define SAVE_GROUPS    vector<gid_t> orig_groups;                              \
-                       vector<gid_t> *user_groups;                             \
-                       get_groups( &orig_groups );                             \
-                       discover_groups(&user_groups,fuse_get_context()->uid);  \
-                       setgroups( user_groups->size(),                         \
-                              (const gid_t*)&(user_groups->front()) ); 
-
-#define RESTORE_GROUPS setgroups( orig_groups.size(),                         \
+#define RESTORE_GROUPS setgroups( orig_groups.size(),                   \
                                 (const gid_t*)&(orig_groups.front()));
+#define RESTORE_IDS    SET_IDS(save_uid,save_gid);
 
 #ifdef __FreeBSD__
-    #define SAVE_IDS 
-    #define RESTORE_IDS 
+    #define SET_IDS(X,Y)
+    #define SAVE_IDS
 #else
     #include <sys/fsuid.h>  
-    #define SAVE_IDS   uid_t save_uid = Util::Getuid();                        \
-                       gid_t save_gid = Util::Getgid();                        \
-                       Util::Setfsuid( fuse_get_context()->uid );              \
-                       Util::Setfsgid( fuse_get_context()->gid );              
-
-    #define RESTORE_IDS Util::Setfsuid(save_uid); Util::Setfsgid(save_gid);   
+    #define SAVE_IDS uid_t s_uid = Util::Getuid(); gid_t s_gid = Util::Getgid();
+    #define SET_IDS(X,Y)   Util::Setfsuid( X );    Util::Setfsgid( Y ); 
 #endif
 
-//#define PLFS_ENTER_GROUP SAVE_GROUPS; PLFS_ENTER;
-
-#define PLFS_ENTER SAVE_GROUPS;                                        \
-                   string strPath  = expandPath( path );               \
-                   ostringstream funct_id;                             \
-                   LogMessage lm, lm2;                                 \
-                   START_TIMES;                                        \
-                   funct_id << setw(16) << fixed << setprecision(16)   \
-                        << begin << " PLFS::" << __FUNCTION__          \
-                        << " on " << strPath << " pid "                \
-                        << fuse_get_context()->pid << " ";             \
-                   lm << funct_id.str() << endl;                       \
-                   lm.flush();                                         \
-                   SAVE_IDS;                                           \
+#define PLFS_ENTER vector<gid_t> orig_groups;                                 \
+                   ostringstream funct_id;                                    \
+                   LogMessage lm, lm2;                                        \
+                   string strPath  = expandPath( path );                      \
+                   get_groups( &orig_groups );                                \
+                   set_groups( fuse_get_context()->uid );                     \
+                   START_TIMES;                                               \
+                   funct_id << setw(16) << fixed << setprecision(16)          \
+                        << begin << " PLFS::" << __FUNCTION__                 \
+                        << " on " << strPath << " pid "                       \
+                        << fuse_get_context()->pid << " ";                    \
+                   lm << funct_id.str() << endl;                              \
+                   lm.flush();                                                \
+                   SAVE_IDS;                                                  \
+                   SET_IDS(fuse_get_context()->uid,fuse_get_context()->gid);  \
                    int ret = 0;
 
-#define PLFS_ENTER_IO  PLFS_ENTER
-#define PLFS_ENTER_PID PLFS_ENTER 
-
-#define PLFS_EXIT_ALL  funct_id << (ret >= 0 ? "success" : strerror(-ret) ) \
-                                << " " << end-begin << "s";                 \
-                       lm2 << funct_id.str() << endl; lm2.flush();          \
-                       return ret;
-
-#define PLFS_EXIT       RESTORE_IDS; RESTORE_GROUPS; END_TIMES; PLFS_EXIT_ALL;
-//#define PLFS_EXIT_GROUP RESTORE_IDS; RESTORE_GROUPS; END_TIMES; PLFS_EXIT_ALL;
-
-#define PLFS_EXIT_IO   PLFS_EXIT 
+#define PLFS_EXIT  SET_IDS(s_uid,s_gid);                                \
+                   RESTORE_GROUPS;                                      \
+                   END_TIMES;                                           \
+                   funct_id << (ret >= 0 ? "success" : strerror(-ret) ) \
+                            << " " << end-begin << "s";                 \
+                   lm2 << funct_id.str() << endl; lm2.flush();          \
+                   return ret;
 
 #define EXIT_IF_DEBUG  if ( isdebugfile(path) ) return 0;
 
@@ -369,7 +354,7 @@ int Plfs::f_mknod(const char *path, mode_t mode, dev_t rdev) {
 // untar of tarballs, so I'm gonna try to call f_mknod here
 // the big tarball thing seems to work again with this commented out.... ?
 int Plfs::f_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
-    PLFS_ENTER_PID;
+    PLFS_ENTER;
     //ret = f_mknod( strPath.c_str(), mode, 0 );
     ret = -ENOSYS;
     PLFS_EXIT;
@@ -378,7 +363,7 @@ int Plfs::f_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
 // returns 0 or -errno
 // nothing to do for a read file
 int Plfs::f_fsync(const char *path, int datasync, struct fuse_file_info *fi) {
-    PLFS_ENTER_PID; GET_OPEN_FILE;
+    PLFS_ENTER; GET_OPEN_FILE;
     if ( of ) {
         plfs_sync( of, fuse_get_context()->pid );
     }
@@ -389,7 +374,7 @@ int Plfs::f_fsync(const char *path, int datasync, struct fuse_file_info *fi) {
 // current write file and adjust those indices also if necessary
 int Plfs::f_ftruncate(const char *path, off_t offset, struct fuse_file_info *fi)
 {
-    PLFS_ENTER_PID; GET_OPEN_FILE;
+    PLFS_ENTER; GET_OPEN_FILE;
     ret = plfs_trunc( of, strPath.c_str(), offset );
     PLFS_EXIT;
 }
@@ -446,7 +431,7 @@ int Plfs::getattr_helper( const char *path,
 int Plfs::f_fgetattr(const char *path, struct stat *stbuf, 
         struct fuse_file_info *fi) 
 {
-    PLFS_ENTER_PID; GET_OPEN_FILE;
+    PLFS_ENTER; GET_OPEN_FILE;
     ret = getattr_helper( path, stbuf, of );
     PLFS_EXIT;
 }
@@ -567,16 +552,38 @@ int Plfs::get_groups( vector<gid_t> *vec ) {
 // cache and periodically flush it.  Wonder if querying time all the time
 // will be a problem?  ugh.
 //
+// TODO:
 // HEY!  HEY!  When we can get fuse 2.8.XX, we can throw some of this crap
 // away since Miklos has added fuse_getgroups which does this all for us!
 // http://article.gmane.org/gmane.comp.file-systems.fuse.devel/7952
-int Plfs::discover_groups( vector<gid_t> **retvec, uid_t uid ) {
+int Plfs::set_groups( uid_t uid ) {
     char *username;
     struct passwd *pwd;
-    map<uid_t, vector<gid_t> *>::iterator itr =
+    vector<gid_t> groups;
+    vector<gid_t> *groups_ptr;
+    static double age = Util::getTime();
+        // unfortunately, I think this whole thing needs to be in a mutex
+        // it used to be the case that we only had the mutex around the
+        // code to read the groups and the lookup was unprotected
+        // but now we need to periodically purge the data-structure and
+        // I'm not sure the data-structure is thread-safe
+        // what if we get an itr, and then someone else frees the structure,
+        // and then we try to dereference the itr?
+    Util::MutexLock( &self->group_mutex, __FUNCTION__ );
+
+    // purge the cache every 30 seconds
+    if ( Util::getTime() - age > 30 ) {
+        self->memberships.clear();
+        age = Util::getTime();
+    }
+
+    // do the lookup
+    map<uid_t, vector<gid_t> >::iterator itr =
             self->memberships.find( uid );
+
+    // if not found, find it and cache it
     if ( itr == self->memberships.end() ) {
-        vector<gid_t> *vec = new vector<gid_t>;
+        Util::Debug( stderr, "Need to find groups for %d\n", (int)uid );
         pwd      = getpwuid( uid );
         username = pwd->pw_name;
 
@@ -584,24 +591,26 @@ int Plfs::discover_groups( vector<gid_t> **retvec, uid_t uid ) {
         struct group *grp;
         char         **members;
 
-        Util::MutexLock( &self->group_mutex, __FUNCTION__ );
         setgrent();
         while( (grp = getgrent()) != NULL ) {
             members = grp->gr_mem;
             while (*members) {
                 if ( strcmp( *(members), username ) == 0 ) {
-                    vec->push_back( grp->gr_gid );
+                    groups.push_back( grp->gr_gid );
                 }
                 members++;
             }
         }
         endgrent();
-        Util::MutexUnlock( &self->group_mutex, __FUNCTION__ );
-        self->memberships[uid] = vec;
-        *retvec = vec;
+        self->memberships[uid] = groups;
+        groups_ptr = &groups;
     } else {
-        *retvec = itr->second;
+        groups_ptr = &(itr->second);
     }
+
+    // now unlock the mutex, set the groups, and return 
+    Util::MutexUnlock( &self->group_mutex, __FUNCTION__ );
+    setgroups( groups_ptr->size(), (const gid_t*)&(groups_ptr->front()) ); 
     return 0;
 }
 		    
@@ -681,7 +690,7 @@ int Plfs::removeWriteFile( WriteFile *of, string strPath ) {
 // see f_readdir for some documentation here
 // returns 0 or -errno
 int Plfs::f_opendir( const char *path, struct fuse_file_info *fi ) {
-    PLFS_ENTER_PID;
+    PLFS_ENTER;
     PLFS_EXIT;
 }
 
@@ -693,7 +702,7 @@ int Plfs::f_opendir( const char *path, struct fuse_file_info *fi ) {
 int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		off_t offset, struct fuse_file_info *fi) 
 {
-    PLFS_ENTER_PID;
+    PLFS_ENTER;
     vector<string>::iterator itr;
     set<string> entries;
 
@@ -733,7 +742,7 @@ int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 }
 
 int Plfs::f_releasedir( const char *path, struct fuse_file_info *fi ) {
-    PLFS_ENTER_PID;
+    PLFS_ENTER;
     PLFS_EXIT;
 }
 
@@ -745,7 +754,7 @@ int Plfs::f_releasedir( const char *path, struct fuse_file_info *fi ) {
 int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
     fi->fh = (uint64_t)NULL;
     EXIT_IF_DEBUG;
-    PLFS_ENTER_PID;
+    PLFS_ENTER;
     Plfs_fd *pfd = NULL;
     bool newly_created = false;
 
@@ -799,15 +808,18 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
 // so it should be safe to close all fd's on the first release
 // and delete it.  But it's safer to wait until the last release
 // 
-// shoot.  the release is tricky bec it might not pass the correct pid
 int Plfs::f_release( const char *path, struct fuse_file_info *fi ) {
-    PLFS_ENTER_PID; GET_OPEN_FILE;
+    PLFS_ENTER; GET_OPEN_FILE;
     // there is one 'Plfs_fd *of' shared by multiple procs
     // each proc has its own 'OpenFile openfile'
     if ( of ) {
-        // TODO, we also need to set correct groups here
-        Util::Setfsuid( openfile->uid );
-        Util::Setfsgid( openfile->gid );
+        // this function is called by the root process so in order to set up
+        // the persona, we need to pull the cached persona info
+        // we need to set up the persona since closing the file will create
+        // the metadata dropping and we need it created by the same persona
+        // who created the container
+        SET_IDS(    openfile->uid, openfile->gid );
+        set_groups( openfile->uid );
         Util::MutexLock( &self->fd_mutex, __FUNCTION__ );
         int remaining = plfs_close( of, openfile->pid );
         fi->fh = (uint64_t)NULL;
@@ -866,9 +878,9 @@ mode_t Plfs::getMode( string expanded ) {
 int Plfs::f_write(const char *path, const char *buf, size_t size, off_t offset,
 		struct fuse_file_info *fi) 
 {
-    PLFS_ENTER_IO; GET_OPEN_FILE;
+    PLFS_ENTER; GET_OPEN_FILE;
     ret = plfs_write( of, buf, size, offset, fuse_get_context()->pid );
-    PLFS_EXIT_IO;
+    PLFS_EXIT;
 }
 
 // handle this directly in fuse, no need to use plfs library
@@ -922,9 +934,9 @@ int Plfs::f_readn(const char *path, char *buf, size_t size, off_t offset,
         return writeDebug( buf, size, offset, path );
     }
 
-    PLFS_ENTER_IO; GET_OPEN_FILE;
+    PLFS_ENTER; GET_OPEN_FILE;
     ret = plfs_read( of, buf, size, offset );
-    PLFS_EXIT_IO;
+    PLFS_EXIT;
 }
 
 string Plfs::openFilesToString() {
@@ -1038,11 +1050,11 @@ string Plfs::paramsToString( Params *p ) {
 // be called before some IO's.  So for safety sake, we should sync
 // here and do the close in the release
 int Plfs::f_flush( const char *path, struct fuse_file_info *fi ) {
-    PLFS_ENTER_IO; GET_OPEN_FILE;
+    PLFS_ENTER; GET_OPEN_FILE;
     if ( of ) {
         ret = plfs_sync( of, fuse_get_context()->pid );
     }
-    PLFS_EXIT_IO;
+    PLFS_EXIT;
 }
 
 // returns 0 or -errno
@@ -1064,14 +1076,24 @@ int Plfs::f_rename( const char *path, const char *to ) {
     Plfs_fd *pfd = findOpenFile( strPath );
     if ( pfd ) {
         fprintf( stderr, "WTF?  Rename open file\n" );
-        ret = -ENOSYS;
+        //ret = -ENOSYS;
     }
 
+    ret = plfs_rename( pfd, strPath.c_str(), toPath.c_str() );
     if ( ret == 0 ) {
-        ret = retValue( Util::Rename( strPath.c_str(), toPath.c_str() ) );
-        if ( ret == 0 ) {
+        Util::MutexLock( &self->container_mutex, __FUNCTION__ );
+        if (self->createdContainers.find(strPath)
+                !=self->createdContainers.end()) 
+        {
             self->createdContainers.erase( strPath );
+            self->createdContainers.insert( toPath );
+        }
+        Util::MutexUnlock( &self->container_mutex, __FUNCTION__ );
+        if ( self->known_modes.find(strPath) != self->known_modes.end() ) {
+            self->known_modes[toPath] = self->known_modes[strPath];
+            self->known_modes.erase(strPath);
         }
     }
+
     PLFS_EXIT;
 }
