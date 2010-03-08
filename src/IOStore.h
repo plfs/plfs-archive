@@ -22,7 +22,7 @@ public:
     virtual int Mkdir( const char*, mode_t )=0;
     virtual int Mknod( const char *path, mode_t mode, dev_t dev )=0;
     virtual void* Mmap( void *, size_t, int, int, int, off_t)=0;
-    virtual int munmap(void *addr, size_t length);
+    virtual int Munmap(void *addr, size_t length);
     virtual int Open( const char*, int )=0;
     virtual int Open( const char*, int, mode_t )=0;
     virtual DIR* Opendir( const char*) =0;

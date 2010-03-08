@@ -61,7 +61,7 @@ public:
 
     int Munmap(void *addr, size_t length)
     {
-        return munmap(addr, length)
+        return munmap(addr, length);
     }
 
     int Open(const char* path, int flags) {
