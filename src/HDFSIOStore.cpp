@@ -502,6 +502,7 @@ int HDFSIOStore::Stat(const char* path, struct stat* buf)
 {
     hdfsFileInfo* hdfsInfo = hdfsGetPathInfo(fs, path);
     if (!hdfsInfo) {
+        std::cout << "Failed to get stat for path " << path << "\n";
         errno = ENOENT;
         return -1;
     }
