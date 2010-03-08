@@ -451,7 +451,7 @@ int Index::cleanupReadIndex( int fd, void *maddr, off_t length, int ret,
     }
 
     if ( maddr != NULL ) {
-        ret2 = munmap( maddr, length );
+        ret2 = Util::ioStore->munmap( maddr, length );
         if ( ret2 < 0 ) {
             cerr << "WTF. readIndex failed during munmap of "  << indexfile 
                  << " (" << length << "): " << strerror(errno) << endl;

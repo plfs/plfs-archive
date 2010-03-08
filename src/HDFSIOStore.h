@@ -27,6 +27,7 @@ public:
     int Mkdir(const char* path, mode_t mode);
     int Mknod(const char* path, mode_t mode, dev_t dev);
     void* Mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset);
+    int Munmap(void *addr, size_t length);
     int Open(const char* path, int flags);
     int Open(const char* path, int flags, mode_t mode);
     DIR* Opendir(const char *name);

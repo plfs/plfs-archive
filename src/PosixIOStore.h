@@ -59,6 +59,11 @@ public:
         return mmap(addr, len, prot, flags, fd, offset);
     }
 
+    int Munmap(void *addr, size_t length)
+    {
+        return munmap(addr, length)
+    }
+
     int Open(const char* path, int flags) {
         return open(path, flags);
     }

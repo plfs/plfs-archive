@@ -116,7 +116,6 @@ int HDFSIOStore::Close(int fd)
 {
     int ret;
     hdfsFile openFile;
-    string* open_path;
 
     openFile = GetFileFromMap(fd);
     std::cout << "Closing " << fd << "\n";
@@ -297,6 +296,16 @@ void* HDFSIOStore::Mmap(void *addr, size_t len, int prot, int flags, int fd, off
     }
 
     return buffer;
+}
+
+/**
+ * Just clean up the allocated space. No real error checking here.
+ */
+int HDFSIOStore::Munmap(void* addr, size_t len)
+{
+    char* buffer = (char*)addr;
+    delete[] buffer;
+    return 0;
 }
 
 /**
