@@ -22,7 +22,7 @@ DIRECT_IO        = -o direct_io
 ALLOW_OTHER      = -o allow_other
 
 # single threaded makes debugging easier
-#SINGLE_THREADED  = -s
+SINGLE_THREADED  = -s
 
 # set values for mntpnt and backend
 ifndef PLFS_MNT

@@ -135,6 +135,7 @@ int Plfs::init( int *argc, char **argv ) {
 
     // TODO: This needs to be a parameter of its own!
     plfs_hdfs_init("default", 0);
+    //plfs_posix_init();
 
     cerr << "Starting PLFS on " << hostname << "." << endl;
     LogMessage::init( "/dev/stderr" );
