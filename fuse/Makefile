@@ -5,6 +5,14 @@ CXXFLAGS = -I$(PLFS_INSTALL_DIR) -DPLFS_TIMES -DCOUNT_SKIPS -g -Wall
 LDFLAGS  = -L$(PLFS_INSTALL_DIR) -lplfs 
 LOG      = /tmp/plfs.log
 
+# TODO: Make all this hadoop stuff dependent on a define so it can easily
+# be turned on and off.
+HADOOP_CXXFLAGS = -I${HADOOP_HOME}/src/c++/libhdfs/ -I${JAVA_HOME}/include -I${JAVA_HOME}/include/linux
+HADOOP_LDFLAGS = -L${HADOOP_HOME}/src/c++/install/lib -L${JAVA_HOME}/jre/lib/amd64/server/ -lhdfs -ljvm
+
+CXXFLAGS += ${HADOOP_CXXFLAGS}
+LDFLAGS += ${HADOOP_LDFLAGS}
+
 # remove direct_io if you want to exec a PLFS file
 # but it makes the performance horrible because writes are split into 4K
 # as opposed to 128K with direct_io 
