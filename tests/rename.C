@@ -13,8 +13,6 @@
 
 #define TRUE 1
 
-// use this as a starting point for C++ codes.
-
 void
 Usage( char *prog, int line ) {
     fprintf( stderr, "Usage (line %d): %s args\n", line, prog );
