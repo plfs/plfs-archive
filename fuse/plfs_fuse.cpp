@@ -590,8 +590,8 @@ int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
         }
         (void) path;
         struct dirent *de;
-        while ((de = readdir(dp)) != NULL) {
-            //cerr << "Found entry " << de->d_name << endl;
+        while ((de = Util::ioStore->Readdir(dp)) != NULL) {
+            cerr << "Found entry " << de->d_name << endl;
             if( entries.find(de->d_name) != entries.end() ) continue;
             entries.insert( de->d_name );
             struct stat st;
@@ -600,6 +600,7 @@ int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
             st.st_mode = de->d_type << 12;
             string fullPath( dirpath + "/" + de->d_name );
             if ( ! isDirectory( fullPath.c_str() ) ) {
+                Util::Debug(stderr, "Setting mode\n");
                 st.st_mode = Container::fileMode( st.st_mode );
             }
             if (filler(buf, de->d_name, &st, 0)) {
@@ -607,6 +608,7 @@ int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                 break;
             }
         }
+        Util::Debug(stderr, "Feh\n");
         Util::Closedir( dp );
     }
     PLFS_EXIT;

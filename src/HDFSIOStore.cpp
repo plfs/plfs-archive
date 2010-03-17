@@ -4,6 +4,7 @@
 #include <grp.h>
 #include <pwd.h>
 #include <string.h>
+#include "Util.h"
 #include "HDFSIOStore.h"
 
 
@@ -394,6 +395,11 @@ DIR* HDFSIOStore::Opendir(const char *name)
         delete dir;
         return NULL;
     }
+    
+    // Temporary debugging measure:
+    for (int i = 0; i < dir->numEntries; i++) {
+        Util::Debug(stderr, "%s\n", dir->infos[i].mName);
+    }
 
     return (DIR*)dir;
 }
@@ -446,13 +452,15 @@ ssize_t HDFSIOStore::Read(int fd, void *buf, size_t count)
  */
 struct dirent *HDFSIOStore::Readdir(DIR *dirp)
 {
+    Util::Debug(stderr, "readdir called\n");
     char* lastComponent; // For locating the last part of the string name.
     struct openDir* dir = (struct openDir*)dirp;
     if (dir->curEntryNum == dir->numEntries) {
         // We've read all the entries! Return NULL.
+        Util::Debug(stderr, "Done reading directory\n");
         return NULL;
     }
-
+    std::cout << "Processing entry.\n";
     // Fill in the struct dirent curEntry field.
     dir->curEntry.d_ino = 0; // No inodes in HDFS.
     // I'm not sure how offset is used in this context. Technically
@@ -474,7 +482,7 @@ struct dirent *HDFSIOStore::Readdir(DIR *dirp)
     // NAME_MAX does not include the terminating null and if we copy
     // the max number of characters, strncpy won't place it, so set it manually.
     dir->curEntry.d_name[NAME_MAX] = '\0';
-    
+    std::cout << "Entry name " << dir->curEntry.d_name[NAME_MAX];
     dir->curEntryNum++;
     return &dir->curEntry;
 }
