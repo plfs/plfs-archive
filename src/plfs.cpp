@@ -354,9 +354,12 @@ plfs_getattr( Plfs_fd *of, const char *path, struct stat *stbuf ) {
     int ret = 0;
     if ( ! Container::isContainer( path ) ) {
         ret = retValue( Util::Lstat( path, stbuf ) );
+        if (ret)
+            Util::Debug(stderr, "Couldn't stat regular file.\n");
     } else {
         ret = Container::getattr( path, stbuf );
         if ( ret == 0 ) {
+            Util::Debug(stderr, "Could stat container file. Checking if it's open.\n");
             // is it also open currently?
             // we might be reading from some other users writeFile but
             // we're only here if we had access to stat the container
@@ -367,6 +370,7 @@ plfs_getattr( Plfs_fd *of, const char *path, struct stat *stbuf ) {
             // If we were trying to read index droppings
             // and they weren't available, then we should do this.
             WriteFile *wf=(of && of->getWritefile() ? of->getWritefile() :NULL);
+            Util::Debug(stderr, "Got write file.\n");
             if ( wf ) {
                 off_t  last_offset;
                 size_t total_bytes;
