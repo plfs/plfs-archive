@@ -115,7 +115,9 @@ split(const std::string &s, const char delim, std::vector<std::string> &elems) {
 bool Plfs::isDirectory( string path ) {
     bool isdir = false;
     struct stat buf;
+    fprintf(stderr, "outside if statement, plfs_fuse.cpp:118: Pathname: %s\n", path.c_str());
     if ( plfs_getattr( NULL, path.c_str(), &buf ) == 0 ) {
+      fprintf(stderr, "inside if statement, plfs_fuse.cpp:120: Pathname: %s\n", path.c_str());
         isdir = ( buf.st_mode & S_IFDIR );
     }
     return isdir;
