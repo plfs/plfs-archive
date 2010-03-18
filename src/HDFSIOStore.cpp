@@ -125,11 +125,11 @@ int HDFSIOStore::Close(int fd)
         errno = ENOENT;
         return -1;
     }
-    /*    std::cout << "FD " << fd << " corresponds to hdfsFile " << openFile << "\n";
+    /*    std::cout << "FD " << fd << " corresponds to hdfsFile " << openFile << "\n";*/
     if (hdfsFlush(fs, openFile)) {
         std::cout << "Error flushing file.\n";
         return -1;
-        }*/
+    }
     ret = hdfsCloseFile(fs, openFile);
     if (ret) {
         std::cout << "Error closing hdfsFile\n";
