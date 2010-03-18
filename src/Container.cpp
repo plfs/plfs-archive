@@ -245,7 +245,7 @@ int Container::discoverOpenHosts( const char *path, set<string> *openhosts ) {
     DIR *openhostsdir   = NULL; 
     Util::Opendir( (getOpenHostsDir(path)).c_str(), &openhostsdir );
     if ( openhostsdir == NULL ) return 0;
-    while( (dent = readdir( openhostsdir )) != NULL ) {
+    while( (dent = Util::ioStore->Readdir( openhostsdir )) != NULL ) {
         string host;
         if ( ! strncmp( dent->d_name, ".", 1 ) ) continue;  // skip . and ..
         host = dent->d_name;
@@ -349,7 +349,7 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
     Util::Opendir( (getMetaDirPath(path)).c_str(), &metadir );
     struct dirent *dent = NULL;
     if ( metadir != NULL ) {
-        while( (dent = readdir( metadir )) != NULL ) {
+        while( (dent = Util::ioStore->Readdir( metadir )) != NULL ) {
             if ( ! strncmp( dent->d_name, ".", 1 ) ) continue;  // . and ..
             off_t last_offset;
             size_t total_bytes;
@@ -772,7 +772,7 @@ int Container::Truncate( const char *path, off_t offset ) {
     // now remove all the meta droppings
     ret = Util::Opendir( getMetaDirPath( path ).c_str(), &td ); 
     if ( ret == 0 ) {
-        while( ( tent = readdir( td ) ) != NULL ) {
+        while( ( tent = Util::ioStore->Readdir( td ) ) != NULL ) {
             if ( strcmp( ".", tent->d_name ) && strcmp( "..", tent->d_name ) ) {
                 string metadropping = getMetaDirPath( path );
                 metadropping += "/"; metadropping += tent->d_name;

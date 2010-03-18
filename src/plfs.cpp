@@ -284,10 +284,10 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
     int ret = 0;
     Util::Debug( stderr, "%s on %s\n", __FUNCTION__, path );
 
-    dir = opendir( path );
+    dir = Util::ioStore->Opendir( path );
     if ( dir == NULL ) return -errno;
 
-    while( (ent = readdir( dir ) ) != NULL ) {
+    while( (ent = Util::ioStore->Readdir( dir ) ) != NULL ) {
         if ( ! strcmp(ent->d_name, ".") || ! strcmp(ent->d_name, "..") ) {
             //Util::Debug( stderr, "skipping %s\n", ent->d_name );
             continue;
@@ -318,7 +318,7 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
             }
         }
     }
-    if ( closedir( dir ) != 0 ) {
+    if ( Util::ioStore->Closedir( dir ) != 0 ) {
         ret = -errno;
     }
 
@@ -352,11 +352,14 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
 int 
 plfs_getattr( Plfs_fd *of, const char *path, struct stat *stbuf ) {
     int ret = 0;
+    Util::Debug(stderr, "Checking if it's a container.\n");
     if ( ! Container::isContainer( path ) ) {
+        Util::Debug(stderr, "Not a container--statting\n");
         ret = retValue( Util::Lstat( path, stbuf ) );
         if (ret)
             Util::Debug(stderr, "Couldn't stat regular file.\n");
     } else {
+        Util::Debug(stderr, "Stating container.\n");
         ret = Container::getattr( path, stbuf );
         if ( ret == 0 ) {
             Util::Debug(stderr, "Could stat container file. Checking if it's open.\n");
