@@ -28,12 +28,12 @@ HDFSIOStore::HDFSIOStore(const char* host, int port)
  * it is removed on close.
  * Returns the new fd on success, -1 on error.
  */
-int HDFSIOStore::AddFileToMap(hdfsFile file, string &path)
+int HDFSIOStore::AddFileToMap(hdfsFile file, int open_mode)
 {
     int fd;
     struct openFile of;
     of.file = file;
-    of.path = path;
+    of.open_mode = open_mode;
     pthread_mutex_lock(&fd_count_mutex);
     fd = fd_count++;
     pthread_mutex_unlock(&fd_count_mutex);
@@ -64,14 +64,14 @@ hdfsFile HDFSIOStore::GetFileFromMap(int fd)
     return it->second.file;
 }
 
-string* HDFSIOStore::GetPathFromMap(int fd)
+int HDFSIOStore::GetModeFromMap(int fd)
 {
     map<int, openFile>::iterator it;
     it= fdMap.find(fd);
     if (it == fdMap.end()) {
         return NULL;
     }
-    return &it->second.path;
+    return it->second.open_mode;
 }
 
 /**
@@ -126,9 +126,11 @@ int HDFSIOStore::Close(int fd)
         return -1;
     }
     /*    std::cout << "FD " << fd << " corresponds to hdfsFile " << openFile << "\n";*/
-    if (hdfsFlush(fs, openFile)) {
-        std::cout << "Error flushing file.\n";
-        return -1;
+    if (GetModeFromMap(fd) == O_WRONLY) {
+        if (hdfsFlush(fs, openFile)) {
+            Util::Debug(stderr, "Couldn't flush file open for writes.\n");
+            return -1;
+        }
     }
     ret = hdfsCloseFile(fs, openFile);
     if (ret) {
@@ -179,7 +181,7 @@ int HDFSIOStore::Creat(const char*path, mode_t mode)
     //hdfsChmod(fs, path, mode);
     
     // We've created the file, set its mode. Now add it to map!
-    fd = AddFileToMap(file, path_string);
+    fd = AddFileToMap(file, O_WRONLY);
     return fd;
 }
 
@@ -347,7 +349,7 @@ int HDFSIOStore::Open(const char* path, int flags)
         std::cout << "Disaster trying to open " << path << "\n";
         return -1;
     }
-    fd = AddFileToMap(openFile, path_string);
+    fd = AddFileToMap(openFile, new_flags);
 
     std::cout << "Opened fd " << fd << "with secret file " << openFile << "\n";
     return fd;

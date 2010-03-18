@@ -50,7 +50,7 @@ protected:
     hdfsFS fs; // The hdfs filesystem object for this object.
     struct openFile {
         hdfsFile file;
-        string path;
+        int open_mode;        
     };
     map<int, struct openFile> fdMap; // Maps from int file descriptors to HDFS files.
     const char* hostName;
@@ -67,9 +67,9 @@ protected:
     // To assign unique fds.
     pthread_mutex_t fd_count_mutex;
     int fd_count;
-    int AddFileToMap(hdfsFile file, string& path);
+    int AddFileToMap(hdfsFile file, int open_mode);
     hdfsFile GetFileFromMap(int fd);
-    string* GetPathFromMap(int fd);
+    int GetModeFromMap(int fd);
     void RemoveFileFromMap(int fd);
 private:
     // Declared but not defined, so illegal to call. We only want proper invocations of
