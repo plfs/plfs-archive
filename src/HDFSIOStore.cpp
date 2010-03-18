@@ -126,12 +126,11 @@ int HDFSIOStore::Close(int fd)
         return -1;
     }
     /*    std::cout << "FD " << fd << " corresponds to hdfsFile " << openFile << "\n";*/
-    if (GetModeFromMap(fd) == O_WRONLY) {
-        if (hdfsFlush(fs, openFile)) {
-            Util::Debug(stderr, "Couldn't flush file open for writes.\n");
-            return -1;
-        }
+    //if (GetModeFromMap(fd) == O_WRONLY) {
+    if (hdfsFlush(fs, openFile)) {
+        Util::Debug(stderr, "Couldn't flush file. Probably open for reads.\n");
     }
+    //}
     ret = hdfsCloseFile(fs, openFile);
     if (ret) {
         std::cout << "Error closing hdfsFile\n";
