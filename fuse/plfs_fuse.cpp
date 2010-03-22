@@ -140,13 +140,13 @@ int Plfs::init( int *argc, char **argv ) {
         // figure out our hostname now in order to make containers
     char hostname[PPATH];
     if (gethostname(hostname, sizeof(hostname)) < 0) {
-        fprintf(stderr,"plfsfuse gethostname failed");
+        Util::Debug(stderr,"plfsfuse gethostname failed");
         return -errno;
     }
     myhost = hostname; 
 
     cerr << "Starting PLFS on " << hostname << "." << endl;
-    LogMessage::init( "/dev/stderr" );
+    LogMessage::init( );
 
         // bufferindex works and is good because it consolidates the index some
         // but the problem is that make test doesn't work on my mac book air.
@@ -260,7 +260,7 @@ string Plfs::expandPath( const char *path ) {
     string canonical_path( self->params.backends[hash_by_path] + "/" + path );
     // stop doing the dangling stuff for now
     /*
-    fprintf( stderr, "%s: %s -> %s\n", 
+   Util::Debug( stderr, "%s: %s -> %s\n", 
             __FUNCTION__, path, canonical_path.c_str() );
     */
     return canonical_path;
@@ -280,7 +280,7 @@ bool Plfs::isdebugfile( const char *path, const char *file ) {
 
 int Plfs::makePlfsFile( string expanded_path, mode_t mode, int flags ) {
     int res = 0;
-    fprintf( stderr, "Need to create container for %s (%s %d)\n", 
+    Util::Debug( stderr, "Need to create container for %s (%s %d)\n", 
             expanded_path.c_str(), 
             self->myhost.c_str(), fuse_get_context()->pid );
 
@@ -308,7 +308,7 @@ int Plfs::makePlfsFile( string expanded_path, mode_t mode, int flags ) {
     double time_end = Util::getTime();
     self->make_container_time += (time_end - time_start);
     if ( time_end - time_start > 2 ) {
-        fprintf( stderr, "WTF: %s of %s took %.2f secs\n", __FUNCTION__,
+        Util::Debug( stderr, "WTF: %s of %s took %.2f secs\n", __FUNCTION__,
                 expanded_path.c_str(), time_end - time_start );
         self->wtfs++;
     }
@@ -786,7 +786,7 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
         of->gid = fuse_get_context()->gid; 
         fi->fh = (uint64_t)of;
         if ( newly_created ) {
-            fprintf( stderr, "%s adding open file for %s\n", __FUNCTION__,
+            Util::Debug( stderr, "%s adding open file for %s\n", __FUNCTION__,
                     strPath.c_str() );
             self->open_files[strPath] = pfd;
         }
@@ -825,11 +825,11 @@ int Plfs::f_release( const char *path, struct fuse_file_info *fi ) {
         fi->fh = (uint64_t)NULL;
         delete openfile;
         if ( remaining == 0 ) {
-            fprintf( stderr, "%s removing open file for %s, pid %u\n",
+            Util::Debug( stderr, "%s removing open file for %s, pid %u\n",
                     __FUNCTION__, strPath.c_str(), openfile->pid );
             self->open_files.erase( strPath );
         } else {
-            fprintf( stderr, 
+            Util::Debug( stderr, 
                 "%s not yet removing open file for %s, pid %u, %d remaining\n",
                 __FUNCTION__, strPath.c_str(), openfile->pid, remaining );
         }
@@ -845,10 +845,10 @@ Plfs_fd *Plfs::findOpenFile( string expanded ) {
     HASH_MAP<string, Plfs_fd *>::iterator itr;
     itr = self->open_files.find( expanded );
     if ( itr == self->open_files.end() ) {
-        fprintf( stderr, "No OpenFile found for %s\n", expanded.c_str() );
+        Util::Debug( stderr, "No OpenFile found for %s\n", expanded.c_str() );
         pfd = NULL;
     } else {
-        fprintf( stderr, "OpenFile found for %s\n", expanded.c_str() );
+        Util::Debug( stderr, "OpenFile found for %s\n", expanded.c_str() );
         pfd = itr->second;
     }
     return pfd;
@@ -871,7 +871,8 @@ mode_t Plfs::getMode( string expanded ) {
         mode = itr->second; 
         whence = (char*)"stashed value";
     }
-    fprintf( stderr, "%s pulled mode %d from %s\n", __FUNCTION__, mode, whence);
+    Util::Debug( stderr, "%s pulled mode %d from %s\n", 
+            __FUNCTION__, mode, whence);
     return mode;
 }
 
@@ -1075,7 +1076,7 @@ int Plfs::f_rename( const char *path, const char *to ) {
         // we need to figure out how to do rename on an open file....
     Plfs_fd *pfd = findOpenFile( strPath );
     if ( pfd ) {
-        fprintf( stderr, "WTF?  Rename open file\n" );
+        Util::Debug( stderr, "WTF?  Rename open file\n" );
         //ret = -ENOSYS;
     }
 

@@ -148,7 +148,8 @@ string Util::toString( ) {
     for( itr = utimers.begin(); itr != utimers.end(); itr++ ) {
         count  = counters.find( itr->first );
         err = errors.find( itr->first );
-        output += timeToString( itr, err, count, &total_errs, &total_ops, &total_time );
+        output += timeToString( itr, err, count, &total_errs, 
+                &total_ops, &total_time );
         if ( ( kitr = kbytes.find(itr->first) ) != kbytes.end() ) {
             output += bandwidthToString( itr, kitr );
         }

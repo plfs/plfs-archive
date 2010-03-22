@@ -77,8 +77,8 @@ int WriteFile::addWriter( pid_t pid ) {
         pthread_mutex_init( index_mux, NULL );
     }
 
-    Util::Debug( stderr, "%s on %s now has %d writers\n", 
-            __FUNCTION__, physical_path.c_str(), writers );
+    Util::Debug( stderr, "%s (%d) on %s now has %d writers\n", 
+            __FUNCTION__, pid, physical_path.c_str(), writers );
     Util::MutexUnlock( &data_mux, __FUNCTION__ );
     return ret;
 }
@@ -152,8 +152,8 @@ int WriteFile::removeWriter( pid_t pid ) {
             delete( ofd );
         }
     }
-    Util::Debug( stderr, "%s on %s now has %d writers: %d\n", 
-            __FUNCTION__, physical_path.c_str(), writers, ret );
+    Util::Debug( stderr, "%s (%d) on %s now has %d writers: %d\n", 
+            __FUNCTION__, pid, physical_path.c_str(), writers, ret );
     Util::MutexUnlock( &data_mux, __FUNCTION__ );
     return ( ret == 0 ? writers : ret );
 }
