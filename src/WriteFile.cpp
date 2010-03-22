@@ -41,7 +41,8 @@ int WriteFile::sync( pid_t pid ) {
     int ret; 
     OpenFd *ofd = getFd( pid );
     if ( ofd == NULL ) {
-        ret = -ENOENT;
+        // ugh, sometimes FUSE passes in weird pids, just ignore this
+        //ret = -ENOENT;
     } else {
         ret = Util::Fsync( ofd->fd );
         if ( ret == 0 ) index->flush();
@@ -142,10 +143,15 @@ int WriteFile::removeWriter( pid_t pid ) {
     int ret = 0;
     Util::MutexLock(   &data_mux , __FUNCTION__);
     struct OpenFd *ofd = getFd( pid );
+    writers--;  
     if ( ofd == NULL ) {
-        ret = -ENOENT;
+        // if we can't find it, we still decrement the writers count
+        // this is strange but sometimes fuse does weird things w/ pids
+        // if the writers goes zero, when this struct is freed, everything
+        // gets cleaned up
+        Util::Debug( stderr, "%s can't find pid %d\n", __FUNCTION__, pid );
     } else {
-        writers--;  ofd->writers--;
+        ofd->writers--;
         if ( ofd->writers <= 0 ) {
             ret = closeFd( ofd->fd );
             fds.erase( pid );
