@@ -56,7 +56,7 @@ class WriteFile : public Metadata {
         string hostname;
         map< pid_t, OpenFd * > fds;
         map< int, string > paths;      // need to remember fd paths to restore
-        pthread_mutex_t    *index_mux; // only used if multiple writers
+        pthread_mutex_t    index_mux;  // to use the shared index 
         pthread_mutex_t    data_mux;   // to access our map of fds 
         bool synchronous_index;
         Index *index;

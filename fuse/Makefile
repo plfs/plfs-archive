@@ -16,6 +16,9 @@ LOG      = /tmp/plfs.log
 # as opposed to 128K with direct_io 
 DIRECT_IO        = -o direct_io
 
+# big writes should aggregate small contiguous writes
+#BIG_WRITES       = -obig_writes
+
 # ALLOW_OTHER is needed to run as root to allow other users to see the mount
 UID := $(shell whoami)
 ifeq ($(UID), root)
@@ -23,7 +26,7 @@ ifeq ($(UID), root)
 endif
 
 # single threaded makes debugging easier
-#SINGLE_THREADED  = -s
+SINGLE_THREADED  = -s
 
 # set values for mntpnt and backend
 ifndef PLFS_MNT
@@ -33,7 +36,7 @@ ifndef PLFS_BACK
     PLFS_BACK = /tmp/plfs.back
 endif
 
-PLFS_SHARED_ARGS = $(DIRECT_IO) $(SINGLE_THREADED) $(ALLOW_OTHER) \
+PLFS_SHARED_ARGS = $(DIRECT_IO) $(SINGLE_THREADED) $(ALLOW_OTHER) $(BIG_WRITES)\
 				   -plfs_backend=$(PLFS_BACK) -plfs_subdirs=32 \
 				   -plfs_synconclose=1
 
@@ -59,8 +62,11 @@ export PKG_CONFIG_PATH
 
 all: $(TARGET) 
 
-$(TARGET): plfs_fuse.o main.o
+$(TARGET): plfs_fuse.o main.o ../lib/libplfs.a
 	g++ -o $(TARGET) main.o plfs_fuse.o $(LDFLAGS)
+
+../lib/libplfs.a:
+	make -C ../src
 
 mount: $(TARGET) $(PLFS_MNT) $(PLFS_BACK)
 	./$(TARGET) -d $(PLFS_MNT) $(PLFS_ARGS)

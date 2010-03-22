@@ -103,14 +103,24 @@ void Index::init( string logical ) {
 Index::Index( string logical, int fd ) : Metadata::Metadata() {
     init( logical );
     this->fd = fd;
+    ostringstream os;
+    os << __FUNCTION__ << ": " << this << " created index on " <<
+        logical_path << endl;
 }
 
 Index::Index( string logical ) : Metadata::Metadata() {
     init( logical );
+    ostringstream os;
+    os << __FUNCTION__ << ": " << this << " created index on " <<
+        logical_path << endl;
+    Util::Debug( stderr, "%s", os.str().c_str() );
 }
 
 Index::~Index() {
-    Util::Debug( stderr, "Removing index on %s\n", logical_path.c_str() );
+    ostringstream os;
+    os << __FUNCTION__ << ": " << this << " removing index on " <<
+        logical_path << endl;
+    Util::Debug( stderr, "%s", os.str().c_str() );
     for( unsigned i = 0; i < chunk_map.size(); i++ ) {
         if ( chunk_map[i].fd > 0 ) {
             Util::Debug( stderr, "Closing fd %d for %s\n",
@@ -172,9 +182,9 @@ bool Index::ispopulated( ) {
 int Index::flush() {
     // ok, vectors are guaranteed to be contiguous
     // so just dump it in one fell swoop
-    void *start = &(hostIndex.front());
     size_t  len = hostIndex.size() * sizeof(HostEntry);
     if ( len == 0 ) return 0;   // could be 0 if we weren't buffering
+    void *start = &(hostIndex.front());
     int ret     = Util::Writen( fd, start, len );
     hostIndex.clear();
     return ( ret < 0 ? -errno : 0 );
@@ -208,6 +218,11 @@ int Index::readIndex( string hostindex ) {
     int   fd = -1;
     void  *maddr = NULL;
     populated = true;
+
+    ostringstream os;
+    os << __FUNCTION__ << ": " << this << " reading index on " <<
+        logical_path << endl;
+    Util::Debug( stderr, "%s", os.str().c_str() );
 
     maddr = mapIndex( hostindex, &fd, &length );
     if( ! maddr ) {
@@ -510,8 +525,11 @@ int Index::chunkFound( int *fd, off_t *chunk_off, size_t *chunk_len,
 int Index::globalLookup( int *fd, off_t *chunk_off, size_t *chunk_len, 
         off_t logical ) 
 {
-    Util::Debug( stderr, "Look up %ld in %s\n", 
-            (long)logical, logical_path.c_str() );
+    ostringstream os;
+    os << __FUNCTION__ << ": " << this << " using index." << endl;
+    Util::Debug( stderr, "%s", os.str().c_str() );
+    //Util::Debug( stderr, "Look up %ld in %s\n", 
+    //        (long)logical, logical_path.c_str() );
     ContainerEntry entry, previous;
     MAP_ITR itr;
     MAP_ITR prev = (MAP_ITR)NULL;
@@ -541,16 +559,16 @@ int Index::globalLookup( int *fd, off_t *chunk_off, size_t *chunk_len,
         prev--;
     }
     entry = itr->second;
-    ostringstream oss;
-    oss << "Considering whether chunk " << entry 
-         << " contains " << logical; 
-    Util::Debug( stderr, "%s\n", oss.str().c_str() );
+    //ostringstream oss;
+    //oss << "Considering whether chunk " << entry 
+    //     << " contains " << logical; 
+    //Util::Debug( stderr, "%s\n", oss.str().c_str() );
 
         // case 1 or 2
     if ( entry.contains( logical ) ) {
-        ostringstream oss;
-        oss << "FOUND(1): " << entry << " contains " << logical;
-        Util::Debug( stderr, "%s\n", oss.str().c_str() );
+        //ostringstream oss;
+        //oss << "FOUND(1): " << entry << " contains " << logical;
+        //Util::Debug( stderr, "%s\n", oss.str().c_str() );
         return chunkFound( fd, chunk_off, chunk_len, 
                 logical - entry.logical_offset, &entry );
     }
@@ -559,9 +577,9 @@ int Index::globalLookup( int *fd, off_t *chunk_off, size_t *chunk_len,
     if ( prev != (MAP_ITR)NULL ) {
         previous = prev->second;
         if ( previous.contains( logical ) ) {
-            ostringstream oss;
-            oss << "FOUND(2): " << previous << " contains " << logical << endl;
-            Util::Debug( stderr, "%s\n", oss.str().c_str() );
+            //ostringstream oss;
+            //oss << "FOUND(2): "<< previous << " contains " << logical << endl;
+            //Util::Debug( stderr, "%s\n", oss.str().c_str() );
             return chunkFound( fd, chunk_off, chunk_len, 
                 logical - previous.logical_offset, &previous );
         }
@@ -572,9 +590,9 @@ int Index::globalLookup( int *fd, off_t *chunk_off, size_t *chunk_len,
 
         // case 4: within a hole
     if ( logical < entry.logical_offset ) {
-        ostringstream oss;
-        oss << "FOUND(4): " << logical << " is in a hole" << endl;
-        Util::Debug( stderr, "%s\n", oss.str().c_str() );
+        //ostringstream oss;
+        //oss << "FOUND(4): " << logical << " is in a hole" << endl;
+        //Util::Debug( stderr, "%s\n", oss.str().c_str() );
         off_t remaining_hole_size = entry.logical_offset - logical;
         *fd = -1;
         *chunk_len = remaining_hole_size;
@@ -582,9 +600,9 @@ int Index::globalLookup( int *fd, off_t *chunk_off, size_t *chunk_len,
     }
 
         // case 3: off the end of the file
-    oss.str("");    // stupid way to clear the buffer
-    oss << "FOUND(3): " << logical << " is beyond the end of the file" << endl;
-    Util::Debug( stderr, "%s\n", oss.str().c_str() );
+    //oss.str("");    // stupid way to clear the buffer
+    //oss << "FOUND(3): " <<logical << " is beyond the end of the file" << endl;
+    //Util::Debug( stderr, "%s\n", oss.str().c_str() );
     *fd = -1;
     *chunk_len = 0;
     return 0;

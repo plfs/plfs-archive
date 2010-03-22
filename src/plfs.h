@@ -52,6 +52,8 @@ int plfs_open( Plfs_fd **, const char *path,
 
 ssize_t plfs_read( Plfs_fd *, char *buf, size_t size, off_t offset );
 
+ssize_t plfs_reference_count( Plfs_fd * );
+
 int plfs_rename( Plfs_fd *, const char *from, const char *to );
 
 /* Plfs_fd can be NULL */

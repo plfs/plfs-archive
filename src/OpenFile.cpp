@@ -1,5 +1,6 @@
 #include "OpenFile.h"
 #include "COPYRIGHT.h"
+#include <stdlib.h>
 
 Plfs_fd::Plfs_fd( WriteFile *wf, Index *i, pid_t pi, mode_t m, const char *p ) :
         Metadata::Metadata() 

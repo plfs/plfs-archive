@@ -164,6 +164,8 @@ plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
     }
 
     if ( new_index_created ) {
+        Util::Debug( stderr, "%s removing freshly created index for %s\n",
+                __FUNCTION__, path );
         delete( index );
     }
     return ret;
@@ -181,14 +183,14 @@ plfs_rename( Plfs_fd *pfd, const char *from, const char *to ) {
 // pass in a NULL Plfs_fd to have one created for you
 // pass in a valid one to add more writers to it
 // one problem is that we fail if we're asked to overwrite a normal file
-// another problem is that if concurrent procs open a file w/ O_TRUNC flag,
-// then some proc's data and index droppings might be removed by someone else
 int
 plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
 {
     WriteFile *wf    = NULL;
     Index     *index = NULL;
     int ret          = 0;
+
+    // ugh, no idea why this line is here or what it does 
     if ( mode == 420 || mode == 416 ) mode = 33152; 
 
     // make sure we're allowed to open this container
@@ -241,6 +243,7 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
         }
         if ( ret != 0 && index ) {
             delete index;
+            index = NULL;
         }
     }
 
@@ -320,7 +323,15 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
             }
         } else {
             //Util::Debug( stderr, "unlinking %s\n", ent->d_name );
-            if ( Util::Unlink( child.c_str() ) != 0 ) {
+            // ok, we seem to be screwing things up by deleting a handle
+            // that someone else has open:
+            // e.g. two writers do an open with O_TRUNC at the same time
+            // one writer finishes the O_TRUNC and then opens it's fd's
+            // then the next writer comes and does the O_TRUNC and removes
+            // the first writer's open files.  Instead let's just truncate
+            // each open file
+            //if ( Util::Unlink( child.c_str() ) != 0 ) {
+            if ( Util::Truncate( child.c_str(), 0 ) != 0 ) {
                 // ENOENT would be OK, could mean that an openhosts dropping
                 // was removed on another host or something
                 if ( errno != ENOENT ) {
@@ -488,6 +499,16 @@ plfs_query( Plfs_fd *pfd, size_t *writers, size_t *readers ) {
     return 0;
 }
 
+ssize_t plfs_reference_count( Plfs_fd *pfd ) {
+    WriteFile *wf = pfd->getWritefile();
+    Index     *in = pfd->getIndex();
+    
+    int ref_count = 0;
+    if ( wf ) ref_count += wf->numWriters();
+    if ( in ) ref_count += in->numReaders();
+    return ref_count;
+}
+
 // returns number of open handles or -errno
 int
 plfs_close( Plfs_fd *pfd, pid_t pid ) {
@@ -522,12 +543,13 @@ plfs_close( Plfs_fd *pfd, pid_t pid ) {
         readers = index->removeReader();
     }
 
+    Util::Debug( stderr, "%s %s: %d readers, %d writers remaining\n",
+            __FUNCTION__, pfd->getPath(), (int)readers, (int)writers );
+
     // clean up anything that isn't needed anymore
     if ( readers == 0 && index ) delete index;
     if ( writers == 0 && wf    ) delete wf;
     if ( readers == 0 && writers == 0 ) delete pfd;
 
-    Util::Debug( stderr, "%s %s: %d readers, %d writers remaining\n",
-            __FUNCTION__, pfd->getPath(), (int)readers, (int)writers );
     return ( ret < 0 ? ret : ( readers + writers ) );
 }

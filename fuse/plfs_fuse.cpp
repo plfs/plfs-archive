@@ -208,7 +208,7 @@ int Plfs::init( int *argc, char **argv ) {
             O_WRONLY | O_APPEND | O_CREAT, DEFAULT_MODE );
     char buffer[1024];
     snprintf( buffer, 1024, "PLFS started at %.2f\n", Util::getTime() );
-    write( fd, buffer, 1024 );
+    write( fd, buffer, strlen(buffer) );
     close( fd );
 
         // init our mutex
@@ -298,8 +298,8 @@ int Plfs::makePlfsFile( string expanded_path, mode_t mode, int flags ) {
         self->extra_attempts += extra_attempts;
         if ( res == 0 ) {
             self->createdContainers.insert( expanded_path );
-            cerr << __FUNCTION__ << " Stashing mode for " << expanded_path 
-                 << ":" << mode << endl;
+            Util::Debug( stderr, "%s Stashing mode for %s: %d\n",
+                __FUNCTION__, expanded_path.c_str(), (int)mode );
             self->known_modes[expanded_path] = mode;
         }
     }
@@ -492,7 +492,7 @@ int Plfs::iterate_backends( dir_op *d ) {
                 break;
             default:
                 assert( 0 );
-                cerr << "Bad dir op in " << __FUNCTION__ << endl;
+                Util::Debug( stderr, "Bad dir op in %s\n", __FUNCTION__ );
                 break;
         }
         if ( ( ret = retValue( ret ) ) != 0 ) break;
@@ -512,8 +512,8 @@ int Plfs::f_chmod (const char *path, mode_t mode) {
     } else {
         ret = plfs_chmod( strPath.c_str(), mode );
         if ( ret == 0 ) {
-            cerr << __FUNCTION__ << " Stashing mode for " << strPath
-                 << ":" << mode << endl;
+            Util::Debug( stderr, "%s Stashing mode for %s: %d\n",
+                __FUNCTION__, strPath.c_str(), (int)mode );
             self->known_modes[strPath] = mode;
         }
     }
@@ -523,13 +523,13 @@ int Plfs::f_chmod (const char *path, mode_t mode) {
 // fills the set of supplementary groups of the effective uid
 int Plfs::get_groups( vector<gid_t> *vec ) {
     int ngroups = getgroups (NULL, 0);
-    gid_t *groups = new gid_t[ngroups];
+    gid_t *groups = (gid_t*)malloc(sizeof(gid_t)*ngroups);
     //(gid_t *) malloc(ngroups * sizeof (gid_t));
     int val = getgroups (ngroups, groups);
     for( int i = 0; i < val; i++ ) {
         vec->push_back( groups[i] );
     }
-    delete groups; 
+    free( groups );
     return ( val >= 0 ? 0 : -errno );
 }
 
@@ -712,7 +712,7 @@ int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     {
         DIR *dp;
         string dirpath( *itr ); dirpath += "/"; dirpath += path;
-        cerr << "Will opendir " << dirpath << endl;
+        Util::Debug( stderr, "Will opendir %s\n", dirpath.c_str() );
         ret = Util::Opendir( dirpath.c_str(), &dp );
         if ( ret != 0 || ! dp ) {
             break;
@@ -720,7 +720,6 @@ int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
         (void) path;
         struct dirent *de;
         while ((de = readdir(dp)) != NULL) {
-            //cerr << "Found entry " << de->d_name << endl;
             if( entries.find(de->d_name) != entries.end() ) continue;
             entries.insert( de->d_name );
             struct stat st;
@@ -732,7 +731,7 @@ int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                 st.st_mode = Container::fileMode( st.st_mode );
             }
             if (filler(buf, de->d_name, &st, 0)) {
-                cerr << "WTF?  filler failed." << endl;
+                Util::Debug( stderr, "WTF?  filler failed.\n" );
                 break;
             }
         }
@@ -786,11 +785,15 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
         of->gid = fuse_get_context()->gid; 
         fi->fh = (uint64_t)of;
         if ( newly_created ) {
-            Util::Debug( stderr, "%s adding open file for %s\n", __FUNCTION__,
-                    strPath.c_str() );
+            ostringstream oss;
+            oss << __FUNCTION__ << " adding open file for " <<
+                strPath.c_str() << " (" << pfd << ")" << endl;
+            Util::Debug( stderr, "%s", oss.str().c_str() ); 
             self->open_files[strPath] = pfd;
         }
     }
+    Util::Debug(stderr,"%s: %s ref count: %d\n", __FUNCTION__, 
+            strPath.c_str(), plfs_reference_count(pfd));
     Util::MutexUnlock( &self->fd_mutex, __FUNCTION__ );
 
     // we can safely add more writers to an already open file
@@ -811,6 +814,7 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
 int Plfs::f_release( const char *path, struct fuse_file_info *fi ) {
     PLFS_ENTER; GET_OPEN_FILE;
     // there is one 'Plfs_fd *of' shared by multiple procs
+    // the Plfs_fd *of is removed by plfs_close since plfs_open created it
     // each proc has its own 'OpenFile openfile'
     if ( of ) {
         // this function is called by the root process so in order to set up
@@ -821,9 +825,10 @@ int Plfs::f_release( const char *path, struct fuse_file_info *fi ) {
         SET_IDS(    openfile->uid, openfile->gid );
         set_groups( openfile->uid );
         Util::MutexLock( &self->fd_mutex, __FUNCTION__ );
+        Util::Debug(stderr,"%s: %s ref count: %d\n", __FUNCTION__, 
+            strPath.c_str(), plfs_reference_count(of));
         int remaining = plfs_close( of, openfile->pid );
         fi->fh = (uint64_t)NULL;
-        delete openfile;
         if ( remaining == 0 ) {
             Util::Debug( stderr, "%s removing open file for %s, pid %u\n",
                     __FUNCTION__, strPath.c_str(), openfile->pid );
@@ -833,6 +838,7 @@ int Plfs::f_release( const char *path, struct fuse_file_info *fi ) {
                 "%s not yet removing open file for %s, pid %u, %d remaining\n",
                 __FUNCTION__, strPath.c_str(), openfile->pid, remaining );
         }
+        delete openfile;
         Util::MutexUnlock( &self->fd_mutex, __FUNCTION__ );
     }
     PLFS_EXIT;
@@ -863,7 +869,7 @@ mode_t Plfs::getMode( string expanded ) {
             self->known_modes.find( expanded );
     if ( itr == self->known_modes.end() ) {
             // Container::getmode returns DEFAULT_MODE if not found
-        cerr << "Pulling mode from Container" << endl;
+        Util::Debug( stderr, "Pulling mode from Container\n" );
         mode = Container::getmode( expanded.c_str() );
         self->known_modes[expanded] = mode;
         whence = (char*)"container";
@@ -892,7 +898,8 @@ int Plfs::f_readlink (const char *path, char *buf, size_t bufsize) {
     char_count = readlink( strPath.c_str(), buf, bufsize );
     if ( char_count != -1 ) {
         ret = 0;
-        cerr << "Readlink at " << strPath.c_str() << ": " << char_count << endl;
+        Util::Debug( stderr, "Readlink at %s: %d\n", 
+            strPath.c_str(), char_count );
     } else {
         ret = retValue( -1 );
     }
@@ -902,8 +909,9 @@ int Plfs::f_readlink (const char *path, char *buf, size_t bufsize) {
 // handle this directly in fuse, no need to use plfs library
 int Plfs::f_link( const char *path1, const char *path ) {
     PLFS_ENTER;
-    cerr << "Making hard link from " << path1 << " to " << strPath << endl;
-    cerr << "How do I check for EXDEV here?" << endl;
+    Util::Debug( stderr, "Making hard link from %s to %s\n", path1,
+                    strPath.c_str() );
+    Util::Debug( stderr, "How do I check for EXDEV here?\n" );
     ret = retValue( link( path1, strPath.c_str() ) );
     PLFS_EXIT;
 }
@@ -911,7 +919,8 @@ int Plfs::f_link( const char *path1, const char *path ) {
 // handle this directly in fuse, no need to use plfs library
 int Plfs::f_symlink( const char *path1, const char *path ) {
     PLFS_ENTER;
-    cerr << "Making symlink from " << path1 << " to " << strPath << endl;
+    Util::Debug( stderr, "Making symlink from %s to %s\n", path1,
+                    strPath.c_str() );
     ret = retValue( Util::Symlink( path1, strPath.c_str() ) );
     PLFS_EXIT;
 }
@@ -936,6 +945,9 @@ int Plfs::f_readn(const char *path, char *buf, size_t size, off_t offset,
     }
 
     PLFS_ENTER; GET_OPEN_FILE;
+    ostringstream os;
+    os << __FUNCTION__ << " reading from " << of << endl;
+    Util::Debug( stderr, "%s", os.str().c_str() );
     ret = plfs_read( of, buf, size, offset );
     PLFS_EXIT;
 }

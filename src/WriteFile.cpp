@@ -19,13 +19,13 @@ WriteFile::WriteFile( string path, string hostname,
     this->hostname          = hostname;
     this->index             = NULL;
     this->mode              = mode;
-    this->index_mux         = NULL;
     // if synchronous index is false, writes will work
     // but O_RDWR reads won't work, and not sure about
     // stat'ing an open file
     this->synchronous_index = true;
     this->writers           = 0;
     pthread_mutex_init( &data_mux, NULL );
+    pthread_mutex_init( &index_mux, NULL );
 }
 
 WriteFile::~WriteFile() {
@@ -45,8 +45,10 @@ int WriteFile::sync( pid_t pid ) {
         //ret = -ENOENT;
     } else {
         ret = Util::Fsync( ofd->fd );
+        Util::MutexLock( &index_mux, __FUNCTION__ );
         if ( ret == 0 ) index->flush();
         if ( ret == 0 ) ret = Util::Fsync( index->getFd() );
+        Util::MutexUnlock( &index_mux, __FUNCTION__ );
         if ( ret != 0 ) ret = -errno;
     }
     return ret;
@@ -73,11 +75,6 @@ int WriteFile::addWriter( pid_t pid ) {
         }
     }
     if ( ret == 0 ) ret = ++writers;
-    if ( writers > 1 ) {
-        index_mux = new pthread_mutex_t;
-        pthread_mutex_init( index_mux, NULL );
-    }
-
     Util::Debug( stderr, "%s (%d) on %s now has %d writers\n", 
             __FUNCTION__, pid, physical_path.c_str(), writers );
     Util::MutexUnlock( &data_mux, __FUNCTION__ );
@@ -200,11 +197,11 @@ ssize_t WriteFile::write(const char *buf, size_t size, off_t offset, pid_t pid){
 
         // then the index
         if ( ret >= 0 ) {
-            if ( index_mux ) Util::MutexLock(   index_mux , __FUNCTION__);
+            Util::MutexLock(   &index_mux , __FUNCTION__);
             index->addWrite( offset, ret, pid, begin, end );
             if ( synchronous_index ) ret = index->flush();  
             if ( ret >= 0 )          addWrite( offset, size ); // metadata
-            if ( index_mux ) Util::MutexUnlock( index_mux, __FUNCTION__ );
+            Util::MutexUnlock( &index_mux, __FUNCTION__ );
         }
     }
 
@@ -219,17 +216,21 @@ int WriteFile::openIndex( pid_t pid ) {
     if ( fd < 0 ) {
         ret = -errno;
     } else {
+        Util::MutexLock(   &index_mux , __FUNCTION__);
         index = new Index( physical_path, fd );
+        Util::MutexUnlock( &index_mux, __FUNCTION__ );
     }
     return ret;
 }
 
 int WriteFile::closeIndex( ) {
     int ret = 0;
+    Util::MutexLock(   &index_mux , __FUNCTION__);
     ret = index->flush();
     ret = closeFd( index->getFd() );
     delete( index );
     index = NULL;
+    Util::MutexUnlock( &index_mux, __FUNCTION__ );
     return ret;
 }
 
@@ -287,6 +288,7 @@ int WriteFile::restoreFds( ) {
     
     // first reset the index fd
     if ( index ) {
+        Util::MutexLock( &index_mux, __FUNCTION__ );
         index->flush();
 
         paths_itr = paths.find( index->getFd() );
@@ -296,6 +298,7 @@ int WriteFile::restoreFds( ) {
         if ( closeFd( index->getFd() ) != 0 )    return -errno;
         if ( (ret = openFile( indexpath, mode )) < 0 ) return -errno;
         index->resetFd( ret );
+        Util::MutexUnlock( &index_mux, __FUNCTION__ );
     }
 
     // then the data fds
