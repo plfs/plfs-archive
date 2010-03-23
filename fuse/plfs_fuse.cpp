@@ -795,11 +795,7 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
         of->flags = fi->flags;
         fi->fh = (uint64_t)of;
         if ( newly_created ) {
-            ostringstream oss;
-            oss << __FUNCTION__ << " adding OpenFile for " <<
-                strPath.c_str() << " (" << pfd << ")" << endl;
-            Util::Debug( stderr, "%s", oss.str().c_str() ); 
-            self->open_files[strPath] = pfd;
+            addOpenFile( strPath, of->pid, pfd );
         }
     }
     //Util::Debug(stderr,"%s: %s ref count: %d\n", __FUNCTION__, 
@@ -841,12 +837,7 @@ int Plfs::f_release( const char *path, struct fuse_file_info *fi ) {
         int remaining = plfs_close( of, openfile->pid, fi->flags );
         fi->fh = (uint64_t)NULL;
         if ( remaining == 0 ) {
-            ostringstream oss;
-            oss << __FUNCTION__ << " removing OpenFile for " <<
-                strPath.c_str() << " (" << of << ") pid " << 
-                openfile->pid<< endl;
-            Util::Debug( stderr, "%s", oss.str().c_str() ); 
-            self->open_files.erase( strPath );
+            removeOpenFile( strPath, openfile->pid, of );
         } else {
             Util::Debug( stderr, 
                 "%s not yet removing open file for %s, pid %u, %d remaining\n",
@@ -857,6 +848,29 @@ int Plfs::f_release( const char *path, struct fuse_file_info *fi ) {
         Util::MutexUnlock( &self->fd_mutex, __FUNCTION__ );
     }
     PLFS_EXIT;
+}
+
+int Plfs::addOpenFile( string expanded, pid_t pid, Plfs_fd *pfd ) {
+    ostringstream oss;
+    oss << __FUNCTION__ << " adding OpenFile for " <<
+        expanded << " (" << pfd << ") pid " << pid << endl;
+    Util::Debug( stderr, "%s", oss.str().c_str() ); 
+    self->open_files[expanded] = pfd;
+    return 0;
+}
+
+// when this is called we should be in a mutex
+// this might sometimes fail to remove a file if we did a rename on an open file
+// because the rename removes the open file and then when the release comes
+// it has already been removed
+int Plfs::removeOpenFile( string expanded, pid_t pid, Plfs_fd *pfd ) {
+    ostringstream oss;
+    int erased = 0;
+    Util::Debug( stderr, "%s", oss.str().c_str() ); 
+    erased = self->open_files.erase( expanded );
+    oss << __FUNCTION__ << " removed " << erased << " OpenFile for " <<
+                expanded << " (" << pfd << ") pid " << pid << endl;
+    return erased;
 }
 
 // just look to see if we already have a certain file open
@@ -1108,14 +1122,33 @@ int Plfs::f_rename( const char *path, const char *to ) {
         // renames it to CVS/Entries, and then 
         // we need to figure out how to do rename on an open file....
     Util::MutexLock( &self->fd_mutex, __FUNCTION__ );
+        // ok, we remove the openfile at the old path
+        // this means that when the release tries to remove it, it won't find it
+        // but that's ok because not finding it doesn't bother the release.
+        // we need to add it back again as an openFile on the newPath so that
+        // new opener's can use it.  Otherwise, they'll open the same droppings
+        // if they're both writing and they'll overwrite each other.
+        // we could add it as another openFile but that seems confusing and
+        // prone to failure when some new proc starts using it and it thinks
+        // it is pointing to the old path.  In any event, 
+        // Therefore, we also need to teach it that it has
+        // a new path and hopefully if it opens any new droppings it will do
+        // so using the new path
     Plfs_fd *pfd = findOpenFile( strPath );
-    Util::MutexUnlock( &self->fd_mutex, __FUNCTION__ );
     if ( pfd ) {
-        Util::Debug( stderr, "WTF?  Rename open file\n" );
+        pid_t pid = fuse_get_context()->pid;
+        removeOpenFile( strPath, pid, pfd );
+        addOpenFile( toPath, pid, pfd );
+        pfd->setPath( toPath ); 
+        Util::Debug( stderr, "Rename open file %s -> %s (hope this works\n", 
+                path, to );
         //ret = -ENOSYS;
     }
-
+    // make the rename happen in the mutex so that no-one can start opening
+    // this thing until it's done
     ret = plfs_rename( pfd, strPath.c_str(), toPath.c_str() );
+    Util::MutexUnlock( &self->fd_mutex, __FUNCTION__ );
+
     if ( ret == 0 ) {
         Util::MutexLock( &self->container_mutex, __FUNCTION__ );
         if (self->createdContainers.find(strPath)

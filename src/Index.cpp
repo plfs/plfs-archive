@@ -115,6 +115,10 @@ Index::Index( string logical ) : Metadata::Metadata() {
     Util::Debug( stderr, "%s", os.str().c_str() );
 }
 
+void Index::setPath( string p ) {
+    this->logical_path = p;
+}
+
 Index::~Index() {
     ostringstream os;
     os << __FUNCTION__ << ": " << this << " removing index on " <<

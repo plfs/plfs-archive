@@ -16,3 +16,5 @@ make the SC paper into a pdf, open the pdf
 
 5) run fs_test with N-1 strided and touch -2 and
 check -2 with at least 2 procs
+
+6) run the qio tests

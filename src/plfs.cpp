@@ -505,6 +505,9 @@ plfs_trunc( Plfs_fd *of, const char *path, off_t offset ) {
             // here's a problem, if the file is open for writing, we've
             // already opened fds in there.  So the droppings are
             // deleted/resized and our open handles are messed up 
+            // it's just a little scary if this ever happens following
+            // a rename because the writefile will attempt to restore
+            // them at the old path....
         if ( ret == 0 && of && of->getWritefile() ) {
             ret = of->getWritefile()->restoreFds();
         }

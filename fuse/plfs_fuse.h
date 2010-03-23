@@ -84,6 +84,8 @@ class Plfs : public fusexx::fuse<Plfs> {
         static bool isdebugfile( const char*, const char * );
         static bool isdebugfile( const char* );
         static int writeDebug( char *buf, size_t, off_t, const char* );
+        static int addOpenFile( string, pid_t, Plfs_fd * );
+        static int removeOpenFile( string, pid_t, Plfs_fd * );
         static Plfs_fd *findOpenFile( string ); 
         //static int removeWriteFile( WriteFile *, string );
         //static int getIndex( string, mode_t, Index ** );

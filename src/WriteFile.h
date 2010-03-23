@@ -43,6 +43,8 @@ class WriteFile : public Metadata {
 
         int sync( pid_t pid );
 
+        void       setPath( string path ); 
+
         int restoreFds();
     private:
         int openIndexFile( string path, string host, pid_t, mode_t );
@@ -59,6 +61,8 @@ class WriteFile : public Metadata {
         pthread_mutex_t    index_mux;  // to use the shared index 
         pthread_mutex_t    data_mux;   // to access our map of fds 
         bool synchronous_index;
+        bool has_been_renamed; // use this to guard against a truncate following
+                               // a rename
         Index *index;
         mode_t mode;
 };

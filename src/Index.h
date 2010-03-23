@@ -78,6 +78,8 @@ class Index : public Metadata {
 
         int readIndex( string hostindex );
     
+        void setPath( string );
+
         bool ispopulated( );
 
         void addWrite( off_t offset, size_t bytes, pid_t, double, double );

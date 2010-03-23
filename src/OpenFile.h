@@ -18,7 +18,7 @@ class Plfs_fd : public Metadata {
         void       setWriteFds( int, int, Index * );
         void       getWriteFds( int *, int *, Index ** );
         pid_t      getPid();
-        void       setPath( string path ) { this->path = path; }
+        void       setPath( string path ); 
         const char *getPath() { return this->path.c_str(); }
         mode_t     getMode()  { return this->mode; }
         time_t     getCtime() { return ctime; }

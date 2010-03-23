@@ -15,6 +15,13 @@ Plfs_fd::Plfs_fd( WriteFile *wf, Index *i, pid_t pi, mode_t m, const char *p ) :
     this->ctime     = t.tv_sec;
 }
 
+// this should be in a mutex when it is called
+void Plfs_fd::setPath( string p ) {
+    this->path = p;
+    if ( writefile ) writefile->setPath( p );
+    if ( index     )     index->setPath( p );
+}
+
 WriteFile *Plfs_fd::getWritefile( ) {
     return writefile;
 }

@@ -23,8 +23,14 @@ WriteFile::WriteFile( string path, string hostname,
     // but O_RDWR reads won't work, and not sure about
     // stat'ing an open file
     this->synchronous_index = true;
+    this->has_been_renamed  = false;
     pthread_mutex_init( &data_mux, NULL );
     pthread_mutex_init( &index_mux, NULL );
+}
+
+void WriteFile::setPath ( string p ) {
+    this->physical_path    = p;
+    this->has_been_renamed = true;
 }
 
 WriteFile::~WriteFile() {
@@ -299,11 +305,18 @@ int WriteFile::openFile( string physicalpath, mode_t mode ) {
 
 // if fuse::f_truncate is used, we will have open handles that get messed up
 // in that case, we need to restore them
+// what if rename is called and then f_truncate?
 // return 0 or -errno
 int WriteFile::restoreFds( ) {
     map<int,string>::iterator paths_itr;
     map<pid_t, OpenFd *>::iterator pids_itr;
     int ret = 0;
+
+    // if an open WriteFile ever gets truncated after being renamed, that
+    // will be really tricky.  Let's hope that never happens, put an assert
+    // to guard against it.  I guess it if does happen we just need to do
+    // reg ex changes to all the paths
+    assert( ! has_been_renamed );
     
     // first reset the index fd
     if ( index ) {
