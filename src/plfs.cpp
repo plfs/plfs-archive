@@ -8,6 +8,7 @@
 
 #include <stdarg.h>
 #include <limits>
+#include <assert.h>
 
 // a shortcut for functions that are expecting zero
 int 
@@ -32,6 +33,10 @@ addWriter( WriteFile *wf, pid_t pid, const char *path, mode_t mode ) {
         }
     }
     return ret;
+}
+int
+isWriter( int flags ) {
+    return (flags & O_WRONLY || flags & O_RDWR);
 }
 
 // this requires that the supplementary groups for the user are set
@@ -128,6 +133,14 @@ plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
     bool new_index_created = false;  
     const char *path = pfd->getPath();
 
+    // this can fail because this call is not in a mutex so it's possible
+    // that some other thread in a close is changing ref counts right now
+    // but it's OK that the reference count is off here since the only
+    // way that it could be off is if someone else removes their handle,
+    // but no-one can remove the handle being used here except this thread
+    // which can't remove it now since it's using it now
+    //plfs_reference_count(pfd);
+
     // possible that we opened the file as O_RDWR
     // if so, build an index now, but destroy it after this IO
     // so that new writes are re-indexed for new reads
@@ -167,6 +180,7 @@ plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
         Util::Debug( stderr, "%s removing freshly created index for %s\n",
                 __FUNCTION__, path );
         delete( index );
+        index = NULL;
     }
     return ret;
 }
@@ -186,9 +200,12 @@ plfs_rename( Plfs_fd *pfd, const char *from, const char *to ) {
 int
 plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
 {
-    WriteFile *wf    = NULL;
-    Index     *index = NULL;
-    int ret          = 0;
+    WriteFile *wf      = NULL;
+    Index     *index   = NULL;
+    int ret            = 0;
+    bool new_writefile = false;
+    bool new_index     = false;
+    bool new_pfd       = false;
 
     // ugh, no idea why this line is here or what it does 
     if ( mode == 420 || mode == 416 ) mode = 33152; 
@@ -207,28 +224,30 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
         ret = plfs_trunc( NULL, path, 0 );
     }
 
+    if ( *pfd) plfs_reference_count(*pfd);
+
     // this next chunk of code works similarly for writes and reads
     // for writes, create a writefile if needed, otherwise add a new writer
     // create the write index file after the write data file so that the
     // hostdir is created
     // for reads, create an index if needed, otherwise add a new reader
-    if ( ret == 0 && (flags & O_WRONLY || flags & O_RDWR) ) {
-        bool newly_created = false;
+    if ( ret == 0 && isWriter(flags) ) {
         if ( *pfd ) {
             wf = (*pfd)->getWritefile();
         } 
         if ( wf == NULL ) {
             wf = new WriteFile( path, Util::hostname(), mode ); 
-            newly_created = true;
+            new_writefile = true;
         }
         if ( ret == 0 ) {
             ret = addWriter( wf, pid, path, mode );
             Util::Debug( stderr, "%s added writer: %d\n", __FUNCTION__, ret );
             if ( ret > 0 ) ret = 0; // add writer returns # of current writers
-            if ( ret == 0 && newly_created ) ret = wf->openIndex( pid ); 
+            if ( ret == 0 && new_writefile ) ret = wf->openIndex( pid ); 
         }
         if ( ret != 0 && wf ) {
             delete wf;
+            wf = NULL;
         }
     } else if ( ret == 0 ) {
         if ( *pfd ) {
@@ -236,10 +255,11 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
         }
         if ( index == NULL ) {
             index = new Index( path );  
+            new_index = true;
             ret = Container::populateIndex( path, index );
         }
         if ( ret == 0 ) {
-            index->addReader();
+            index->incrementOpens(1);
         }
         if ( ret != 0 && index ) {
             delete index;
@@ -249,19 +269,34 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
 
     if ( ret == 0 && ! *pfd ) {
         *pfd = new Plfs_fd( wf, index, pid, mode, path ); 
+        new_pfd       = true;
         // we create one open record for all the pids using a file
         // only create the open record for files opened for writing
         if ( wf ) {
             ret = Container::addOpenrecord( path, Util::hostname(), pid );
         }
         //cerr << __FUNCTION__ << " added open record for " << path << endl;
+    } else if ( ret == 0 ) {
+        if ( wf && new_writefile) (*pfd)->setWritefile( wf ); 
+        if ( index && new_index ) (*pfd)->setIndex( index  ); 
     }
+    if ( ret == 0 ) (*pfd)->incrementOpens(1);
+    plfs_reference_count(*pfd);
     return ret;
 }
 
 ssize_t 
 plfs_write( Plfs_fd *pfd, const char *buf, size_t size, off_t offset, pid_t pid)
 {
+
+    // this can fail because this call is not in a mutex so it's possible
+    // that some other thread in a close is changing ref counts right now
+    // but it's OK that the reference count is off here since the only
+    // way that it could be off is if someone else removes their handle,
+    // but no-one can remove the handle being used here except this thread
+    // which can't remove it now since it's using it now
+    //plfs_reference_count(pfd);
+
     int ret = 0; ssize_t written;
     WriteFile *wf = pfd->getWritefile();
 
@@ -292,6 +327,8 @@ plfs_sync( Plfs_fd *pfd, pid_t pid ) {
 // we also use this function to implement truncate on a container
 // in that case, we remove all droppings but preserve the container
 // an empty container = empty file
+//
+// this code should really be moved to container
 int 
 removeDirectoryTree( const char *path, bool truncate_only ) {
     DIR *dir;
@@ -330,14 +367,15 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
             // then the next writer comes and does the O_TRUNC and removes
             // the first writer's open files.  Instead let's just truncate
             // each open file
-            //if ( Util::Unlink( child.c_str() ) != 0 ) {
-            if ( Util::Truncate( child.c_str(), 0 ) != 0 ) {
-                // ENOENT would be OK, could mean that an openhosts dropping
-                // was removed on another host or something
-                if ( errno != ENOENT ) {
-                    ret = -errno;
-                    continue;
-                }
+            int remove_ret = 0;
+            if ( truncate_only ) remove_ret = Util::Truncate(child.c_str(), 0);
+            else                 remove_ret = Util::Unlink  (child.c_str());
+            
+            // ENOENT would be OK, could mean that an openhosts dropping
+            // was removed on another host or something
+            if ( remove_ret != 0 && errno != ENOENT ) {
+                ret = -errno;
+                continue;
             }
         }
     }
@@ -426,7 +464,10 @@ extendFile( Plfs_fd *of, string strPath, off_t offset ) {
         newly_opened = true;
     }
     if ( ret == 0 ) ret = wf->extend( offset );
-    if ( newly_opened ) delete wf;
+    if ( newly_opened ) {
+        delete wf;
+        wf = NULL;
+    }
     return ret;
 }
 
@@ -494,7 +535,7 @@ plfs_query( Plfs_fd *pfd, size_t *writers, size_t *readers ) {
     }
 
     if ( ix ) {
-        *readers = ix->numReaders();
+        *readers = ix->incrementOpens(0);
     }
     return 0;
 }
@@ -505,20 +546,32 @@ ssize_t plfs_reference_count( Plfs_fd *pfd ) {
     
     int ref_count = 0;
     if ( wf ) ref_count += wf->numWriters();
-    if ( in ) ref_count += in->numReaders();
+    if ( in ) ref_count += in->incrementOpens(0);
+    if ( ref_count != pfd->incrementOpens(0) ) {
+        ostringstream oss;
+        oss << __FUNCTION__ << " not equal counts: " << ref_count
+            << " != " << pfd->incrementOpens(0) << endl;
+        Util::Debug( stderr, "%s", oss.str().c_str() ); 
+        assert( 0 );
+    }
     return ref_count;
 }
 
 // returns number of open handles or -errno
 int
-plfs_close( Plfs_fd *pfd, pid_t pid ) {
+plfs_close( Plfs_fd *pfd, pid_t pid, int open_flags ) {
     int ret = 0;
     WriteFile *wf    = pfd->getWritefile();
     Index     *index = pfd->getIndex();
-    size_t writers = 0, readers = 0;
+    size_t writers = 0, readers = 0, ref_count = 0;
+
+    // be careful.  We might enter here when we have both writers and readers
+    // make sure to remove the appropriate open handle for this thread by 
+    // using the original open_flags
 
     // clean up after writes
-    if ( wf ) {
+    if ( isWriter(open_flags) ) {
+        assert(wf);
         writers = wf->removeWriter( pid );
         if ( writers == 0 ) {
             off_t  last_offset;
@@ -530,26 +583,39 @@ plfs_close( Plfs_fd *pfd, pid_t pid ) {
             // one we used to create the open-record
             Container::removeOpenrecord( pfd->getPath(), Util::hostname(), 
                     pfd->getPid() );
+            delete wf;
+            wf = NULL;
+            pfd->setWritefile(NULL);
         } else if ( writers < 0 ) {
             ret = writers;
             writers = wf->numWriters();
         } else if ( writers > 0 ) {
             ret = 0;
         }
+    } else {
+        assert( index );
+        readers = index->incrementOpens(-1);
+        if ( readers == 0 ) {
+            delete index;
+            index = NULL;
+            pfd->setIndex(NULL);
+        }
     }
 
-    // clean up after reads
-    if ( index ) {
-        readers = index->removeReader();
+    ref_count = pfd->incrementOpens(-1);
+    Util::Debug( stderr, "%s %s: %d readers, %d writers, %d refs remaining\n",
+            __FUNCTION__, pfd->getPath(), (int)readers, (int)writers,
+            (int)ref_count);
+
+    // make sure the reference counting is correct 
+    plfs_reference_count(pfd);    
+    if ( ret == 0 && ref_count == 0 ) {
+        ostringstream oss;
+        oss << __FUNCTION__ << " removing OpenFile " << pfd << endl;
+        Util::Debug( stderr, "%s", oss.str().c_str() ); 
+        delete pfd; 
+        pfd = NULL;
     }
 
-    Util::Debug( stderr, "%s %s: %d readers, %d writers remaining\n",
-            __FUNCTION__, pfd->getPath(), (int)readers, (int)writers );
-
-    // clean up anything that isn't needed anymore
-    if ( readers == 0 && index ) delete index;
-    if ( writers == 0 && wf    ) delete wf;
-    if ( readers == 0 && writers == 0 ) delete pfd;
-
-    return ( ret < 0 ? ret : ( readers + writers ) );
+    return ( ret < 0 ? ret : ref_count );
 }

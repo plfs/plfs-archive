@@ -55,6 +55,7 @@ struct OpenFile {
     pid_t    pid;
     uid_t    uid;
     gid_t    gid;
+    int      flags;
 };
 
 #ifdef PLFS_TIMES
@@ -107,7 +108,14 @@ struct OpenFile {
 #define EXIT_IF_DEBUG  if ( isdebugfile(path) ) return 0;
 
 #define GET_OPEN_FILE  struct OpenFile *openfile = (struct OpenFile*)fi->fh; \
-                       Plfs_fd *of = ( openfile ? openfile->pfd : NULL );
+                       Plfs_fd *of = NULL;                                   \
+                       if ( openfile ) {                                     \
+                           of = (Plfs_fd *)openfile->pfd;                    \
+                           ostringstream oss;                                \
+                           oss << __FUNCTION__ << " got OpenFile for " <<    \
+                               strPath.c_str() << " (" << of << ")" << endl; \
+                           Util::Debug( stderr, "%s", oss.str().c_str() );   \
+                       }
 
 std::vector<std::string> &
 split(const std::string &s, const char delim, std::vector<std::string> &elems) {
@@ -148,12 +156,12 @@ int Plfs::init( int *argc, char **argv ) {
     cerr << "Starting PLFS on " << hostname << "." << endl;
     LogMessage::init( );
 
-        // bufferindex works and is good because it consolidates the index some
-        // but the problem is that make test doesn't work on my mac book air.
+    params.direct_io     = 0;
+
+    // these options are no longer used
     params.bufferindex   = true;
     params.subdirs       = 32;
     params.sync_on_close = false;
-    params.direct_io     = 0;
 
         // modify argc to remove -plfs args so that fuse proper doesn't see them
     int removed_args = 0;
@@ -523,13 +531,14 @@ int Plfs::f_chmod (const char *path, mode_t mode) {
 // fills the set of supplementary groups of the effective uid
 int Plfs::get_groups( vector<gid_t> *vec ) {
     int ngroups = getgroups (NULL, 0);
-    gid_t *groups = (gid_t*)malloc(sizeof(gid_t)*ngroups);
+    gid_t *groups = new gid_t[ngroups];
     //(gid_t *) malloc(ngroups * sizeof (gid_t));
     int val = getgroups (ngroups, groups);
     for( int i = 0; i < val; i++ ) {
         vec->push_back( groups[i] );
     }
-    free( groups );
+    delete groups;
+    groups = NULL;
     return ( val >= 0 ? 0 : -errno );
 }
 
@@ -779,21 +788,22 @@ int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
 
     if ( ret == 0 ) {
         struct OpenFile *of = new OpenFile;
-        of->pfd = pfd;
-        of->pid = fuse_get_context()->pid;
-        of->uid = fuse_get_context()->uid; 
-        of->gid = fuse_get_context()->gid; 
+        of->pfd   = pfd;
+        of->pid   = fuse_get_context()->pid;
+        of->uid   = fuse_get_context()->uid; 
+        of->gid   = fuse_get_context()->gid; 
+        of->flags = fi->flags;
         fi->fh = (uint64_t)of;
         if ( newly_created ) {
             ostringstream oss;
-            oss << __FUNCTION__ << " adding open file for " <<
+            oss << __FUNCTION__ << " adding OpenFile for " <<
                 strPath.c_str() << " (" << pfd << ")" << endl;
             Util::Debug( stderr, "%s", oss.str().c_str() ); 
             self->open_files[strPath] = pfd;
         }
     }
-    Util::Debug(stderr,"%s: %s ref count: %d\n", __FUNCTION__, 
-            strPath.c_str(), plfs_reference_count(pfd));
+    //Util::Debug(stderr,"%s: %s ref count: %d\n", __FUNCTION__, 
+    //        strPath.c_str(), plfs_reference_count(pfd));
     Util::MutexUnlock( &self->fd_mutex, __FUNCTION__ );
 
     // we can safely add more writers to an already open file
@@ -825,13 +835,17 @@ int Plfs::f_release( const char *path, struct fuse_file_info *fi ) {
         SET_IDS(    openfile->uid, openfile->gid );
         set_groups( openfile->uid );
         Util::MutexLock( &self->fd_mutex, __FUNCTION__ );
+        assert( openfile->flags == fi->flags );
         Util::Debug(stderr,"%s: %s ref count: %d\n", __FUNCTION__, 
             strPath.c_str(), plfs_reference_count(of));
-        int remaining = plfs_close( of, openfile->pid );
+        int remaining = plfs_close( of, openfile->pid, fi->flags );
         fi->fh = (uint64_t)NULL;
         if ( remaining == 0 ) {
-            Util::Debug( stderr, "%s removing open file for %s, pid %u\n",
-                    __FUNCTION__, strPath.c_str(), openfile->pid );
+            ostringstream oss;
+            oss << __FUNCTION__ << " removing OpenFile for " <<
+                strPath.c_str() << " (" << of << ") pid " << 
+                openfile->pid<< endl;
+            Util::Debug( stderr, "%s", oss.str().c_str() ); 
             self->open_files.erase( strPath );
         } else {
             Util::Debug( stderr, 
@@ -839,6 +853,7 @@ int Plfs::f_release( const char *path, struct fuse_file_info *fi ) {
                 __FUNCTION__, strPath.c_str(), openfile->pid, remaining );
         }
         delete openfile;
+        openfile = NULL;
         Util::MutexUnlock( &self->fd_mutex, __FUNCTION__ );
     }
     PLFS_EXIT;
@@ -854,8 +869,11 @@ Plfs_fd *Plfs::findOpenFile( string expanded ) {
         Util::Debug( stderr, "No OpenFile found for %s\n", expanded.c_str() );
         pfd = NULL;
     } else {
-        Util::Debug( stderr, "OpenFile found for %s\n", expanded.c_str() );
+        ostringstream oss;
         pfd = itr->second;
+        oss << __FUNCTION__ << " OpenFile " << pfd << " found for " <<
+            expanded.c_str() << endl;
+        Util::Debug( stderr, "%s", oss.str().c_str() ); 
     }
     return pfd;
 }
@@ -955,6 +973,7 @@ int Plfs::f_readn(const char *path, char *buf, size_t size, off_t offset,
 string Plfs::openFilesToString() {
     ostringstream oss;
     size_t readers, writers;
+    Util::MutexLock( &self->fd_mutex, __FUNCTION__ );
     int quant = self->open_files.size();
     oss << quant << " OpenFiles" << ( quant ? ": " : "" ) << endl;
     HASH_MAP<string, Plfs_fd *>::iterator itr;
@@ -964,6 +983,7 @@ string Plfs::openFilesToString() {
         oss << readers << " readers, "
             << writers << " writers. " << endl;
     }
+    Util::MutexUnlock( &self->fd_mutex, __FUNCTION__ );
     return oss.str();
 }
 
@@ -1034,6 +1054,7 @@ int Plfs::writeDebug( char *buf, size_t size, off_t offset, const char *path ) {
 
     memcpy( buf, (const void*)&(tmpbuf[offset]), validsize );
     delete tmpbuf;
+    tmpbuf = NULL;
     return validsize; 
 }
 
@@ -1086,7 +1107,9 @@ int Plfs::f_rename( const char *path, const char *to ) {
         // it creates a CVS/Entries.Backup file, then opens it, then
         // renames it to CVS/Entries, and then 
         // we need to figure out how to do rename on an open file....
+    Util::MutexLock( &self->fd_mutex, __FUNCTION__ );
     Plfs_fd *pfd = findOpenFile( strPath );
+    Util::MutexUnlock( &self->fd_mutex, __FUNCTION__ );
     if ( pfd ) {
         Util::Debug( stderr, "WTF?  Rename open file\n" );
         //ret = -ENOSYS;

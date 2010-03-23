@@ -427,6 +427,7 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
                 index_blocks     += bytesToBlocks( index->totalBytes() );
                 index_size        = max( index->lastOffset(), index_size );
                 delete index;
+                index = NULL;
             }
 
         }
@@ -701,7 +702,7 @@ int Container::nextdropping( string physical_path,
 {
     ostringstream oss;
     oss << "looking for nextdropping in " << physical_path; 
-    Util::Debug( stderr, "%s\n", oss.str().c_str() );
+    //Util::Debug( stderr, "%s\n", oss.str().c_str() );
         // open it on the initial 
     if ( *topdir == NULL ) {
         Util::Opendir( physical_path.c_str(), topdir );
@@ -779,10 +780,13 @@ int Container::Truncate( const char *path, off_t offset ) {
                 ret = index->rewriteIndex( fd );
                 Util::Close( fd );
                 delete index;
+                index = NULL;
             }
         } else {
             cerr << "Failed to read index file " << indexfile 
                  << ": " << strerror( -ret ) << endl;
+            delete index;
+            index = NULL;
             break;
         }
     }

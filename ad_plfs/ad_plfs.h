@@ -51,5 +51,6 @@ void ADIOI_PLFS_Flush(ADIO_File fd, int *error_code);
 void ADIOI_PLFS_Delete(char *filename, int *error_code);
 void ADIOI_PLFS_Resize(ADIO_File fd, ADIO_Offset size, int *error_code);
 
+int ad_plfs_amode( int access_mode ); 
 
 #endif

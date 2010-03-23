@@ -23,7 +23,6 @@ WriteFile::WriteFile( string path, string hostname,
     // but O_RDWR reads won't work, and not sure about
     // stat'ing an open file
     this->synchronous_index = true;
-    this->writers           = 0;
     pthread_mutex_init( &data_mux, NULL );
     pthread_mutex_init( &index_mux, NULL );
 }
@@ -34,6 +33,7 @@ WriteFile::~WriteFile() {
     if ( index ) {
         closeIndex();
         delete index;
+        index = NULL;
     }
 }
 
@@ -74,7 +74,8 @@ int WriteFile::addWriter( pid_t pid ) {
             ret = -errno;
         }
     }
-    if ( ret == 0 ) ret = ++writers;
+    int writers = -1;
+    if ( ret == 0 ) writers = incrementOpens(1);
     Util::Debug( stderr, "%s (%d) on %s now has %d writers\n", 
             __FUNCTION__, pid, physical_path.c_str(), writers );
     Util::MutexUnlock( &data_mux, __FUNCTION__ );
@@ -82,7 +83,23 @@ int WriteFile::addWriter( pid_t pid ) {
 }
 
 size_t WriteFile::numWriters( ) {
-    return writers; 
+    int writers = incrementOpens(0); 
+    bool paranoid_about_reference_counting = false;
+    if ( paranoid_about_reference_counting ) {
+        int check = 0;
+        Util::MutexLock(   &data_mux, __FUNCTION__ );
+        map<pid_t, OpenFd *>::iterator pids_itr;
+        for( pids_itr = fds.begin(); pids_itr != fds.end(); pids_itr++ ) {
+            check += pids_itr->second->writers;
+        }
+        if ( writers != check ) {
+            Util::Debug( stderr, "%s %d not equal %d\n", __FUNCTION__, 
+                    writers, check ); 
+            assert( writers==check );
+        }
+        Util::MutexUnlock( &data_mux, __FUNCTION__ );
+    }
+    return writers;
 }
 
 struct OpenFd * WriteFile::getFd( pid_t pid ) {
@@ -140,19 +157,21 @@ int WriteFile::removeWriter( pid_t pid ) {
     int ret = 0;
     Util::MutexLock(   &data_mux , __FUNCTION__);
     struct OpenFd *ofd = getFd( pid );
-    writers--;  
+    int writers = incrementOpens(-1);
     if ( ofd == NULL ) {
         // if we can't find it, we still decrement the writers count
         // this is strange but sometimes fuse does weird things w/ pids
         // if the writers goes zero, when this struct is freed, everything
         // gets cleaned up
         Util::Debug( stderr, "%s can't find pid %d\n", __FUNCTION__, pid );
+        assert( 0 );
     } else {
         ofd->writers--;
         if ( ofd->writers <= 0 ) {
             ret = closeFd( ofd->fd );
             fds.erase( pid );
-            delete( ofd );
+            delete ofd;
+            ofd = NULL;
         }
     }
     Util::Debug( stderr, "%s (%d) on %s now has %d writers: %d\n", 

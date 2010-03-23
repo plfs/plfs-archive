@@ -17,7 +17,6 @@ void ADIOI_PLFS_Open(ADIO_File fd, int *error_code)
 
     MPI_Comm_rank( fd->comm, &rank );
     static char myname[] = "ADIOI_PLFS_OPEN";
-    plfs_debug( stderr, "%s: begin (%d)\n", myname, rank );
 
     if (fd->perm == ADIO_PERM_NULL) {
         old_mask = umask(022);
@@ -26,15 +25,9 @@ void ADIOI_PLFS_Open(ADIO_File fd, int *error_code)
     }
     else perm = fd->perm;
 
-    amode = 0;//O_META;
-    if (fd->access_mode & ADIO_RDONLY)
-        amode = amode | O_RDONLY;
-    if (fd->access_mode & ADIO_WRONLY)
-        amode = amode | O_WRONLY;
-    if (fd->access_mode & ADIO_RDWR)
-        amode = amode | O_RDWR;
-    if (fd->access_mode & ADIO_EXCL)
-        amode = amode | O_EXCL;
+    amode = ad_plfs_amode( fd->access_mode ); 
+    plfs_debug( stderr, "%s %d with flags %d (%d)\n", 
+            myname, rank, fd->access_mode, amode );
 
     // MPI_File_open is a collective call so only create it once
     // unless comm = MPI_COMM_SELF in which case

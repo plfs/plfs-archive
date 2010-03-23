@@ -14,10 +14,10 @@ LOG      = /tmp/plfs.log
 # remove direct_io if you want to exec a PLFS file
 # but it makes the performance horrible because writes are split into 4K
 # as opposed to 128K with direct_io 
-DIRECT_IO        = -o direct_io
+#DIRECT_IO        = -o direct_io
 
 # big writes should aggregate small contiguous writes
-#BIG_WRITES       = -obig_writes
+BIG_WRITES       = -obig_writes
 
 # ALLOW_OTHER is needed to run as root to allow other users to see the mount
 UID := $(shell whoami)
@@ -26,7 +26,7 @@ ifeq ($(UID), root)
 endif
 
 # single threaded makes debugging easier
-SINGLE_THREADED  = -s
+#SINGLE_THREADED  = -s
 
 # set values for mntpnt and backend
 ifndef PLFS_MNT
@@ -37,8 +37,7 @@ ifndef PLFS_BACK
 endif
 
 PLFS_SHARED_ARGS = $(DIRECT_IO) $(SINGLE_THREADED) $(ALLOW_OTHER) $(BIG_WRITES)\
-				   -plfs_backend=$(PLFS_BACK) -plfs_subdirs=32 \
-				   -plfs_synconclose=1
+				   -plfs_backend=$(PLFS_BACK) 
 
 UNAME := $(shell uname)
 ifeq ($(UNAME), Darwin)

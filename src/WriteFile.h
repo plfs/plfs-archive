@@ -34,7 +34,7 @@ class WriteFile : public Metadata {
 
         int addWriter( pid_t );
         int removeWriter( pid_t );
-        size_t numWriters( );
+        size_t numWriters();
 
         int truncate( off_t offset );
         int extend( off_t offset );
@@ -61,9 +61,6 @@ class WriteFile : public Metadata {
         bool synchronous_index;
         Index *index;
         mode_t mode;
-        int writers;    // be nice to not maintain this and just use fds.size
-                        // but an OpenFd can be shared and we would rather
-                        // maintain this than walk the damn fds
 };
 
 #endif

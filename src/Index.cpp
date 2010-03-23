@@ -94,7 +94,6 @@ void Index::init( string logical ) {
     chunk_id        = 0;
     last_offset     = 0;
     total_bytes     = 0;
-    readers         = 0;
     hostIndex.clear();
     global_index.clear();
     chunk_map.clear();

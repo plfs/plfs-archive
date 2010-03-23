@@ -16,3 +16,8 @@ This fails because there is a file in the place where PLFS wants to make
 a container.  RESOLVED: when this error is seen, unlink the file, and try
 again.
 
+3) bad reference counting in the Plfs_fd structure.  See the ChangeLog for 
+0.1.5
+
+4) truncate in the Container was removing other thread's open file handles.
+See the ChangeLog of 0.1.5
