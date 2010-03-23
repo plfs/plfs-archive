@@ -11,3 +11,9 @@ discovered due to the lack of barriers in the qio tests.  When we had
 simultaneous readers and writers in a Plfs_fd structure, some of the closes
 were screwing up the reference counting, and other thread's Plfs_fd structures
 were being removed out from under them.
+
+3) cvs co was causing problems because it was renaming open files.  I thought
+I had fixed that before but it cropped up again.  Now in the rename, when we
+are renaming an open file, we remove the old open file, we change it's 
+internal names, and we add it back again as a new open file.  There's a bunch
+of comments in plfs_fuse.cpp:f_rename about this as well.

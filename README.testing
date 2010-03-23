@@ -18,3 +18,5 @@ make the SC paper into a pdf, open the pdf
 check -2 with at least 2 procs
 
 6) run the qio tests
+
+7) run the two tests in the tests dir
