@@ -1,6 +1,6 @@
 #! /bin/tcsh -f
 
-set np = 2
+set np = 4
 
 # CHOWN test
 ./chown.tcsh
@@ -56,7 +56,7 @@ endif
 foreach target ( $PLFS_MNT/out.%s plfs:$PLFS_BACK/out.%s ) 
     mpirun -np $np $HOME/Testing/test_fs/src/fs_test.$MY_MPI_HOST.x \
         -type 2 -strided 1 -size 47001 -time 3 -touch 2 -check 2 \
-        -target $target
+        -target $target -deletefile
     if ( $? != 0 ) then
         echo failure
         exit 1
@@ -71,8 +71,8 @@ if ( $? != 0 ) then
 endif
 
 grep 'Committed_AS' /proc/meminfo
-echo sleep 5
-sleep 5
+echo sleep 15
+sleep 15
 grep 'Committed_AS' /proc/meminfo
 
 echo "All tests passed.  Good job PLFS"
