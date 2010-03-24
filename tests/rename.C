@@ -16,7 +16,7 @@
 void
 Usage( char *prog, int line ) {
     fprintf( stderr, "Usage (line %d): %s args\n", line, prog );
-    exit( 0 );
+    exit( 1 );
 }
 
 int
@@ -58,7 +58,7 @@ main( int argc, char **argv ) {
     if ( newtarg ) {
         if ( 0 != rename( target, newtarg ) ) {
             perror( "rename" );
-            //exit( 1 );
+            exit( 1 );
         }
     }
 
@@ -78,6 +78,11 @@ main( int argc, char **argv ) {
         exit( 1 );
     }
     printf( "Read %s from %s\n", buf, ( newtarg ? newtarg : target ) );
+
+    if ( strcmp( buf, "Hello world!\nGoodbye world!\n" ) != 0 ) {
+        printf( "data integrity error" );
+        exit( 1 );
+    }
 
     // now close it
     if ( 0 != fclose( fp ) ) {
