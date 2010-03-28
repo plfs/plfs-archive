@@ -94,7 +94,7 @@ int Container::Modify( DirectoryOperation type,
         mode_t mode )
 {
     Util::Debug( stderr, "%s on %s\n", __FUNCTION__, path );
-    struct dirent *dent = NULL;
+    plfs_dirent *dent = NULL;
     DIR *dir            = NULL; 
     int ret             = 0;
 
@@ -133,7 +133,7 @@ int Container::populateIndex( const char *path, Index *index ) {
     int ret;
     string hostindex;
     
-    DIR *td = NULL, *hd = NULL; struct dirent *tent = NULL;
+    DIR *td = NULL, *hd = NULL; plfs_dirent *tent = NULL;
     while((ret = nextdropping(path,&hostindex,INDEXPREFIX, &td,&hd,&tent))== 1){
         //Util::Debug(stderr, "# need to build index from %s\n", 
         // hostindex.c_str());
@@ -243,7 +243,7 @@ string Container::getOpenHostsDir( string path ) {
 // have the file open
 // now the open hosts file has a pid in it so we need to separate this out
 int Container::discoverOpenHosts( const char *path, set<string> *openhosts ) {
-    struct dirent *dent = NULL;
+    plfs_dirent *dent = NULL;
     DIR *openhostsdir   = NULL; 
     Util::Opendir( (getOpenHostsDir(path)).c_str(), &openhostsdir );
     if ( openhostsdir == NULL ) return 0;
@@ -349,7 +349,7 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
 
     DIR *metadir;
     Util::Opendir( (getMetaDirPath(path)).c_str(), &metadir );
-    struct dirent *dent = NULL;
+    plfs_dirent *dent = NULL;
     if ( metadir != NULL ) {
         while( (dent = readdir( metadir )) != NULL ) {
             if ( ! strncmp( dent->d_name, ".", 1 ) ) continue;  // . and ..
@@ -390,7 +390,7 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
         string dropping; 
         blkcnt_t index_blocks = 0, data_blocks = 0;
         off_t    index_size = 0, data_size = 0;
-        DIR *td = NULL, *hd = NULL; struct dirent *tent = NULL;
+        DIR *td = NULL, *hd = NULL; plfs_dirent *tent = NULL;
         while((ret=nextdropping(path,&dropping,prefix, &td,&hd,&tent))==1)
         {
             string host = hostFromChunk( dropping, prefix );
@@ -681,9 +681,9 @@ int Container::create( const char *expanded_path, const char *hostname,
 }
 
 // returns the first dirent that matches a prefix (or NULL)
-struct dirent *Container::getnextent( DIR *dir, const char *prefix ) {
+plfs_dirent *Container::getnextent( DIR *dir, const char *prefix ) {
     if ( dir == NULL ) return NULL; // this line not necessary, but doesn't hurt
-    struct dirent *next = NULL;
+    plfs_dirent *next = NULL;
     do {
         next = readdir( dir );
     } while( next && prefix && 
@@ -698,7 +698,7 @@ struct dirent *Container::getnextent( DIR *dir, const char *prefix ) {
 // this returns 0 if done.  1 if OK.  -errno if a problem
 int Container::nextdropping( string physical_path, 
         string *droppingpath, const char *dropping_type,
-        DIR **topdir, DIR **hostdir, struct dirent **topent ) 
+        DIR **topdir, DIR **hostdir, plfs_dirent **topent ) 
 {
     ostringstream oss;
     oss << "looking for nextdropping in " << physical_path; 
@@ -744,7 +744,7 @@ int Container::nextdropping( string physical_path,
     }
 
         // get the next hostent, if null, reset topent and hostdir and try again
-    struct dirent *hostent = getnextent( *hostdir, dropping_type );
+    plfs_dirent *hostent = getnextent( *hostdir, dropping_type );
     if ( hostent == NULL ) {
         Util::Closedir( *hostdir );
         *topent  = NULL;
@@ -764,7 +764,7 @@ int Container::Truncate( const char *path, off_t offset ) {
     int ret;
     string indexfile;
 
-    DIR *td = NULL, *hd = NULL; struct dirent *tent = NULL;
+    DIR *td = NULL, *hd = NULL; plfs_dirent *tent = NULL;
     while((ret = nextdropping(path,&indexfile,INDEXPREFIX, &td,&hd,&tent))== 1){
         Index *index = new Index( path, -1 );
         ret = index->readIndex( indexfile );

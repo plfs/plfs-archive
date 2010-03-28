@@ -15,6 +15,7 @@
 #include <sys/statvfs.h>
 #include <time.h>
 #include <map>
+#include "plfs_types.h"
 using namespace std;
 
 #define DEFAULT_MODE (S_IRUSR|S_IWUSR|S_IXUSR|S_IXGRP|S_IXOTH)
@@ -71,7 +72,7 @@ class Container {
         static size_t hashValue( const char *str );
         static blkcnt_t bytesToBlocks( size_t total_bytes );
         static int nextdropping( string, string *, const char *,
-                DIR **, DIR **, struct dirent ** );
+                DIR **, DIR **, plfs_dirent ** );
 
     private:
             // static stuff
@@ -90,7 +91,7 @@ class Container {
         static string hostFromChunk( string datapath, const char *type );
         static string hostdirFromChunk( string chunkpath, const char *type );
         static string containerFromChunk( string datapath );
-        static struct dirent *getnextent( DIR *dir, const char *prefix );
+        static plfs_dirent *getnextent( DIR *dir, const char *prefix );
         static int makeMeta( string path, mode_t type, mode_t mode );
         static int ignoreNoEnt( int ret );
 };

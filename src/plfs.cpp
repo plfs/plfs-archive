@@ -9,7 +9,7 @@
 #include <stdarg.h>
 #include <limits>
 #include <assert.h>
-
+#include <unistd.h>
 // a shortcut for functions that are expecting zero
 int 
 retValue( int res ) {
@@ -332,7 +332,7 @@ plfs_sync( Plfs_fd *pfd, pid_t pid ) {
 int 
 removeDirectoryTree( const char *path, bool truncate_only ) {
     DIR *dir;
-    struct dirent *ent;
+    plfs_dirent *ent;
     int ret = 0;
     Util::Debug( stderr, "%s on %s\n", __FUNCTION__, path );
 
@@ -500,8 +500,8 @@ plfs_trunc( Plfs_fd *of, const char *path, off_t offset ) {
 
     // if we actually modified the container, update any open file handle
     if ( ret == 0 && of && of->getWritefile() ) {
-        ret = of->getWritefile()->truncate( offset );
-        of->truncate( offset );
+        ret = of->getWritefile()->trunc( offset );
+        of->trunc( offset );
             // here's a problem, if the file is open for writing, we've
             // already opened fds in there.  So the droppings are
             // deleted/resized and our open handles are messed up 

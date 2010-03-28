@@ -6,6 +6,7 @@
 
 #include <assert.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <sys/types.h>
 #include <sys/dir.h>
 #include <errno.h>
@@ -279,8 +280,8 @@ int WriteFile::Close() {
 }
 
 // returns 0 or -errno 
-int WriteFile::truncate( off_t offset ) {
-    Metadata::truncate( offset );
+int WriteFile::trunc( off_t offset ) {
+    Metadata::trunc( offset );
     index->truncateHostIndex( offset );
     return 0;
 }

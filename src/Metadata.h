@@ -28,7 +28,7 @@ class Metadata {
         synced = false;
     }
 
-    void truncate( off_t offset ) {
+    void trunc( off_t offset ) {
         off_t lost_bytes = last_offset - offset;
         last_offset = offset;
         if ( lost_bytes > 0 ) {

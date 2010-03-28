@@ -36,7 +36,7 @@ class WriteFile : public Metadata {
         int removeWriter( pid_t );
         size_t numWriters();
 
-        int truncate( off_t offset );
+        int trunc( off_t offset );
         int extend( off_t offset );
 
         ssize_t write( const char*, size_t, off_t, pid_t );

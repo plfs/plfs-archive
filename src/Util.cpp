@@ -4,6 +4,12 @@
 #include <string>
 #include <fstream>
 #include <iostream>
+#ifdef CRAYXT
+// We need to redefine these or it doesn't stick;
+// I don't know why a -D directive is insufficient.
+#define __USE_UNIX98
+#define __USE_GNU
+#endif
 #include <fcntl.h>
 #include <sys/dir.h>
 #include <dirent.h>
@@ -24,6 +30,7 @@
 #include <map>
 #include <stdio.h>
 #include <stdarg.h>
+#include <pthread.h>
 using namespace std;
 
 #ifndef __FreeBSD__
