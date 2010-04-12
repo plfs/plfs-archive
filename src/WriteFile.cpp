@@ -101,6 +101,8 @@ struct OpenFd * WriteFile::getFd( pid_t pid ) {
         Util::Debug( stderr, "%s", oss.str().c_str() );
         ofd = itr->second;
     } else {
+        // As mentioned in the trunk, this whole chunk of code is bogus.
+        /*
         if ( fds.size() > 0 ) {
             ostringstream oss;
             // ideally instead of just taking a random pid, we'd rather
@@ -112,10 +114,9 @@ struct OpenFd * WriteFile::getFd( pid_t pid ) {
                     __FILE__, (int)pid, (int)fds.begin()->second->fd,
                     (int)fds.begin()->first );
             ofd = fds.begin()->second;
-        } else {
-            Util::Debug(stderr, "%s no fd to give to %d\n", __FILE__, (int)pid);
-            ofd = NULL;
-        }
+            } else {*/
+        Util::Debug(stderr, "%s no fd to give to %d\n", __FILE__, (int)pid);
+        ofd = NULL;
     }
     return ofd;
 }
