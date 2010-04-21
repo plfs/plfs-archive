@@ -119,9 +119,9 @@ int HDFSIOStore::Close(int fd)
     hdfsFile openFile;
 
     openFile = GetFileFromMap(fd);
-    std::cout << "Closing " << fd << "\n";
+    //std::cout << "Closing " << fd << "\n";
     if (!openFile) {
-        std::cout << "Error looking it up in map.\n";
+        //std::cout << "Error looking it up in map.\n";
         errno = ENOENT;
         return -1;
     }
@@ -133,7 +133,7 @@ int HDFSIOStore::Close(int fd)
     //}
     ret = hdfsCloseFile(fs, openFile);
     if (ret) {
-        std::cout << "Error closing hdfsFile\n";
+        //std::cout << "Error closing hdfsFile\n";
         return ret;
     }
 
@@ -329,28 +329,28 @@ int HDFSIOStore::Open(const char* path, int flags)
     } else if (flags & O_WRONLY)  {
         new_flags = O_WRONLY;
     } else {
-        std::cout << "Unsupported flags.\n";
+        //std::cout << "Unsupported flags.\n";
         errno = ENOTSUP;
         return -1;
     }
 
-    std::cout << "Attempting open on " << path << "\n";
+    //std::cout << "Attempting open on " << path << "\n";
     if (hdfsExists(fs, path)) {
-        std::cout << "Doesn't exist yet....\n";
+        //std::cout << "Doesn't exist yet....\n";
     } else {
         hdfsFileInfo* info = hdfsGetPathInfo(fs, path);
-        std::cout << "Exists and has " << info->mSize << " bytes\n";
+        //std::cout << "Exists and has " << info->mSize << " bytes\n";
         hdfsFreeFileInfo(info, 1);
     }
     openFile = hdfsOpenFile(fs, path, new_flags, 0, 0, 0);
     
     if (!openFile) {
-        std::cout << "Disaster trying to open " << path << "\n";
+        //std::cout << "Disaster trying to open " << path << "\n";
         return -1;
     }
     fd = AddFileToMap(openFile, new_flags);
 
-    std::cout << "Opened fd " << fd << "with secret file " << openFile << "\n";
+    //std::cout << "Opened fd " << fd << "with secret file " << openFile << "\n";
     return fd;
 }
 
@@ -415,7 +415,7 @@ ssize_t HDFSIOStore::Pread(int fd, void* buf, size_t count, off_t offset)
         errno = EBADF;
         return -1;
     }
-    std::cout << "Reading " << count << "bytes\n";
+    //std::cout << "Reading " << count << "bytes\n";
     return hdfsPread(fs, openFile, offset, buf, count);
 }
 
@@ -439,7 +439,7 @@ ssize_t HDFSIOStore::Read(int fd, void *buf, size_t count)
         errno = EBADF;
         return -1;
     }
-    std::cout << "Reading " << count << "bytes\n";
+    //std::cout << "Reading " << count << "bytes\n";
     return hdfsRead(fs, openFile, buf, count);
 }
 
@@ -461,7 +461,7 @@ struct dirent *HDFSIOStore::Readdir(DIR *dirp)
         Util::Debug(stderr, "Done reading directory\n");
         return NULL;
     }
-    std::cout << "Processing entry.\n";
+    //std::cout << "Processing entry.\n";
     // Fill in the struct dirent curEntry field.
     dir->curEntry.d_ino = 0; // No inodes in HDFS.
     // I'm not sure how offset is used in this context. Technically
@@ -483,7 +483,7 @@ struct dirent *HDFSIOStore::Readdir(DIR *dirp)
     // NAME_MAX does not include the terminating null and if we copy
     // the max number of characters, strncpy won't place it, so set it manually.
     dir->curEntry.d_name[NAME_MAX] = '\0';
-    std::cout << "Entry name " << dir->curEntry.d_name[NAME_MAX];
+    //std::cout << "Entry name " << dir->curEntry.d_name[NAME_MAX];
     dir->curEntryNum++;
     return &dir->curEntry;
 }
@@ -511,7 +511,7 @@ int HDFSIOStore::Stat(const char* path, struct stat* buf)
 {
     hdfsFileInfo* hdfsInfo = hdfsGetPathInfo(fs, path);
     if (!hdfsInfo) {
-        std::cout << "Failed to get stat for path " << path << "\n";
+        //std::cout << "Failed to get stat for path " << path << "\n";
         errno = ENOENT;
         return -1;
     }
