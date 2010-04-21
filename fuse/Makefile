@@ -1,9 +1,19 @@
 PLFS_INSTALL_DIR = ../src
 
+# get the svnversion info to put into .plfsdebug
+SVN_VERSION := $(shell svnversion ..)
+TAG_VERSION := $(shell cat ../VERSION)
+
+# something weird needed on snow leopard
+#SNOW = -D__DARWIN_64_BIT_INO_T=0 
+# doesn't work.  does work to link with -lfuse_ino64 instead of -lfuse
+# http://www.mail-archive.com/macfuse@googlegroups.com/msg01048.html
+
 TARGET   = plfs
 CXXFLAGS = -I$(PLFS_INSTALL_DIR) -DPLFS_TIMES -DCOUNT_SKIPS -g -Wall
 LDFLAGS  = -L$(PLFS_INSTALL_DIR) -lplfs 
 LOG      = /tmp/plfs.log
+LIBRARY  = $(PLFS_INSTALL_DIR)/libplfs.a
 
 # TODO: Make all this hadoop stuff dependent on a define so it can easily
 # be turned on and off.
@@ -17,6 +27,9 @@ LDFLAGS += ${HADOOP_LDFLAGS}
 # but it makes the performance horrible because writes are split into 4K
 # as opposed to 128K with direct_io 
 DIRECT_IO        = -o direct_io
+
+# big writes should aggregate small contiguous writes
+#BIG_WRITES       = -obig_writes
 
 # ALLOW_OTHER is needed to run as root to allow other users to see the mount
 ALLOW_OTHER      = -o allow_other
@@ -58,8 +71,11 @@ export PKG_CONFIG_PATH
 
 all: $(TARGET)
 
-$(TARGET): plfs_fuse.o main.o
+$(TARGET): $(LIBRARY) plfs_fuse.o main.o 
 	g++ -o $(TARGET) main.o plfs_fuse.o $(LDFLAGS)
+
+$(LIBRARY):
+	make -C ../src
 
 mount: $(TARGET) $(PLFS_MNT) $(PLFS_BACK)
 	./$(TARGET) -d $(PLFS_MNT) $(PLFS_ARGS)

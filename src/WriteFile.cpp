@@ -35,7 +35,7 @@ void WriteFile::setPath ( string p ) {
 }
 
 WriteFile::~WriteFile() {
-    Util::Debug(stderr, "Delete self %s\n", physical_path.c_str() );
+    Util::Debug("Delete self %s\n", physical_path.c_str() );
     Close();
     if ( index ) {
         closeIndex();
@@ -83,7 +83,7 @@ int WriteFile::addWriter( pid_t pid ) {
     }
     int writers = -1;
     if ( ret == 0 ) writers = incrementOpens(1);
-    Util::Debug(stderr, "%s (%d) on %s now has %d writers\n", 
+    Util::Debug("%s (%d) on %s now has %d writers\n", 
             __FUNCTION__, pid, physical_path.c_str(), writers );
     Util::MutexUnlock( &data_mux, __FUNCTION__ );
     return ret;
@@ -100,7 +100,7 @@ size_t WriteFile::numWriters( ) {
             check += pids_itr->second->writers;
         }
         if ( writers != check ) {
-            Util::Debug(stderr, "%s %d not equal %d\n", __FUNCTION__, 
+            Util::Debug("%s %d not equal %d\n", __FUNCTION__, 
                     writers, check ); 
             assert( writers==check );
         }
@@ -141,7 +141,7 @@ struct OpenFd * WriteFile::getFd( pid_t pid ) {
             ofd = NULL;
         }
         */
-        Util::Debug(stderr, "%s no fd to give to %d\n", __FILE__, (int)pid);
+        Util::Debug("%s no fd to give to %d\n", __FILE__, (int)pid);
         ofd = NULL;
     }
     return ofd;
@@ -152,7 +152,7 @@ int WriteFile::closeFd( int fd ) {
     paths_itr = paths.find( fd );
     string path = ( paths_itr == paths.end() ? "ENOENT?" : paths_itr->second );
     int ret = Util::Close( fd );
-    Util::Debug(stderr, "%s:%s closed fd %d for %s: %d %s\n",
+    Util::Debug("%s:%s closed fd %d for %s: %d %s\n",
             __FILE__, __FUNCTION__, fd, path.c_str(), ret, 
             ( ret != 0 ? strerror(errno) : "success" ) );
     paths.erase ( fd );
@@ -170,7 +170,7 @@ int WriteFile::removeWriter( pid_t pid ) {
         // this is strange but sometimes fuse does weird things w/ pids
         // if the writers goes zero, when this struct is freed, everything
         // gets cleaned up
-        Util::Debug(stderr, "%s can't find pid %d\n", __FUNCTION__, pid );
+        Util::Debug("%s can't find pid %d\n", __FUNCTION__, pid );
         assert( 0 );
     } else {
         ofd->writers--;
@@ -181,7 +181,7 @@ int WriteFile::removeWriter( pid_t pid ) {
             ofd = NULL;
         }
     }
-    Util::Debug(stderr, "%s (%d) on %s now has %d writers: %d\n", 
+    Util::Debug("%s (%d) on %s now has %d writers: %d\n", 
             __FUNCTION__, pid, physical_path.c_str(), writers, ret );
     Util::MutexUnlock( &data_mux, __FUNCTION__ );
     return ( ret == 0 ? writers : ret );
@@ -298,7 +298,7 @@ int WriteFile::openDataFile(string path, string host, pid_t p, mode_t m){
 int WriteFile::openFile( string physicalpath, mode_t mode ) {
     int flags = O_WRONLY | O_APPEND | O_CREAT;
     int fd = Util::Open( physicalpath.c_str(), flags, mode );
-    Util::Debug(stderr, "open %s : %d %s\n", physicalpath.c_str(), 
+    Util::Debug("open %s : %d %s\n", physicalpath.c_str(), 
             fd, ( fd < 0 ? strerror(errno) : "" ) );
     if ( fd >= 0 ) paths[fd] = physicalpath;    // remember so restore works
     return ( fd >= 0 ? fd : -errno );

@@ -18,9 +18,12 @@ class Plfs_fd : public Metadata {
         void       setWriteFds( int, int, Index * );
         void       getWriteFds( int *, int *, Index ** );
         pid_t      getPid();
+        void       setPath( string path ); 
         const char *getPath() { return this->path.c_str(); }
         mode_t     getMode()  { return this->mode; }
         time_t     getCtime() { return ctime; }
+        void       setIndex( Index *i )          { this->index     = i;  }
+        void       setWritefile( WriteFile *wf ) { this->writefile = wf; }
     private:
         WriteFile *writefile;
         Index     *index;

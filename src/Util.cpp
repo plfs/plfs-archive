@@ -23,6 +23,7 @@
 #include <map>
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdlib.h>
 using namespace std;
 
 #ifndef __FreeBSD__
@@ -50,7 +51,7 @@ using namespace std;
     #define ENTER_MUX  ENTER_UTIL;
     #define ENTER_PATH ENTER_UTIL;
 #else
-    #define DEBUG_ENTER /*Util::Debug( stderr, "Enter %s\n", __FUNCTION__ );*/
+    #define DEBUG_ENTER /*Util::Debug("Enter %s\n", __FUNCTION__ );*/
     #define DEBUG_EXIT  LogMessage lm1;                             \
                         lm1 << "Util::" << setw(13) << __FUNCTION__ \
                             << setw(7) << setprecision(0) << ret    \
@@ -103,15 +104,31 @@ using namespace std;
 
 #ifdef VERBOSE
 void
-Util::Debug( FILE *fp, const char *format, ... ) {
+Util::Debug( const char *format, ... ) {
     va_list args;
     va_start(args, format);
-    vfprintf(fp, format, args);
+    Util::Debug( format, args);
     va_end( args );
 }
 #else
-void Util::Debug( FILE *fp, const char *format, ... ) { return; }
+void Util::Debug( const char *format, ... ) { return; }
 #endif
+
+void
+Util::Debug( const char *format, va_list args ) {
+    static FILE *debugfile = NULL;
+    static bool init = 0;
+    if ( ! init ) {
+        init = 1;
+        if ( getenv( "PLFS_DEBUG" ) ) {
+            debugfile = fopen( getenv("PLFS_DEBUG"), "w" );
+        }
+    }
+    if ( debugfile ) {
+        vfprintf(debugfile, format, args);
+        fflush(debugfile);
+    }
+}
 
 // initialize static variables
 HASH_MAP<string, double> utimers;
@@ -263,10 +280,10 @@ int Util::MutexLock(  pthread_mutex_t *mux , const char * where ) {
     ENTER_MUX;
     ostringstream os, os2;
     os << "Locking mutex " << mux << " from " << where << endl;
-    Util::Debug( stderr, "%s", os.str().c_str() );
+    Util::Debug("%s", os.str().c_str() );
     pthread_mutex_lock( mux );
     os2 << "Locked mutex " << mux << " from " << where << endl;
-    Util::Debug( stderr, "%s", os2.str().c_str() );
+    Util::Debug("%s", os2.str().c_str() );
     EXIT_UTIL;
 }
 
@@ -274,7 +291,7 @@ int Util::MutexUnlock( pthread_mutex_t *mux, const char *where ) {
     ENTER_MUX;
     ostringstream os;
     os << "Unlocking mutex " << mux << " from " << where << endl;
-    Util::Debug( stderr, "%s", os.str().c_str() );
+    Util::Debug("%s", os.str().c_str() );
     pthread_mutex_unlock( mux );
     EXIT_UTIL;
 }
@@ -389,12 +406,16 @@ bool Util::exists( const char *path ) {
     EXIT_UTIL;
 }
 
+bool Util::isDirectory( struct stat *buf ) {
+    return S_ISDIR(buf->st_mode);
+}
+
 bool Util::isDirectory( const char *path ) {
     ENTER_PATH;
     bool exists = false;
     struct stat buf;
     if ( ioStore->Stat( path, &buf ) == 0 ) {
-        exists = ( buf.st_mode & S_IFDIR );
+        exists = isDirectory( &buf );
     }
     ret = exists;
     EXIT_UTIL;
@@ -430,7 +451,7 @@ double Util::getTime( ) {
     //return 1.0e-9 * gethrtime();
     struct timeval time;
     if ( gettimeofday( &time, NULL ) != 0 ) {
-        Util::Debug( stderr, "WTF: %s failed: %s\n", 
+        Util::Debug("WTF: %s failed: %s\n", 
                 __FUNCTION__, strerror(errno));
     }
     return (double)time.tv_sec + time.tv_usec/1.e6; 
@@ -575,6 +596,7 @@ int Util::Setfsgid( gid_t g ) {
     ENTER_UTIL;
     #ifndef __FreeBSD__
     ret = setfsgid( g );
+    Util::Debug("Set gid %d: %s\n", g, strerror(errno) ); 
     #endif
     EXIT_UTIL;
 }
@@ -583,6 +605,7 @@ int Util::Setfsuid( uid_t u ) {
     ENTER_UTIL;
     #ifndef __FreeBSD__
     ret = setfsuid( u );
+    Util::Debug("Set uid %d: %s\n", u, strerror(errno) ); 
     #endif
     EXIT_UTIL;
 }

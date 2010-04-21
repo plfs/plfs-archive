@@ -28,18 +28,23 @@
 void plfs_posix_init();
 void plfs_hdfs_init(const char* host, int port);
 void plfs_store_delete();
+
+int is_plfs_file( const char *path );
+
 int plfs_access( const char *path, int mask );
 
 int plfs_chmod( const char *path, mode_t mode );
 
 int plfs_chown( const char *path, uid_t, gid_t );
 
-int plfs_close( Plfs_fd *, pid_t );
+int plfs_close( Plfs_fd *, pid_t, int open_flags );
 
 /* plfs_create
    you don't need to call this, you can also pass O_CREAT to plfs_open
 */
 int plfs_create( const char *path, mode_t mode, int flags ); 
+
+void plfs_debug( const char *format, ... );
 
 /* plfs_open
 */
@@ -47,6 +52,10 @@ int plfs_open( Plfs_fd **, const char *path,
         int flags, pid_t pid, mode_t );
 
 ssize_t plfs_read( Plfs_fd *, char *buf, size_t size, off_t offset );
+
+ssize_t plfs_reference_count( Plfs_fd * );
+
+int plfs_rename( Plfs_fd *, const char *from, const char *to );
 
 /* Plfs_fd can be NULL */
 int plfs_getattr( Plfs_fd *, const char *path, struct stat *stbuf );

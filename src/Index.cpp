@@ -108,13 +108,20 @@ Index::Index( string logical, int fd ) : Metadata::Metadata() {
 
 Index::Index( string logical ) : Metadata::Metadata() {
     init( logical );
+    ostringstream os;
+    os << __FUNCTION__ << ": " << this << " created index on " <<
+        logical_path << endl;
+    Util::Debug("%s", os.str().c_str() );
 }
 
 Index::~Index() {
-    Util::Debug( stderr, "Removing index on %s\n", logical_path.c_str() );
+    ostringstream os;
+    os << __FUNCTION__ << ": " << this << " removing index on " <<
+        logical_path << endl;
+    Util::Debug("%s", os.str().c_str() );
     for( unsigned i = 0; i < chunk_map.size(); i++ ) {
         if ( chunk_map[i].fd > 0 ) {
-            Util::Debug( stderr, "Closing fd %d for %s\n",
+            Util::Debug("Closing fd %d for %s\n",
                     (int)chunk_map[i].fd, chunk_map[i].path.c_str() );
             Util::Close( chunk_map[i].fd );
         }
@@ -167,6 +174,10 @@ bool Index::ispopulated( ) {
     return populated;
 }
 
+void Index::setPath( string p ) {
+    this->logical_path = p;
+}
+
 // returns 0 or -errno
 // this dumps the local index
 // and then clears it
@@ -187,7 +198,7 @@ void *Index::mapIndex( string hostindex, int *fd, off_t *length ) {
     void *addr;
     *fd = Util::Open( hostindex.c_str(), O_RDONLY );
     if ( *fd < 0 ) {
-        Util::Debug( stderr, "Couldn't open index %s\n", hostindex.c_str());
+        Util::Debug( "Couldn't open index %s\n", hostindex.c_str());
         return NULL;
     }
     // lseek doesn't always see latest data if panfs hasn't flushed
@@ -195,7 +206,7 @@ void *Index::mapIndex( string hostindex, int *fd, off_t *length ) {
     // created.  
     Util::Lseek( *fd, 0, SEEK_END, length );
     if ( *length <= 0 ) {
-        Util::Debug( stderr, "Problem seeking to end of index file %s\n", hostindex.c_str());
+        Util::Debug( "Problem seeking to end of index file %s\n", hostindex.c_str());
         return NULL;
     }
 
@@ -212,9 +223,14 @@ int Index::readIndex( string hostindex ) {
     void  *maddr = NULL;
     populated = true;
 
+    ostringstream os;
+    os << __FUNCTION__ << ": " << this << " reading index on " <<
+        logical_path << endl;
+    Util::Debug("%s", os.str().c_str() );
+
     maddr = mapIndex( hostindex, &fd, &length );
-    if( ! maddr ) {
-        Util::Debug( stderr, "Couldn't map index %s\n", hostindex.c_str());
+    if( maddr == NULL || maddr == MAP_FAILED ) {
+        Util::Debug( "Couldn't map index %s\n", hostindex.c_str());
         return cleanupReadIndex( fd, maddr, length, 0, "mapIndex",
             hostindex.c_str() );
     }
@@ -252,7 +268,7 @@ int Index::readIndex( string hostindex ) {
     HostEntry *h_index = (HostEntry*)maddr;
     size_t entries     = length / sizeof(HostEntry); // shouldn't be partials
                                                      // but any will be ignored
-    Util::Debug( stderr, "There are %d in %s\n", entries, hostindex.c_str() );
+    Util::Debug("There are %d in %s\n", entries, hostindex.c_str() );
     for( size_t i = 0; i < entries; i++ ) {
         ContainerEntry c_entry;
         HostEntry      h_entry = h_index[i];
@@ -322,7 +338,8 @@ int Index::handleOverlap( ContainerEntry *g_entry,
         global_index.erase( insert_ret.first );
         insert_ret = insertGlobalEntry( g_entry ); 
         if ( insert_ret.second == false ) {
-            cerr << "WTF? Deleted old entry but couldn't insert new" << endl;
+            Util::Debug(
+                    "WTF? Deleted old entry but couldn't insert new" );
             return -1;
         }
 
@@ -334,8 +351,10 @@ int Index::handleOverlap( ContainerEntry *g_entry,
             pair< map<off_t,ContainerEntry>::iterator, bool > insert_old;
             insert_old = insertGlobalEntry( &old );
             if ( insert_old.second == false ) {
-                cerr << "Adjusted old entry " << old << " but couldn't insert" 
+                ostringstream oss;
+                oss << "Adjusted old entry " << old << " but couldn't insert" 
                      << endl;
+                Util::Debug("%s\n", oss.str().c_str() );
                 return -1;
             }
         }
@@ -396,8 +415,10 @@ int Index::insertGlobal( ContainerEntry *g_entry ) {
     //     << logical_path << endl;
     ret = insertGlobalEntry( g_entry ); 
     if ( ret.second == false ) {
-        cerr << "overlap(1) at " << *g_entry << " with " << ret.first->second 
+        ostringstream oss;
+        oss << "overlap(1) at " << *g_entry << " with " << ret.first->second 
              << endl;
+        Util::Debug("%s\n", oss.str().c_str() );
         overlap  = true;
         inserted = false;
     } 
@@ -407,17 +428,23 @@ int Index::insertGlobal( ContainerEntry *g_entry ) {
     next = ret.first; next++;
     prev = ret.first; prev--;
     if ( next != global_index.end() && g_entry->overlap( next->second ) ) {
-        cerr << "overlap2 at " << *g_entry << " and " <<next->second <<endl;
+        ostringstream oss;
+        oss << "overlap2 at " << *g_entry << " and " <<next->second <<endl;
+        Util::Debug("%s\n", oss.str().c_str() );
         overlap = true;
     }
     if (ret.first!=global_index.begin() && prev->second.overlap(*g_entry) ){
-        cerr << "overlap3 at " << *g_entry << " and " <<prev->second <<endl;
+        ostringstream oss;
+        oss << "overlap3 at " << *g_entry << " and " <<prev->second <<endl;
+        Util::Debug("%s\n", oss.str().c_str() );
         overlap = true;
     }
 
     if ( overlap ) {
-        cerr << __FUNCTION__ << " of " << logical_path << " trying to insert "
+        ostringstream oss;
+        oss << __FUNCTION__ << " of " << logical_path << " trying to insert "
             << "overlap at " << g_entry->logical_offset << endl;
+        Util::Debug("%s\n", oss.str().c_str() );
         return handleOverlap( g_entry, ret );
     } else {
             // might as well try to merge any potentially adjoining regions
@@ -446,23 +473,31 @@ int Index::cleanupReadIndex( int fd, void *maddr, off_t length, int ret,
 {
     int ret2 = 0, ret3 = 0;
     if ( ret < 0 ) {
-        fprintf( stderr, "WTF.  readIndex failed during %s on %s: %s\n",
+        Util::Debug("WTF.  readIndex failed during %s on %s: %s\n",
                 last_func, indexfile, strerror( errno ) );
     }
 
-    if ( maddr != NULL ) {
+    if ( maddr != NULL && maddr != MAP_FAILED ) {
         ret2 = Util::ioStore->Munmap( maddr, length );
         if ( ret2 < 0 ) {
-            cerr << "WTF. readIndex failed during munmap of "  << indexfile 
+            ostringstream oss;
+            oss << "WTF. readIndex failed during munmap of "  << indexfile 
                  << " (" << length << "): " << strerror(errno) << endl;
+            Util::Debug("%s\n", oss.str().c_str() );
+
             ret = ret2; // set to error
         }
+    }
+
+    if ( maddr == MAP_FAILED ) {
+        Util::Debug("mmap failed on %s: %s\n",indexfile,strerror(errno));
     }
 
     if ( fd > 0 ) {
         ret3 = Util::Close( fd );
         if ( ret3 < 0 ) {
-            fprintf( stderr, "WTF. readIndex failed during close of %s: %s\n",
+            Util::Debug(
+                    "WTF. readIndex failed during close of %s: %s\n",
                     indexfile, strerror( errno ) );
             ret = ret3; // set to error
         }
@@ -481,12 +516,12 @@ int Index::chunkFound( int *fd, off_t *chunk_off, size_t *chunk_len,
     if( cf_ptr->fd < 0 ) {
         cf_ptr->fd = Util::Open(cf_ptr->path.c_str(), O_RDONLY);
         if ( cf_ptr->fd < 0 ) {
-            fprintf( stderr, "WTF? Open of %s: %s\n", 
+            Util::Debug("WTF? Open of %s: %s\n", 
                     cf_ptr->path.c_str(), strerror(errno) );
             return -errno;
         } 
     }
-    Util::Debug( stderr, "Will read from chunk %s at off %ld\n",
+    Util::Debug("Will read from chunk %s at off %ld\n",
             cf_ptr->path.c_str(), (long)*chunk_off );
     *fd = cf_ptr->fd;
     return 0;
@@ -500,8 +535,9 @@ int Index::chunkFound( int *fd, off_t *chunk_off, size_t *chunk_len,
 int Index::globalLookup( int *fd, off_t *chunk_off, size_t *chunk_len, 
         off_t logical ) 
 {
-    Util::Debug( stderr, "Look up %ld in %s\n", 
-            (long)logical, logical_path.c_str() );
+    ostringstream os;
+    os << __FUNCTION__ << ": " << this << " using index." << endl;
+    Util::Debug("%s", os.str().c_str() );
     ContainerEntry entry, previous;
     MAP_ITR itr;
     MAP_ITR prev = (MAP_ITR)NULL;
@@ -515,7 +551,7 @@ int Index::globalLookup( int *fd, off_t *chunk_off, size_t *chunk_len,
 
         // zero length file, nothing to see here, move along
     if ( global_index.size() == 0 ) {
-        Util::Debug( stderr, "Zero sized index in %s\n",
+        Util::Debug( "Zero sized index in %s\n",
                      logical_path.c_str());
         *fd = -1;
         *chunk_len = 0;
@@ -533,16 +569,17 @@ int Index::globalLookup( int *fd, off_t *chunk_off, size_t *chunk_len,
         prev--;
     }
     entry = itr->second;
-    ostringstream oss;
-    oss << "Considering whether chunk " << entry 
-         << " contains " << logical; 
-    Util::Debug( stderr, "%s\n", oss.str().c_str() );
+    //ostringstream oss;
+    //oss << "Considering whether chunk " << entry 
+    //     << " contains " << logical; 
+    //Util::Debug("%s\n", oss.str().c_str() );
 
         // case 1 or 2
     if ( entry.contains( logical ) ) {
-        ostringstream oss;
-        oss << "FOUND(1): " << entry << " contains " << logical;
-        Util::Debug( stderr, "%s\n", oss.str().c_str() );
+        //ostringstream oss;
+        //oss << "FOUND(1): " << entry << " contains " << logical;
+        //Util::Debug("%s\n", oss.str().c_str() );
+
         return chunkFound( fd, chunk_off, chunk_len, 
                 logical - entry.logical_offset, &entry );
     }
@@ -551,9 +588,9 @@ int Index::globalLookup( int *fd, off_t *chunk_off, size_t *chunk_len,
     if ( prev != (MAP_ITR)NULL ) {
         previous = prev->second;
         if ( previous.contains( logical ) ) {
-            ostringstream oss;
-            oss << "FOUND(2): " << previous << " contains " << logical << endl;
-            Util::Debug( stderr, "%s\n", oss.str().c_str() );
+            //ostringstream oss;
+            //oss << "FOUND(2): "<< previous << " contains " << logical << endl;
+            //Util::Debug("%s\n", oss.str().c_str() );
             return chunkFound( fd, chunk_off, chunk_len, 
                 logical - previous.logical_offset, &previous );
         }
@@ -564,7 +601,9 @@ int Index::globalLookup( int *fd, off_t *chunk_off, size_t *chunk_len,
 
         // case 4: within a hole
     if ( logical < entry.logical_offset ) {
-        cerr << "FOUND(4): " << logical << " is in a hole" << endl;
+        //ostringstream oss;
+        //oss << "FOUND(4): " << logical << " is in a hole" << endl;
+        //Util::Debug("%s\n", oss.str().c_str() );
         off_t remaining_hole_size = entry.logical_offset - logical;
         *fd = -1;
         *chunk_len = remaining_hole_size;
@@ -572,7 +611,9 @@ int Index::globalLookup( int *fd, off_t *chunk_off, size_t *chunk_len,
     }
 
         // case 3: off the end of the file
-    cerr << "FOUND(3): " << logical << " is beyond the end of the file" << endl;
+    //oss.str("");    // stupid way to clear the buffer
+    //oss << "FOUND(3): " <<logical << " is beyond the end of the file" << endl;
+    //Util::Debug("%s\n", oss.str().c_str() );
     *fd = -1;
     *chunk_len = 0;
     return 0;
@@ -596,7 +637,7 @@ void Index::addWrite( off_t offset, size_t length, pid_t pid,
         && hostIndex[quant-1].logical_offset + (off_t)hostIndex[quant-1].length 
             == offset )
     {
-        Util::Debug( stderr, "Merged new write with last at %ld\n",
+        Util::Debug("Merged new write with last at %ld\n",
              (long)hostIndex[quant-1].logical_offset ); 
         hostIndex[quant-1].length += length;
     } else {
@@ -606,6 +647,8 @@ void Index::addWrite( off_t offset, size_t length, pid_t pid,
         entry.id             = pid; 
         #ifdef INDEX_CONTAINS_TIMESTAMPS
             entry.begin_timestamp = begin_timestamp;
+            // valgrind complains about this line as well:
+            // Address 0x97373bc is 20 bytes inside a block of size 40 alloc'd
             entry.end_timestamp   = end_timestamp;
         #endif
         hostIndex.push_back( entry );

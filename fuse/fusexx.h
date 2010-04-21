@@ -18,7 +18,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <string.h>
-#include <cstdio>
+#include <stdio.h>
 
 namespace fusexx {
     /*

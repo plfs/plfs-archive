@@ -9,7 +9,7 @@ using namespace std;
 
 class LogMessage : public ostringstream {
     public:
-        static int init( const char * );
+        static int init( );
         static int changeLogFile( const char *logfile );
         static void Flush();
         static string Dump();

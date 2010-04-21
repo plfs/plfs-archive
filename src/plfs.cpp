@@ -1,5 +1,6 @@
 #include <limits>
 #include <string.h>
+#include <assert.h>
 #include "plfs.h"
 #include "plfs_private.h"
 #include "Index.h"
@@ -48,9 +49,28 @@ addWriter( WriteFile *wf, pid_t pid, const char *path, mode_t mode ) {
     return ret;
 }
 
+int
+isWriter( int flags ) {
+    return (flags & O_WRONLY || flags & O_RDWR);
+}
+
 int 
 plfs_chown( const char *path, uid_t u, gid_t g ) {
     return Container::Chown( path, u, g );
+}
+
+int
+is_plfs_file( const char *path ) {
+    return Container::isContainer( path );
+}
+
+
+void 
+plfs_debug( const char *format, ... ) {
+    va_list args;
+    va_start(args, format);
+    Util::Debug(format, args);
+    va_end( args );
 }
 
 int
@@ -164,7 +184,18 @@ plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
     }
 
     if ( new_index_created ) {
+        Util::Debug("%s removing freshly created index for %s\n",
+                __FUNCTION__, path );
         delete( index );
+    }
+    return ret;
+}
+
+int
+plfs_rename( Plfs_fd *pfd, const char *from, const char *to ) {
+    int ret = retValue( Util::Rename( from, to ) );
+    if ( ret == 0 && pfd ) {
+        pfd->setPath( to );
     }
     return ret;
 }
@@ -174,6 +205,95 @@ plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
 // one problem is that we fail if we're asked to overwrite a normal file
 // another problem is that if concurrent procs open a file w/ O_TRUNC flag,
 // then some proc's data and index droppings might be removed by someone else
+int
+plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
+{
+    WriteFile *wf      = NULL;
+    Index     *index   = NULL;
+    int ret            = 0;
+    bool new_writefile = false;
+    bool new_index     = false;
+    bool new_pfd       = false;
+
+    // ugh, no idea why this line is here or what it does 
+    if ( mode == 420 || mode == 416 ) mode = 33152; 
+
+    // make sure we're allowed to open this container
+    // this breaks things when tar is trying to create new files
+    // with --r--r--r bec we create it w/ that access and then 
+    // we can't write to it
+    //ret = checkAccess( strPath, fi ); 
+
+    if ( flags & O_CREAT ) {
+        ret = plfs_create( path, mode, flags ); 
+    }
+
+    if ( flags & O_TRUNC ) {
+        ret = plfs_trunc( NULL, path, 0 );
+    }
+
+    if ( *pfd) plfs_reference_count(*pfd);
+
+    // this next chunk of code works similarly for writes and reads
+    // for writes, create a writefile if needed, otherwise add a new writer
+    // create the write index file after the write data file so that the
+    // hostdir is created
+    // for reads, create an index if needed, otherwise add a new reader
+    if ( ret == 0 && isWriter(flags) ) {
+        if ( *pfd ) {
+            wf = (*pfd)->getWritefile();
+        } 
+        if ( wf == NULL ) {
+            wf = new WriteFile( path, Util::hostname(), mode ); 
+            new_writefile = true;
+        }
+        if ( ret == 0 ) {
+            ret = addWriter( wf, pid, path, mode );
+            Util::Debug("%s added writer: %d\n", __FUNCTION__, ret );
+            if ( ret > 0 ) ret = 0; // add writer returns # of current writers
+            if ( ret == 0 && new_writefile ) ret = wf->openIndex( pid ); 
+        }
+        if ( ret != 0 && wf ) {
+            delete wf;
+            wf = NULL;
+        }
+    } else if ( ret == 0 ) {
+        if ( *pfd ) {
+            index = (*pfd)->getIndex();
+        }
+        if ( index == NULL ) {
+            index = new Index( path );  
+            new_index = true;
+            ret = Container::populateIndex( path, index );
+        }
+        if ( ret == 0 ) {
+            index->incrementOpens(1);
+        }
+        if ( ret != 0 && index ) {
+            delete index;
+            index = NULL;
+        }
+    }
+
+    if ( ret == 0 && ! *pfd ) {
+        *pfd = new Plfs_fd( wf, index, pid, mode, path ); 
+        new_pfd       = true;
+        // we create one open record for all the pids using a file
+        // only create the open record for files opened for writing
+        if ( wf ) {
+            ret = Container::addOpenrecord( path, Util::hostname(), pid );
+        }
+        //cerr << __FUNCTION__ << " added open record for " << path << endl;
+    } else if ( ret == 0 ) {
+        if ( wf && new_writefile) (*pfd)->setWritefile( wf ); 
+        if ( index && new_index ) (*pfd)->setIndex( index  ); 
+    }
+    if ( ret == 0 ) (*pfd)->incrementOpens(1);
+    plfs_reference_count(*pfd);
+    return ret;
+}
+
+/* OLD VERSION
 int
 plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
 {
@@ -212,7 +332,7 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
         }
         if ( ret == 0 ) {
             ret = addWriter( wf, pid, path, mode );
-            Util::Debug( stderr, "%s added writer: %d\n", __FUNCTION__, ret );
+            Util::Debug("%s added writer: %d\n", __FUNCTION__, ret );
             if ( ret > 0 ) ret = 0; // add writer returns # of current writers
             if ( ret == 0 && newly_created ) ret = wf->openIndex( pid ); 
         }
@@ -242,7 +362,7 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
         //cerr << __FUNCTION__ << " added open record for " << path << endl;
     }
     return ret;
-}
+}*/
 
 ssize_t 
 plfs_write( Plfs_fd *pfd, const char *buf, size_t size, off_t offset, pid_t pid)
@@ -250,7 +370,7 @@ plfs_write( Plfs_fd *pfd, const char *buf, size_t size, off_t offset, pid_t pid)
     int ret = 0; ssize_t written;
     WriteFile *wf = pfd->getWritefile();
 
-    Util::Debug( stderr, "Write to %s, offset %ld\n", 
+    Util::Debug("Write to %s, offset %ld\n", 
             pfd->getPath(), (long)offset );
     ret = written = wf->write( buf, size, offset, pid );
 
@@ -282,14 +402,14 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
     DIR *dir;
     struct dirent *ent;
     int ret = 0;
-    Util::Debug( stderr, "%s on %s\n", __FUNCTION__, path );
+    Util::Debug("%s on %s\n", __FUNCTION__, path );
 
     dir = Util::ioStore->Opendir( path );
     if ( dir == NULL ) return -errno;
 
     while( (ent = Util::ioStore->Readdir( dir ) ) != NULL ) {
         if ( ! strcmp(ent->d_name, ".") || ! strcmp(ent->d_name, "..") ) {
-            //Util::Debug( stderr, "skipping %s\n", ent->d_name );
+            //Util::Debug("skipping %s\n", ent->d_name );
             continue;
         }
         if ( ! strcmp(ent->d_name, ACCESSFILE ) && truncate_only ) {
@@ -307,7 +427,7 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
                 continue;
             }
         } else {
-            //Util::Debug( stderr, "unlinking %s\n", ent->d_name );
+            //Util::Debug("unlinking %s\n", ent->d_name );
             if ( Util::Unlink( child.c_str() ) != 0 ) {
                 // ENOENT would be OK, could mean that an openhosts dropping
                 // was removed on another host or something
@@ -352,17 +472,17 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
 int 
 plfs_getattr( Plfs_fd *of, const char *path, struct stat *stbuf ) {
     int ret = 0;
-    Util::Debug(stderr, "Checking if it's a container.\n");
+    Util::Debug("Checking if it's a container.\n");
     if ( ! Container::isContainer( path ) ) {
-        Util::Debug(stderr, "Not a container--statting\n");
+        Util::Debug("Not a container--statting\n");
         ret = retValue( Util::Lstat( path, stbuf ) );
         if (ret)
-            Util::Debug(stderr, "Couldn't stat regular file.\n");
+            Util::Debug("Couldn't stat regular file.\n");
     } else {
-        Util::Debug(stderr, "Stating container.\n");
+        Util::Debug("Stating container.\n");
         ret = Container::getattr( path, stbuf );
         if ( ret == 0 ) {
-            Util::Debug(stderr, "Could stat container file. Checking if it's open.\n");
+            Util::Debug("Could stat container file. Checking if it's open.\n");
             // is it also open currently?
             // we might be reading from some other users writeFile but
             // we're only here if we had access to stat the container
@@ -373,7 +493,7 @@ plfs_getattr( Plfs_fd *of, const char *path, struct stat *stbuf ) {
             // If we were trying to read index droppings
             // and they weren't available, then we should do this.
             WriteFile *wf=(of && of->getWritefile() ? of->getWritefile() :NULL);
-            Util::Debug(stderr, "Got write file.\n");
+            Util::Debug("Got write file.\n");
             if ( wf ) {
                 off_t  last_offset;
                 size_t total_bytes;
@@ -482,16 +602,34 @@ plfs_query( Plfs_fd *pfd, size_t *writers, size_t *readers ) {
     return 0;
 }
 
+ssize_t plfs_reference_count( Plfs_fd *pfd ) {
+    WriteFile *wf = pfd->getWritefile();
+    Index     *in = pfd->getIndex();
+    
+    int ref_count = 0;
+    if ( wf ) ref_count += wf->numWriters();
+    if ( in ) ref_count += in->incrementOpens(0);
+    if ( ref_count != pfd->incrementOpens(0) ) {
+        ostringstream oss;
+        oss << __FUNCTION__ << " not equal counts: " << ref_count
+            << " != " << pfd->incrementOpens(0) << endl;
+        Util::Debug("%s", oss.str().c_str() ); 
+        assert( 0 );
+    }
+    return ref_count;
+}
+
 // returns number of open handles or -errno
 int
-plfs_close( Plfs_fd *pfd, pid_t pid ) {
+plfs_close( Plfs_fd *pfd, pid_t pid, int open_flags ) {
     int ret = 0;
     WriteFile *wf    = pfd->getWritefile();
     Index     *index = pfd->getIndex();
-    size_t writers = 0, readers = 0;
+    size_t writers = 0, readers = 0, ref_count = 0;
 
     // clean up after writes
-    if ( wf ) {
+    if ( isWriter(open_flags) ) {
+        assert(wf);
         writers = wf->removeWriter( pid );
         if ( writers == 0 ) {
             off_t  last_offset;
@@ -503,25 +641,38 @@ plfs_close( Plfs_fd *pfd, pid_t pid ) {
             // one we used to create the open-record
             Container::removeOpenrecord( pfd->getPath(), Util::hostname(), 
                     pfd->getPid() );
+            delete wf;
+            wf = NULL;
+            pfd->setWritefile(NULL);
         } else if ( writers < 0 ) {
             ret = writers;
             writers = wf->numWriters();
         } else if ( writers > 0 ) {
             ret = 0;
         }
+    } else {
+        assert( index );
+        readers = index->incrementOpens(-1);
+        if ( readers == 0 ) {
+            delete index;
+            index = NULL;
+            pfd->setIndex(NULL);
+        }
     }
 
-    // clean up after reads
-    if ( index ) {
-        readers = index->removeReader();
+    ref_count = pfd->incrementOpens(-1);
+    Util::Debug("%s %s: %d readers, %d writers, %d refs remaining\n",
+            __FUNCTION__, pfd->getPath(), (int)readers, (int)writers,
+            (int)ref_count);
+
+    // make sure the reference counting is correct 
+    plfs_reference_count(pfd);    
+    if ( ret == 0 && ref_count == 0 ) {
+        ostringstream oss;
+        oss << __FUNCTION__ << " removing OpenFile " << pfd << endl;
+        Util::Debug("%s", oss.str().c_str() ); 
+        delete pfd; 
+        pfd = NULL;
     }
-
-    // clean up anything that isn't needed anymore
-    if ( readers == 0 && index ) delete index;
-    if ( writers == 0 && wf    ) delete wf;
-    if ( readers == 0 && writers == 0 ) delete pfd;
-
-    Util::Debug( stderr, "%s %s: %d readers, %d writers remaining\n",
-            __FUNCTION__, pfd->getPath(), (int)readers, (int)writers );
-    return ( ret < 0 ? ret : ( readers + writers ) );
+    return ( ret < 0 ? ret : ref_count );
 }

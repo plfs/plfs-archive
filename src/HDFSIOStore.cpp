@@ -128,7 +128,7 @@ int HDFSIOStore::Close(int fd)
     /*    std::cout << "FD " << fd << " corresponds to hdfsFile " << openFile << "\n";*/
     //if (GetModeFromMap(fd) == O_WRONLY) {
     if (hdfsFlush(fs, openFile)) {
-        Util::Debug(stderr, "Couldn't flush file. Probably open for reads.\n");
+        Util::Debug("Couldn't flush file. Probably open for reads.\n");
     }
     //}
     ret = hdfsCloseFile(fs, openFile);
@@ -399,7 +399,7 @@ DIR* HDFSIOStore::Opendir(const char *name)
     
     // Temporary debugging measure:
     for (int i = 0; i < dir->numEntries; i++) {
-        Util::Debug(stderr, "%s\n", dir->infos[i].mName);
+        Util::Debug("%s\n", dir->infos[i].mName);
     }
 
     return (DIR*)dir;
@@ -453,12 +453,12 @@ ssize_t HDFSIOStore::Read(int fd, void *buf, size_t count)
  */
 struct dirent *HDFSIOStore::Readdir(DIR *dirp)
 {
-    Util::Debug(stderr, "readdir called\n");
+    Util::Debug("readdir called\n");
     char* lastComponent; // For locating the last part of the string name.
     struct openDir* dir = (struct openDir*)dirp;
     if (dir->curEntryNum == dir->numEntries) {
         // We've read all the entries! Return NULL.
-        Util::Debug(stderr, "Done reading directory\n");
+        Util::Debug("Done reading directory\n");
         return NULL;
     }
     //std::cout << "Processing entry.\n";
