@@ -3,6 +3,8 @@ SRCS       = $(wildcard *.cpp)
 HDRS       = $(wildcard *.h)
 OBJS       = $(addsuffix .o, $(basename $(SRCS) ) ) 
 VERSION    = $(shell /usr/bin/svnversion ..)
+SYSTEMLIB  = /usr/lib64
+SYSTEMINC  = /usr/include/plfs
 
 # put -DNDEBUG in to turn off assertions, this can make a big difference
 # as many of the asserts are doing stats
@@ -30,6 +32,10 @@ mpi: $(LIBRARY)
 $(LIBRARY): $(OBJS) 
 	@echo $(VERSION)
 	ar rcs $@ $(OBJS) 
+
+install: $(LIBRARY)
+	/bin/cp $(LIBRARY) $(SYSTEMLIB)/
+	/bin/cp $(HDRS) $(SYSTEMINC)/
 
 clean:
 	/bin/rm -f $(LIBRARY) *.o
