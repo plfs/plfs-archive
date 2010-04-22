@@ -4,19 +4,20 @@
 Name:		plfs
 Summary:	plfs - Parallel Log Structured File System
 Version:	0.1.4
-Release:	%{_release}
+Release:	%{_release}%{?dist}
 License:	LANS LLC
 Group:		System Environment/Filesystems
 Source:		plfs-%{version}.tgz
 URL:		https://sf4.lanl.gov/sf/projects/ioandnetworking
 BuildRoot:	%{_tmppath}/plfs-%{version}-root
+Requires:       fuse, fuse-libs
+BuildRequires:  fuse-devel, pkgconfig, subversion
+
 
 %description
 Parallel Log Structured File System 
 transparent filesystem middleware layer intended to speed up 
 small N to 1 strided write patterns to a parallel file system.
-
-BuildRequires: fuse-devel
 
 %prep
 %{__rm} -rf %{buildroot}
@@ -30,9 +31,9 @@ BuildRequires: fuse-devel
 %{__mkdir_p} %{buildroot}/usr/sbin
 %{__mkdir_p} %{buildroot}%{_initrddir}
 %{__mkdir_p} %{buildroot}/etc/sysconfig
-%{__make} install
-%{__install} -m 0755 plfs.init %{buildroot}%{_initrddir}/plfs
-%{__install} -m 0755 plfs.sysconfig %{buildroot}/etc/sysconfig/plfs
+%{__install} -m 0755 fuse/plfs %{buildroot}/%{_sbindir}/plfs
+%{__install} -m 0755 fuse/plfs.init %{buildroot}%{_initrddir}/plfs
+%{__install} -m 0644 fuse/plfs.sysconfig %{buildroot}/etc/sysconfig/plfs
 
 %clean
 if [ %{buildroot} != "/" ]; then
@@ -56,10 +57,9 @@ fi
 
 %files
 %defattr(-,root,root,0755)
-/usr/sbin/plfs
+%{_sbindir}/plfs
 %config %{_initrddir}/plfs
 %config(noreplace) /etc/sysconfig/plfs
-%doc STATUS
 
 %changelog
 * Fri Aug 21 2009 Ben McClelland <ben@lanl.gov>
