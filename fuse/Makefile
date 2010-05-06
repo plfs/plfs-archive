@@ -10,7 +10,7 @@ TAG_VERSION := $(shell cat ../VERSION)
 # http://www.mail-archive.com/macfuse@googlegroups.com/msg01048.html
 
 TARGET   = plfs
-CXXFLAGS = -I$(PLFS_INSTALL_DIR) -DPLFS_TIMES -DCOUNT_SKIPS -g -Wall
+CXXFLAGS = -I$(PLFS_INSTALL_DIR) -D_FILE_OFFSET_BITS=64 -DPLFS_TIMES -DCOUNT_SKIPS -g -Wall
 LDFLAGS  = -L$(PLFS_INSTALL_DIR) -lplfs 
 LOG      = /tmp/plfs.log
 LIBRARY  = $(PLFS_INSTALL_DIR)/libplfs.a
@@ -19,6 +19,7 @@ LIBRARY  = $(PLFS_INSTALL_DIR)/libplfs.a
 # be turned on and off.
 HADOOP_CXXFLAGS = -I${HADOOP_HOME}/src/c++/libhdfs/ -I${JAVA_HOME}/include -I${JAVA_HOME}/include/linux
 HADOOP_LDFLAGS = -L${HADOOP_HOME}/src/c++/install/lib -L${JAVA_HOME}/jre/lib/amd64/server/ -lhdfs -ljvm
+HADOOP_LDFLAGS += -L${HADOOP_HOME}/build/c++/Linux-amd64-64/lib
 
 CXXFLAGS += ${HADOOP_CXXFLAGS}
 LDFLAGS += ${HADOOP_LDFLAGS}
@@ -69,6 +70,8 @@ ifndef PKG_CONFIG_PATH
 endif
 export PKG_CONFIG_PATH
 
+
+
 all: $(TARGET)
 
 $(TARGET): $(LIBRARY) plfs_fuse.o main.o 
@@ -76,6 +79,7 @@ $(TARGET): $(LIBRARY) plfs_fuse.o main.o
 
 $(LIBRARY):
 	make -C ../src
+
 
 mount: $(TARGET) $(PLFS_MNT) $(PLFS_BACK)
 	./$(TARGET) -d $(PLFS_MNT) $(PLFS_ARGS)
