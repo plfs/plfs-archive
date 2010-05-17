@@ -328,6 +328,13 @@ int HDFSIOStore::Open(const char* path, int flags)
         new_flags = O_RDONLY;
     } else if (flags & O_WRONLY)  {
         new_flags = O_WRONLY;
+    } else if (flags & O_RDWR) {
+        if (!hdfsExists(fs, path)) {
+            // If the file exists, open Read Only!
+            flags = O_RDONLY;
+        } else {
+            flags = O_WRONLY;
+        }
     } else {
         //std::cout << "Unsupported flags.\n";
         errno = ENOTSUP;
@@ -335,13 +342,13 @@ int HDFSIOStore::Open(const char* path, int flags)
     }
 
     //std::cout << "Attempting open on " << path << "\n";
-    if (hdfsExists(fs, path)) {
-        //std::cout << "Doesn't exist yet....\n";
+    /*if (hdfsExists(fs, path)) {
+        std::cout << "Doesn't exist yet....\n";
     } else {
         hdfsFileInfo* info = hdfsGetPathInfo(fs, path);
-        //std::cout << "Exists and has " << info->mSize << " bytes\n";
+        std::cout << "Exists and has " << info->mSize << " bytes\n";
         hdfsFreeFileInfo(info, 1);
-    }
+    }*/
     openFile = hdfsOpenFile(fs, path, new_flags, 0, 0, 0);
     
     if (!openFile) {
@@ -623,6 +630,7 @@ int HDFSIOStore::Unlink(const char* path)
  */
 int HDFSIOStore::Utime(const char* filename, const struct utimbuf *times)
 {
+    Util::Debug("Running utime\n");
     return hdfsUtime(fs, filename, times->modtime, times->actime);
 }
 
