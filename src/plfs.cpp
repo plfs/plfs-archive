@@ -13,7 +13,11 @@
 #include <assert.h>
 #include <queue>
 #include <vector>
+#include <stdlib.h>
 using namespace std;
+
+#define PLFS_ENTER string path = expandPath(logical); \
+    Util::Debug("EXPAND in %s: %s->%s\n",__FUNCTION__,logical,path.c_str());
 
 // a struct for making reads be multi-threaded
 typedef struct {  
@@ -33,55 +37,143 @@ typedef struct {
     pthread_mutex_t mux;    // to lock the queue
 } ReaderArgs;
 
+vector<string> &tokenize(const string& str,const string& delimiters,
+        vector<string> &tokens)
+{
+	// skip delimiters at beginning.
+    string::size_type lastPos = str.find_first_not_of(delimiters, 0);
+    	
+	// find first "non-delimiter".
+    string::size_type pos = str.find_first_of(delimiters, lastPos);
+
+    while (string::npos != pos || string::npos != lastPos) {
+        // found a token, add it to the vector.
+        tokens.push_back(str.substr(lastPos, pos - lastPos));
+		
+        // skip delimiters.  Note the "not_of"
+        lastPos = str.find_first_not_of(delimiters, pos);
+		
+        // find next "non-delimiter"
+        pos = str.find_first_of(delimiters, lastPos);
+    }
+
+	return tokens;
+}
+
+// takes a logical path and returns a physical one
+string
+expandPath(string logical) {
+    static bool init = false;
+    // set all of these up once from plfsrc, then reuse
+    static vector<string> expected_tokens; 
+    static vector<string> resolve_tokens; 
+    static string mnt_pt; 
+    static PlfsConf *pconf;
+
+    // this is done once
+    // it reads the map and creates tokens for the expression that
+    // matches logical and the expression used to resolve into physical
+    // boy, I wonder if we have to protect this.  In fuse, it *should* get
+    // done at mount time so that will init it before threads show up
+    // in adio, there are no threads.  should be OK.  
+    if ( ! init ) {
+        pconf = get_plfs_conf();
+        vector<string> map_tokens;
+        string expected;
+        string resolve;
+
+        // seed random so we can load balance requests for the root dir
+        srand(time(NULL));
+
+        // get the mount point from the plfsrc 
+        mnt_pt = pconf->mnt_pt;
+
+        // split the map line into expected and resolve
+        tokenize(pconf->map,":",map_tokens);
+        expected = map_tokens[0];
+        resolve = map_tokens[1];
+        
+        // remove the mnt_point from the expected string (if there) 
+        // and then tokenize the rest of it as well as tokenizing resolve
+        if (strncmp(expected.c_str(),mnt_pt.c_str(),mnt_pt.size())==0) {
+            expected = expected.substr(mnt_pt.size());
+        }
+        tokenize(expected,"/",expected_tokens);
+        tokenize(resolve,"/",resolve_tokens);
+        init = true;  
+    }
+
+    // set remaining to the part of logical after the mnt_pt and tokenize it
+    string remaining;
+    vector<string>remaining_tokens;
+    if (strncmp(logical.c_str(),mnt_pt.c_str(),mnt_pt.size())==0) {
+        remaining = logical.substr(mnt_pt.size());
+    } else {
+        remaining = logical;
+    }
+    tokenize(remaining,"/",remaining_tokens);
+
+    if ( remaining_tokens.empty() ) {
+        // load balance requests for the root dir 
+        return pconf->backends[rand()%pconf->backends.size()];
+    }
+
+    // let's go through the expected tokens and map them
+    // however, if the map is bad in the plfsrc file, then
+    // this might not work, so let's check to make sure the
+    // map is correct
+    assert(remaining_tokens.size()>=expected_tokens.size());
+    map<string,string> expected_map;
+    for(size_t i = 0; i < expected_tokens.size(); i++) {
+        expected_map[expected_tokens[i]] = remaining_tokens[i];
+    }
+
+    // so now all of the vars in expected are mapped to what they received
+    // in remaining
+
+    // so now go through resolve_tokens and build up the physical path
+    string resolved;
+    for(size_t j = 0; j < resolve_tokens.size(); j++) {
+        resolved += '/';
+        string tok = resolve_tokens[j];
+        if ( tok.c_str()[0] == '$' ) {
+            // if it's a var, replace it with the var we discovered
+            resolved += expected_map[tok];  // assumes valid plfsrc map
+        } else if ( strncmp(tok.c_str(),"HASH",4)==0 ) {
+            // need to figure out which var they're asking for
+            // assumes plfsrc is valid
+            size_t start = tok.find("(") + 1;
+            size_t end = tok.find(")");
+            string var = tok.substr(start,end-start);
+            int total = 0;
+            for(size_t i = 0; i < expected_map[var].size(); i++) {
+                total+=(int)expected_map[var][i];
+            }
+            total %= pconf->backends.size();
+            resolved += pconf->backends[total];
+        } else {
+            resolved += tok;
+        }
+    }
+
+    // now throw on all of the remaining that weren't expected
+    for(size_t k = expected_tokens.size(); k < remaining_tokens.size(); k++){
+        resolved += "/" + remaining_tokens[k];
+    }
+    return resolved;
+}
+
 // a shortcut for functions that are expecting zero
 int 
 retValue( int res ) {
     return Util::retValue(res);
 }
 
-// read the plfs configuration file and return a map of kv pairs
-map<string,string>
-plfs_read_conf() {
-    map<string,string> confs;
-
-    vector<string> possible_files;
-    // find which file to open
-    string home_file = getenv("HOME");
-    home_file.append("/.plfsrc");
-    string etc_file = "/etc/.plfsrc";
-
-    // search the two possibilities differently if root or normal user
-    if ( getuid()==0 ) {    // is root
-        possible_files.push_back(etc_file);
-        possible_files.push_back(home_file);
-    } else {
-        possible_files.push_back(home_file);
-        possible_files.push_back(etc_file);
-    }
-
-    // try to parse each file until one works
-    // the C++ way to parse like this is istringstream (bleh)
-    for( size_t i = 0; i < possible_files.size(); i++ ) {
-        string file = possible_files[i];
-        FILE *fp = fopen(file.c_str(),"r");
-        if ( fp == NULL ) continue;
-        char line[8192];
-        char key[8192];
-        char value[8192];
-        while(fgets(line,8192,fp)) {
-            sscanf(line, "%s %s\n", key, value);
-            confs[key] = value;
-        }
-        break;
-    }
-
-    return confs;
-}
-
 int 
-plfs_create( const char *path, mode_t mode, int flags ) {
-    int attempts = 0;
-    return Container::create( path, Util::hostname(), mode, flags, &attempts );
+plfs_create( const char *logical, mode_t mode, int flags ) {
+    PLFS_ENTER;
+    int attempt = 0;
+    return Container::create(path.c_str(),Util::hostname(),mode,flags,&attempt);
 }
 
 int
@@ -103,13 +195,15 @@ isWriter( int flags ) {
 
 // this requires that the supplementary groups for the user are set
 int 
-plfs_chown( const char *path, uid_t u, gid_t g ) {
-    return Container::Chown( path, u, g );
+plfs_chown( const char *logical, uid_t u, gid_t g ) {
+    PLFS_ENTER;
+    return Container::Chown( path.c_str(), u, g );
 }
 
 int
-is_plfs_file( const char *path ) {
-    return Container::isContainer( path );
+is_plfs_file( const char *logical ) {
+    PLFS_ENTER;
+    return Container::isContainer( path.c_str() );
 }
 
 void 
@@ -121,34 +215,69 @@ plfs_debug( const char *format, ... ) {
 }
 
 int
-plfs_access( const char *path, int mask ) {
+plfs_access( const char *logical, int mask ) {
+    PLFS_ENTER;
     int ret = -1;
-    if ( Container::isContainer( path ) ) {
-        ret = retValue( Container::Access( path, mask ) );
+    if ( Container::isContainer( path.c_str() ) ) {
+        ret = retValue( Container::Access( path.c_str(), mask ) );
     } else {
-        ret = retValue( Util::Access( path, mask ) );
-    }
-    return ret;
-}
-int 
-plfs_chmod( const char *path, mode_t mode ) {
-    int ret = -1;
-    if ( Container::isContainer( path ) ) {
-        ret = retValue( Container::Chmod( path, mode ) );
-    } else {
-        ret = retValue( Util::Chmod( path, mode ) );
+        ret = retValue( Util::Access( path.c_str(), mask ) );
     }
     return ret;
 }
 
+int 
+plfs_chmod( const char *logical, mode_t mode ) {
+    PLFS_ENTER;
+    int ret = -1;
+    if ( Container::isContainer( path.c_str() ) ) {
+        ret = retValue( Container::Chmod( path.c_str(), mode ) );
+    } else {
+        ret = retValue( Util::Chmod( path.c_str(), mode ) );
+    }
+    return ret;
+}
+
+// returns 0 or -errno
+int 
+plfs_readdir( const char *logical, void *vptr ) {
+    PLFS_ENTER;
+    vector<string> *dents = (vector<string> *)vptr;
+    DIR *dp;
+    int ret = Util::Opendir( path.c_str(), &dp );
+    if ( ret == 0 && dp ) {
+        (void) path;
+        struct dirent *de;
+        while ((de = readdir(dp)) != NULL) {
+            dents->push_back(de->d_name);
+        }
+    } else {
+        ret = -errno;
+    }
+    Util::Closedir( dp );
+    return ret;
+}
 
 int
-plfs_utime( const char *path, struct utimbuf *ut ) {
+plfs_mkdir( const char *logical, mode_t mode ) {
+    PLFS_ENTER;
+    return retValue(Util::Mkdir(path.c_str(),mode));
+}
+
+int
+plfs_rmdir( const char *logical ) {
+    PLFS_ENTER;
+    return retValue(Util::Rmdir(path.c_str()));
+}
+
+int
+plfs_utime( const char *logical, struct utimbuf *ut ) {
+    PLFS_ENTER;
     int ret = -1;
-    if ( Container::isContainer( path ) ) {
-        ret = Container::Utime( path, ut );
+    if ( Container::isContainer( path.c_str() ) ) {
+        ret = Container::Utime( path.c_str(), ut );
     } else {
-        ret = retValue( Util::Utime( path, ut ) );
+        ret = retValue( Util::Utime( path.c_str(), ut ) );
     }
     return ret;
 }
@@ -481,9 +610,125 @@ plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
     return ret;
 }
 
+// get a pointer to a struct holding plfs configuration values
+PlfsConf *
+get_plfs_conf() {
+    static PlfsConf *pconf = NULL;
+    if ( pconf ) return pconf;  // already made 
+
+    map<string,string> confs;
+    vector<string> possible_files;
+    // find which file to open
+    string home_file = getenv("HOME");
+    home_file.append("/.plfsrc");
+    string etc_file = "/etc/.plfsrc";
+
+    // search the two possibilities differently if root or normal user
+    if ( getuid()==0 ) {    // is root
+        possible_files.push_back(etc_file);
+        possible_files.push_back(home_file);
+    } else {
+        possible_files.push_back(home_file);
+        possible_files.push_back(etc_file);
+    }
+
+    // set up defaults
+    PlfsConf *hidden = new PlfsConf;
+    hidden->threadpool_size = 16;   // seems like a nice number
+    hidden->num_hostdirs = 32;      // ideal is sqrt of num compute nodes
+    hidden->map = "";               // we don't know how to make up a map
+    hidden->error = 0;         // not yet anyway
+
+    // try to parse each file until one works
+    // the C++ way to parse like this is istringstream (bleh)
+    string file;
+    for( size_t i = 0; i < possible_files.size(); i++ ) {
+        string *missing = NULL;
+        string *negative = NULL;
+        file = possible_files[i];
+        FILE *fp = fopen(file.c_str(),"r");
+        if ( fp == NULL ) continue;
+        char line[8192];
+        char key[8192];
+        char value[8192];
+        while(fgets(line,8192,fp)) {
+            if (strlen(line)==0 || line[0]=='#') continue;
+            sscanf(line, "%s %s\n", key, value);
+            confs[key] = value;
+            // it shows up at start time so turn off
+            //Util::Debug("plfsrc has %s -> %s\n", key, value); 
+        }
+        map<string,string>::iterator itr;
+        hidden->parsed = true;
+        if ( (itr = confs.find("threadpool_size")) != confs.end() ) {
+            hidden->threadpool_size = atoi((itr->second).c_str());
+            if ( hidden->threadpool_size <= 0 ) {
+                negative = new string("threadpool_size");
+            }
+        }
+        if ( (itr = confs.find("num_hostdirs")) != confs.end() ) {
+            hidden->num_hostdirs = atoi((itr->second).c_str());
+            if ( hidden->num_hostdirs <= 0 ) {
+                negative = new string("num_hostdirs");
+            }
+        }
+        if ( (itr = confs.find("map")) != confs.end() ) {
+            hidden->map = itr->second;
+        } else {
+            missing = new string("map");
+        }
+        if ( (itr=confs.find("backends")) != confs.end() ) {
+            tokenize(itr->second,",",hidden->backends);
+        } else {
+            missing = new string("backends");
+        }
+        if ( (itr=confs.find("mount_point")) != confs.end() ) {
+            hidden->mnt_pt = itr->second;
+        } else {
+            missing = new string("mount_point");
+        }
+        if ( missing ) {
+            hidden->error = EINVAL;
+            hidden->err_msg = "Conf file " + file + " error: necessary key " +
+                *missing + " not defined.\n";
+        }
+        if ( negative ) {
+            hidden->error = EINVAL;
+            hidden->err_msg = "Conf file " + file + " error: key " +
+                *negative + " is not positive.\n";
+        }
+    }
+
+    // now check the backends
+    vector<string>::iterator itr;
+    for(itr = hidden->backends.begin(); 
+        itr != hidden->backends.end(); 
+        itr++)
+    {
+        if ( ! Util::isDirectory( (*itr).c_str() ) ) {
+            hidden->error = ENOTDIR;
+            hidden->err_msg = "Conf file " + file + " error: " + *itr +
+                " is not a valid backend directory.\n";
+        }
+    }
+
+    if ( hidden->error ) return hidden;
+
+    pconf = hidden; // don't clear the NULL until fully populated
+
+    // now this is a little silly but this is sort of an initialization
+    // for the static plfs library stuff.  There's a bunch of initialization
+    // in expandPath that also should be done here so it will be thread
+    // safe
+    string phys = expandPath(pconf->mnt_pt);
+    return pconf;
+}
+
 int
-plfs_rename( Plfs_fd *pfd, const char *from, const char *to ) {
-    int ret = retValue( Util::Rename( from, to ) );
+plfs_rename( Plfs_fd *pfd, const char *logical, const char *to ) {
+    PLFS_ENTER;
+    string topath = expandPath(to);
+    int ret = retValue( Util::Rename( path.c_str(), topath.c_str() ) );
     if ( ret == 0 && pfd ) {
         pfd->setPath( to );
     }
@@ -494,8 +739,8 @@ plfs_rename( Plfs_fd *pfd, const char *from, const char *to ) {
 // pass in a valid one to add more writers to it
 // one problem is that we fail if we're asked to overwrite a normal file
 int
-plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
-{
+plfs_open(Plfs_fd **pfd,const char *logical,int flags,pid_t pid,mode_t mode) {
+    PLFS_ENTER;
     WriteFile *wf      = NULL;
     Index     *index   = NULL;
     int ret            = 0;
@@ -513,11 +758,11 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
     //ret = checkAccess( strPath, fi ); 
 
     if ( flags & O_CREAT ) {
-        ret = plfs_create( path, mode, flags ); 
+        ret = plfs_create( logical, mode, flags ); 
     }
 
     if ( flags & O_TRUNC ) {
-        ret = plfs_trunc( NULL, path, 0 );
+        ret = plfs_trunc( NULL, logical, 0 );
     }
 
     if ( *pfd) plfs_reference_count(*pfd);
@@ -536,7 +781,7 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
             new_writefile = true;
         }
         if ( ret == 0 ) {
-            ret = addWriter( wf, pid, path, mode );
+            ret = addWriter( wf, pid, path.c_str(), mode );
             Util::Debug("%s added writer: %d\n", __FUNCTION__, ret );
             if ( ret > 0 ) ret = 0; // add writer returns # of current writers
             if ( ret == 0 && new_writefile ) ret = wf->openIndex( pid ); 
@@ -552,7 +797,7 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
         if ( index == NULL ) {
             index = new Index( path );  
             new_index = true;
-            ret = Container::populateIndex( path, index );
+            ret = Container::populateIndex( path.c_str(), index );
         }
         if ( ret == 0 ) {
             index->incrementOpens(1);
@@ -564,12 +809,12 @@ plfs_open( Plfs_fd **pfd, const char *path, int flags, pid_t pid, mode_t mode )
     }
 
     if ( ret == 0 && ! *pfd ) {
-        *pfd = new Plfs_fd( wf, index, pid, mode, path ); 
+        *pfd = new Plfs_fd( wf, index, pid, mode, path.c_str() ); 
         new_pfd       = true;
         // we create one open record for all the pids using a file
         // only create the open record for files opened for writing
         if ( wf ) {
-            ret = Container::addOpenrecord( path, Util::hostname(), pid );
+            ret = Container::addOpenrecord(path.c_str(), Util::hostname(), pid);
         }
         //cerr << __FUNCTION__ << " added open record for " << path << endl;
     } else if ( ret == 0 ) {
@@ -632,10 +877,12 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
     int ret = 0;
     Util::Debug("%s on %s\n", __FUNCTION__, path );
 
-    dir = opendir( path );
+    ret = Util::Opendir( path, &dir );
     if ( dir == NULL ) return -errno;
 
+    Util::Debug("opendir %s\n", path);
     while( (ent = readdir( dir ) ) != NULL ) {
+        Util::Debug("readdir %s\n", path);
         if ( ! strcmp(ent->d_name, ".") || ! strcmp(ent->d_name, "..") ) {
             //Util::Debug("skipping %s\n", ent->d_name );
             continue;
@@ -649,13 +896,13 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
         string child( path );
         child += "/";
         child += ent->d_name;
+        Util::Debug("made child %s from path %s\n",child.c_str(),path);
         if ( Util::isDirectory( child.c_str() ) ) {
             if ( removeDirectoryTree( child.c_str(), truncate_only ) != 0 ) {
                 ret = -errno;
                 continue;
             }
         } else {
-            //Util::Debug("unlinking %s\n", ent->d_name );
             // ok, we seem to be screwing things up by deleting a handle
             // that someone else has open:
             // e.g. two writers do an open with O_TRUNC at the same time
@@ -666,6 +913,8 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
             int remove_ret = 0;
             if ( truncate_only ) remove_ret = Util::Truncate(child.c_str(), 0);
             else                 remove_ret = Util::Unlink  (child.c_str());
+            Util::Debug("removed/truncated %s: %s\n", 
+                    child.c_str(), strerror(errno) );
             
             // ENOENT would be OK, could mean that an openhosts dropping
             // was removed on another host or something
@@ -707,13 +956,27 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
 // Plfs_fd can be NULL
 // returns 0 or -errno
 int 
-plfs_getattr( Plfs_fd *of, const char *path, struct stat *stbuf ) {
+plfs_getattr( Plfs_fd *of, const char *logical, struct stat *stbuf ) {
+    // ok, this is hard
+    // we have a logical path maybe passed in or a physical path
+    // already stashed in the of
+    bool backwards = false;
+    if ( logical == NULL ) {
+        logical = of->getPath();    // this is the physical path
+        backwards = true;
+    }
+    Util::Debug("%s on logical %s\n", __FUNCTION__, logical);
+    PLFS_ENTER; // this assumes it's operating on a logical path
+    Util::Debug("%s on %s\n", __FUNCTION__, path.c_str());
+    if ( backwards ) {
+        path = of->getPath();   // restore the stashed physical path
+    }
+    Util::Debug("%s on %s\n", __FUNCTION__, path.c_str());
     int ret = 0;
-    if ( path == NULL && of ) path = of->getPath();
-    if ( ! Container::isContainer( path ) ) {
-        ret = retValue( Util::Lstat( path, stbuf ) );
+    if ( ! Container::isContainer( path.c_str() ) ) {
+        ret = retValue( Util::Lstat( path.c_str(), stbuf ) );
     } else {
-        ret = Container::getattr( path, stbuf );
+        ret = Container::getattr( path.c_str(), stbuf );
         if ( ret == 0 ) {
             // is it also open currently?
             // we might be reading from some other users writeFile but
@@ -737,6 +1000,11 @@ plfs_getattr( Plfs_fd *of, const char *path, struct stat *stbuf ) {
                 stbuf->st_blocks += Container::bytesToBlocks(total_bytes);
             }
         }
+    }
+    if ( ret != 0 ) {
+        Util::Debug("logical %s,stashed %s,physical %s: %s\n",
+            logical,of?of->getPath():"NULL",path.c_str(),
+            strerror(errno));
     }
     //cerr << __FUNCTION__ << " of " << path << "(" 
     //     << (of == NULL ? "closed" : "open") 
@@ -769,25 +1037,26 @@ extendFile( Plfs_fd *of, string strPath, off_t offset ) {
 
 // the Plfs_fd can be NULL
 int 
-plfs_trunc( Plfs_fd *of, const char *path, off_t offset ) {
-    if ( ! Container::isContainer( path ) ) {
+plfs_trunc( Plfs_fd *of, const char *logical, off_t offset ) {
+    PLFS_ENTER;
+    if ( ! Container::isContainer( path.c_str() ) ) {
         // this is weird, we expect only to operate on containers
-        return retValue( truncate(path,offset) );
+        return retValue( Util::Truncate(path.c_str(),offset) );
     }
 
     int ret = 0;
     if ( offset == 0 ) {
             // this is easy, just remove all droppings
-        ret = removeDirectoryTree( path, true );
+        ret = removeDirectoryTree( path.c_str(), true );
     } else {
             // either at existing end, before it, or after it
         struct stat stbuf;
-        ret = plfs_getattr( of, path, &stbuf );
+        ret = plfs_getattr( of, logical, &stbuf );
         if ( ret == 0 ) {
             if ( stbuf.st_size == offset ) {
                 ret = 0; // nothing to do
             } else if ( stbuf.st_size > offset ) {
-                ret = Container::Truncate( path, offset ); // make smaller
+                ret = Container::Truncate(path.c_str(), offset); // make smaller
             } else if ( stbuf.st_size < offset ) {
                 ret = extendFile( of, path, offset );    // make bigger
             }
@@ -813,12 +1082,14 @@ plfs_trunc( Plfs_fd *of, const char *path, off_t offset ) {
 }
 
 int 
-plfs_unlink( const char *path ) {
+plfs_unlink( const char *logical ) {
+    PLFS_ENTER;
     int ret = 0;
-    if ( Container::isContainer( path ) ) {
-        ret = removeDirectoryTree( path, false );  
+    if ( Container::isContainer( path.c_str() ) ) {
+        ret = removeDirectoryTree( path.c_str(), false );  
+        Util::Debug("Removed dir %s\n",path.c_str());
     } else {
-        ret = retValue( unlink( path ) );   // recurse
+        ret = retValue( Util::Unlink( path.c_str() ) );   
     }
     return ret; 
 }
