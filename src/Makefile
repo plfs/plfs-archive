@@ -12,12 +12,12 @@ CRAYXT	   = 1
 # add -DINDEX_CONTAINS_TIMESTAMPS to allow trace vizualization
 # add -DCOUNT_SKIPS to maintain a count of sequential / non-sequential IO 
 # add -DVERBOSE to get verbose output
-DEBUG   = -DVERBOSE -DPLFS_TIMES -DNUTIL -DINDEX_CONTAINS_TIMESTAMPS \
+DEBUG   = -DNDEBUG -DNUTIL -DINDEX_CONTAINS_TIMESTAMPS \
 	      -DCOUNT_SKIPS 
 ifdef CRAYXT
 	CXX	   = CC
 	CXXFLAGS  = -g $(DEBUG) -fPIC -D_FILE_OFFSET_BITS=64 -DVERSION=$(VERSION) \
-			-DCRAYXT=1 -D__USE_UNIX98=1 -D__USE_GNU=1
+			-DCRAYXT=1 -D__USE_UNIX98=1 -D__USE_GNU=1 -static -Bstatic_pgi -L.
 else
 	CXXFLAGS  = -g -Wall $(DEBUG) -fPIC -D_FILE_OFFSET_BITS=64 -DVERSION=$(VERSION)
 endif
