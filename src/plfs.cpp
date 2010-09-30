@@ -18,11 +18,32 @@ using namespace std;
 
 
 #define PLFS_ENTER int my_errno, ret;\
- string path = expandPath(logical,&my_errno); \
+ string path = expandPath(logical); \
  plfs_debug("EXPAND in %s: %s->%s\n",__FUNCTION__,logical,path.c_str());\
- if ( my_errno != 0 ) {  errno = my_errno; return -errno; } \
- else ret = 0;
+ ret = 0;
 #define PLFS_EXIT(X) return(X);
+
+// there's something weird on Adam's centos box where it seems to allow
+// users to screw with each other's directories even if they shouldn't
+// since a plfs file is actually a directory, this means that users could
+// rename the plfs file.  Put a check in here to prevent this.  It 
+// shouldn't be necessary we check on most OS's but put this in as a 
+// work-around for weird-ass centos
+// stat the creator file, if it succeeds that means we're the creator
+// if it fails, then we're not the creator, so check whether we have
+// write access.  If we don't, return that.
+#define CENTOS_WORKAROUND   \
+    struct stat creator; \
+    string creator_path(path.c_str());\
+    creator_path += "/";\
+    creator_path += CREATORFILE;\
+    ret = retValue(Util::Stat(creator_path.c_str(),&creator ));\
+    if (ret != 0){\
+        ret=retValue(plfs_access(logical,W_OK));\
+        if(ret != 0){\
+        PLFS_EXIT(-EACCES);\
+        }\
+    }
 
 // a struct for making reads be multi-threaded
 typedef struct {  
@@ -68,7 +89,7 @@ vector<string> &tokenize(const string& str,const string& delimiters,
 
 // takes a logical path and returns a physical one
 string
-expandPath(string logical, int *ep_errno) {
+expandPath(string logical) {
     static bool init = false;
     // set all of these up once from plfsrc, then reuse
     static vector<string> expected_tokens; 
@@ -77,7 +98,6 @@ expandPath(string logical, int *ep_errno) {
     static PlfsConf *pconf;
 
 
-    *ep_errno = 0;
     // this is done once
     // it reads the map and creates tokens for the expression that
     // matches logical and the expression used to resolve into physical
@@ -230,10 +250,6 @@ addWriter( WriteFile *wf, pid_t pid, const char *path, mode_t mode ) {
 
 int
 isWriter( int flags ) {
-    // Added O_APPEND for other user trying to write
-    // Removed this functionality for first release
-    // If anyone ever encounters problems with the append 
-    // flag this might be a good place to look
     return (flags & O_WRONLY || flags & O_RDWR );
 }
 // Was running into reference count problems so I had to change this code
@@ -363,6 +379,7 @@ plfs_mkdir( const char *logical, mode_t mode ) {
 int
 plfs_rmdir( const char *logical ) {
     PLFS_ENTER;
+    plfs_debug("%s on %s as %d:%d\n",__FUNCTION__,logical,getuid(),geteuid());
     ret = retValue(Util::Rmdir(path.c_str()));
     PLFS_EXIT(ret);
 }
@@ -721,8 +738,7 @@ plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
 
 bool
 plfs_init(PlfsConf *pconf) { 
-    int ep_errno;
-    expandPath(pconf->mnt_pt,&ep_errno);
+    expandPath(pconf->mnt_pt);
     return true;
 }
 
@@ -1007,8 +1023,7 @@ plfs_symlink(const char *logical, const char *to) {
     // and then un-resolve it on the readlink...
     // ok, let's try that then.  no, let's try the first way
     PLFS_ENTER;
-    int ep_errno;
-    string toPath = expandPath(to,&ep_errno);
+    string toPath = expandPath(to);
     //ret = retValue(Util::Symlink(path.c_str(),toPath.c_str()));
     ret = retValue(Util::Symlink(logical,toPath.c_str()));
     plfs_debug("%s: %s to %s: %d\n", __FUNCTION__, 
@@ -1039,8 +1054,7 @@ int
 plfs_readlink(const char *logical, char *buf, size_t bufsize) {
     PLFS_ENTER;
     memset((void*)buf, 0, bufsize);
-    ret = Util::Readlink(path.c_str(),buf,bufsize);
-    if ( ret < 0 ) ret = -errno;
+    ret = retValue(Util::Readlink(path.c_str(),buf,bufsize));
     plfs_debug("%s: readlink %s: %d\n", __FUNCTION__, path.c_str(),ret);
     PLFS_EXIT(ret);
 }
@@ -1048,8 +1062,8 @@ plfs_readlink(const char *logical, char *buf, size_t bufsize) {
 int
 plfs_rename( const char *logical, const char *to ) {
     PLFS_ENTER;
-    int ep_errno;
-    string topath = expandPath( to , &ep_errno);
+    CENTOS_WORKAROUND;
+    string topath = expandPath( to );
 
     if ( is_plfs_file( to, NULL ) ) {
         // we can't just call rename bec it won't trash a dir in the toPath
@@ -1134,6 +1148,11 @@ removeDirectoryTree( const char *path, bool truncate_only ) {
         if ( ! strcmp( ent->d_name, OPENHOSTDIR ) && truncate_only ) {
             continue;   // don't remove open hosts
         }
+        if ( ! strcmp( ent->d_name, CREATORFILE ) && truncate_only ) {
+                       continue;   // don't remove the creator file
+        }
+
+        
         string child( path );
         child += "/";
         child += ent->d_name;
@@ -1316,6 +1335,10 @@ const char *
 plfs_version( ) {
     return STR(SVN_VERSION);
 }
+const char *
+plfs_buildtime( ) {
+    return __DATE__; 
+}
 
 // the Plfs_fd can be NULL
 int 
@@ -1382,9 +1405,9 @@ plfs_trunc( Plfs_fd *of, const char *logical, off_t offset ) {
 
     if ( ret == 0 ) {
         // update the timestamp
-        struct utimbuf ut;
-        ut.actime = ut.modtime = time(NULL);
-        ret = Container::Utime( path.c_str(), &ut );
+        //struct utimbuf *ut;
+        //ut.actime = ut.modtime = time(NULL);
+        ret = Container::Utime( path.c_str(), NULL );
     }
     PLFS_EXIT(ret);
 }
@@ -1396,7 +1419,7 @@ string
 getAtomicUnlinkPath(string path) {
     string atomicpath = path + ".plfs_atomic_unlink.";
     stringstream timestamp;
-    timestamp << Util::getTime();
+    timestamp << fixed << Util::getTime();
     vector<string> tokens;
     tokenize(path,"/",tokens);
     atomicpath = "";
@@ -1413,9 +1436,9 @@ getAtomicUnlinkPath(string path) {
 int 
 plfs_unlink( const char *logical ) {
     PLFS_ENTER;
+    CENTOS_WORKAROUND;
     mode_t mode =0;
     if ( is_plfs_file( logical, &mode ) ) {
-        // make this more atomic
         string atomicpath = getAtomicUnlinkPath(path);
         ret = retValue( Util::Rename(path.c_str(), atomicpath.c_str()));
         if ( ret == 0 ) {
