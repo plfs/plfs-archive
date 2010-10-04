@@ -28,10 +28,21 @@ int Container::Access( const char *path, int mask ) {
     // doing just Access is insufficient when plfs daemon run as root
     // root can access everything.  so, we must also try the open
    
+    mode_t open_mode;
     int ret;
     string accessfile = getAccessFilePath(path);
         // Needed for open with a create flag
     Util::Debug("%s Check existence of %s\n",__FUNCTION__,accessfile.c_str());
+
+    if((mask & W_OK) && (mask & R_OK)){
+        open_mode = O_RDWR;
+    }
+    else if(mask & R_OK){
+        open_mode = O_RDONLY;
+    }
+    else if(mask & W_OK){
+        open_mode = O_WRONLY;
+    }
 
         // why is this F_OK instead of the passed mask?
     ret = Util::Access( accessfile.c_str(), F_OK );
@@ -40,7 +51,7 @@ int Container::Access( const char *path, int mask ) {
     }
     if ( ret == 0 ) {
         Util::Debug("The file exists attempting open\n");
-        ret = Util::Open(accessfile.c_str(),mask);
+        ret = Util::Open(accessfile.c_str(),open_mode);
         Util::Debug("Open returns %d\n",ret);
         if(ret >= 0 ) {
             Util::Close(ret);
@@ -107,7 +118,7 @@ bool Container::isContainer( const char *physical_path, mode_t *mode ) {
             return false;
         }
     } else {    
-            // the lstat failed.  Assume it's ENOENT.  It might be perms
+            // the stat failed.  Assume it's ENOENT.  It might be perms
             // in which case return an empty mode as well bec this means
             // that the caller lacks permission to stat the thing
         if ( mode ) *mode = 0;  // ENOENT
@@ -128,7 +139,6 @@ bool Container::isContainer( const char *physical_path, mode_t *mode ) {
     int ret = Util::Stat( accessfile.c_str(), &buf );
     plfs_debug("%s checked %s: %d\n", __FUNCTION__, accessfile.c_str(),ret);
     return(ret==0 ? true:false);
-    */
     // I think if we really wanted to reduce this to one stat and have the
     // symlinks work, we could have the symlink point to the back-end instead
     // of to the frontend and then we should be able to just check the access
@@ -146,6 +156,7 @@ bool Container::isContainer( const char *physical_path, mode_t *mode ) {
         // either a file or a symlink
         return false;
     }
+    */
 }
 
 int Container::freeIndex( Index **index ) {
@@ -173,6 +184,7 @@ int Container::Chmod( const char *path, mode_t mode ) {
 
 // just do the droppings and the access file
 int Container::Utime( const char *path, const struct utimbuf *buf ) {
+    // TODO: we maybe shouldn't need to fully recurse here...
     return Container::Modify( UTIME, path, 0, 0, buf, 0 );  
 }
 
@@ -305,13 +317,11 @@ int Container::Modify( DirectoryOperation type,
         return 0; 
     }
     while( ret == 0 && (dent = readdir( dir )) != NULL ) {
-        mode_t use_mode = mode;
         if (!strcmp(dent->d_name,".")||!strcmp(dent->d_name,"..")) continue; 
         string full_path( path ); full_path += "/"; full_path += dent->d_name;
         if ( Util::isDirectory( full_path.c_str() ) ) {
             ret = Container::Modify(type,full_path.c_str(),uid, gid,utbuf,mode);
             if ( ret != 0 ) break;
-            use_mode = dirMode( mode );
         }
         errno = 0;
         if ( type == UTIME ) {
@@ -323,6 +333,7 @@ int Container::Modify( DirectoryOperation type,
 		full_path.c_str(), strerror(errno) );
     }
     if ( type == UTIME ) {
+        Util::Debug("Setting utime on %s\n", path);
         ret = Util::Utime( path , utbuf );
     } else if ( type == CHOWN ) {
         ret = Util::Chown( path, uid, gid );
@@ -331,6 +342,7 @@ int Container::Modify( DirectoryOperation type,
     Util::Closedir( dir );
     return ret;
 }
+
 // the particular index file for each indexer task
 typedef struct {
     string path;
@@ -558,7 +570,7 @@ int Container::addMeta( off_t last_offset, size_t total_bytes,
         << host;
     metafile = oss.str();
     Util::Debug("Creating metafile %s\n", metafile.c_str() );
-    return ignoreNoEnt(Util::Creat( metafile.c_str(), DEFAULT_MODE ));
+    return ignoreNoEnt(Util::Creat( metafile.c_str(), DROPPING_MODE ));
 }
 
 string Container::fetchMeta( string metafile_name, 
