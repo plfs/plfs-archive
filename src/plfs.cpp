@@ -291,7 +291,7 @@ plfs_access( const char *logical, int mask ) {
         ret = retValue( Container::Access( path.c_str(), mask ) );
     } else {
         if ( mode == 0 ) ret = -ENOENT;
-        ret = retValue( Util::Access( path.c_str(), mask ) );
+        else ret = retValue( Util::Access( path.c_str(), mask ) );
     }
     PLFS_EXIT(ret);
 }
@@ -1061,6 +1061,9 @@ plfs_rename( const char *logical, const char *to ) {
     }
     plfs_debug("Trying to rename %s to %s\n", path.c_str(), topath.c_str());
     ret = retValue( Util::Rename(path.c_str(), topath.c_str()));
+    if ( ret == 0 ) { // update the timestamp
+        ret = Container::Utime( topath.c_str(), NULL );
+    }
     PLFS_EXIT(ret);
 }
 
@@ -1391,10 +1394,7 @@ plfs_trunc( Plfs_fd *of, const char *logical, off_t offset ) {
 
     Util::Debug("%s %s to %u: %d\n",__FUNCTION__,path.c_str(),(uint)offset,ret);
 
-    if ( ret == 0 ) {
-        // update the timestamp
-        //struct utimbuf *ut;
-        //ut.actime = ut.modtime = time(NULL);
+    if ( ret == 0 ) { // update the timestamp
         ret = Container::Utime( path.c_str(), NULL );
     }
     PLFS_EXIT(ret);
@@ -1427,24 +1427,12 @@ plfs_unlink( const char *logical ) {
     mode_t mode =0;
     if ( is_plfs_file( logical, &mode ) ) {
         // make this more atomic
-        // there's some problem where users are allowed
-        // through fuse to remove other users directories
-        // so this rename works even if permission should be
-        // denied.
-        // so as a small kludge around this weird directory thing
-        // try to remove the creator file and if that works, then proceed
-        string creator = Container::getCreatorFilePath(path.c_str());
-        ret = retValue(Util::Unlink(creator.c_str()));
+        string atomicpath = getAtomicUnlinkPath(path);
+        ret = retValue( Util::Rename(path.c_str(), atomicpath.c_str()));
         if ( ret == 0 ) {
-            string atomicpath = getAtomicUnlinkPath(path);
-            ret = retValue( Util::Rename(path.c_str(), atomicpath.c_str()));
-            if ( ret == 0 ) {
-                plfs_debug("Converted %s to %s for atomic unlink\n",
-                        path.c_str(), atomicpath.c_str());
-                ret = removeDirectoryTree( atomicpath.c_str(), false );  
-            } else {    // something weird with atomicpath, just try path
-                ret = removeDirectoryTree( path.c_str(), false );  
-            }
+            plfs_debug("Converted %s to %s for atomic unlink\n",
+                    path.c_str(), atomicpath.c_str());
+            ret = removeDirectoryTree( atomicpath.c_str(), false );  
             plfs_debug("Removed plfs container %s: %d\n",path.c_str(),ret);
         }
     } else {
