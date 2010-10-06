@@ -27,6 +27,7 @@ class HostEntry {
         }
         bool overlap( const HostEntry & );
         bool contains ( off_t ) const;
+        bool splittable ( off_t ) const;
         bool abut   ( const HostEntry & );
         off_t logical_tail( ) const;
 
@@ -59,6 +60,7 @@ class ContainerEntry : HostEntry {
     public:
         bool mergable( const ContainerEntry & );
         bool abut( const ContainerEntry & );
+        ContainerEntry split(off_t); //split in half, this is back, return front
 
     protected:
         pid_t original_chunk;	// we just need to track this so we can 
@@ -132,6 +134,8 @@ class Index : public Metadata {
             pair< map<off_t,ContainerEntry>::iterator, bool > insert_ret );
         pair <map<off_t,ContainerEntry>::iterator,bool> insertGlobalEntry(
             ContainerEntry *g_entry );
+        size_t splitEntry(ContainerEntry*,set<off_t> &,
+                multimap<off_t,ContainerEntry> &);
 
             // where we buffer the host index (i.e. write)
         vector< HostEntry > hostIndex;
