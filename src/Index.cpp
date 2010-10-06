@@ -413,193 +413,98 @@ size_t Index::splitEntry( ContainerEntry *entry,
     return num_splits;
 }
 
+void Index::findSplits(ContainerEntry &e,set<off_t> &s) {
+    s.insert(e.logical_offset);
+    s.insert(e.logical_offset+e.length);
+}
+
 // to deal with overlapped write records
-// just overwrite write records with new ones
-// we don't guarantee that we read the write records in order across multiple
-// indices but we do read each index in order
-// so if there is overlap within an index, we'll use the last write which is
-// correct.  If there is overlap across indexes, we don't attempt to guess 
-// their temporal order so this might be wrong.  but screw it, app shouldn't
-// do overwrites from different pids (and especially not from different nodes).
-// there are several types of overlaps:
-// 1) new write perfectly overlaps old write
-// 2) new write is a subset of old write
-// 3) new write spans multiple old writes
-// we need to add the new write and we need to invalidate at least portions
-// of old write(s)
-int Index::handleOverlap(ContainerEntry *incoming,
-        pair<map<off_t,ContainerEntry>::iterator, bool> insert_ret ) 
+// we split them into multiple writes were each one is either unique
+// or perfectly colliding with another (i.e. same logical offset and length)
+// then we keep all the unique ones and the more recent of the colliding ones
+int Index::handleOverlap(ContainerEntry &incoming,
+        pair<map<off_t,ContainerEntry>::iterator, bool> &insert_ret ) 
 {
+    // all the stuff we use
+    map<off_t,ContainerEntry>::iterator first, last, cur; // place holders
+    cur = first = last = insert_ret.first;
+    set<off_t> splits;  // offsets to use to split into chunks
+    multimap<off_t,ContainerEntry> overlaps;    // all offending entries
+    multimap<off_t,ContainerEntry> chunks;   // offending entries nicely split
+    map<off_t,ContainerEntry> winners;      // the set to keep 
+    ostringstream oss;
+
+    // this function is a bit easier if incoming is not already in global_index
+    if ( insert_ret.second ) {
+        global_index.erase(insert_ret.first);
+    }
 
     // find all existing entries that overlap
     // and the set of offsets on which to split
-    map<off_t,ContainerEntry>::iterator first, last, cur;
-    set<off_t> splits;
-    set<off_t>::iterator splits_itr;
-    cur = insert_ret.first;
-    first = global_index.end();
-    if ( cur != global_index.begin() ) {
-        cur--;  // back up one, prev might overlap
-        if ( ! cur->second.overlap(*incoming) ) cur++; // prev didn't overlap
+    // I feel like cur should be at most one away from the first overlap
+    // but I've seen empirically that it's not, so move forward while we
+    // find overlaps, and then backwards while we find them
+    for(first=insert_ret.first;;first--) {
+        if (!first->second.overlap(incoming)) {  // went too far
+            first++;
+            break;
+        }
+        findSplits(first->second,splits);
+        if ( first == global_index.begin() ) break; // no-more to check
     }
-    // when we get here, cur should overlap and should be the first to do so
-    if ( ! cur->second.overlap(*incoming) ) {
-        plfs_debug("WTF: %s:%s:%d\n",__FUNCTION__,__FILE__,__LINE__);
-        errno = EIO;
-        return -errno;
+    for(;last != global_index.end() && last->second.overlap(incoming); last++ ){
+        findSplits(last->second,splits);
     }
-    first = last = cur;
-    while( cur != global_index.end() && cur->second.overlap(*incoming) ) {
-        splits.insert(cur->first);
-        splits.insert(cur->second.logical_offset+cur->second.length);
-        last = cur;
-        cur++;
-    }
+    findSplits(incoming,splits);  // get split points from incoming as well
 
-    // now that we've found the range of overlaps, let's copy them
+    // now that we've found the range of overlaps, let's put them in a 
+    // multimap with the incoming
     // and remove them from the global index
-    // and copy the incoming as well 
-    multimap<off_t,ContainerEntry> overlaps;
-    overlaps.insert(make_pair(incoming->logical_offset,*incoming));
-    if (first==last) {
-        overlaps.insert(make_pair(first->first,first->second));
-        global_index.erase(first->first);
-    } else {
-        overlaps.insert(first,last);
-        global_index.erase(first,last);
-    }
+    overlaps.insert(make_pair(incoming.logical_offset,incoming));
+    overlaps.insert(first,last);
+    global_index.erase(first,last);
 
-    ostringstream oss;
     oss << "Examing the following overlapped entries: " << endl;
-    for(cur=overlaps.begin();cur!=overlaps.end();cur++) {
-        oss << cur->second << endl;
-    }
-    oss << "Need to split at ";
-    for(splits_itr=splits.begin();splits_itr!=splits.end();splits_itr++) {
-        oss << *splits_itr << " ";
+    for(cur=overlaps.begin();cur!=overlaps.end();cur++) oss<<cur->second<< endl;
+
+    oss << "List of split points";
+    for(set<off_t>::iterator i=splits.begin();i!=splits.end();i++) {
+        oss << " " << *i;
     }
     oss << endl;
-    oss << "Global index has " << global_index.size() << " entries." << endl;
 
     // now create the multimap of split entries 
-    multimap<off_t,ContainerEntry> cleaned; 
     for(cur=overlaps.begin();cur!=overlaps.end();cur++) {
-        splitEntry(&cur->second,splits,cleaned);
+        splitEntry(&cur->second,splits,chunks);
     }
 
-    // now iterate over the cleaned entries and insert into winners
-    // on collision, possibly swap
-    map<off_t,ContainerEntry> winners;  // the set to be reinserted
-    multimap<off_t,ContainerEntry>::iterator cleaned_itr;
+    // now iterate over the chunks and insert into winners
+    // on collision, possibly swap depending on timestamps
+    multimap<off_t,ContainerEntry>::iterator chunks_itr;
     pair<map<off_t,ContainerEntry>::iterator,bool> ret;
     oss << "Entries have now been split:" << endl;
-    for(cleaned_itr=cleaned.begin();cleaned_itr!=cleaned.end();cleaned_itr++){
-        oss << cleaned_itr->second << endl;
-        ret = winners.insert(make_pair(cleaned_itr->first,cleaned_itr->second));
+    for(chunks_itr=chunks.begin();chunks_itr!=chunks.end();chunks_itr++){
+        oss << chunks_itr->second << endl;
+        ret = winners.insert(make_pair(chunks_itr->first,chunks_itr->second));
         if ( ! ret.second ) {
-            oss << "Failed to insert " << cleaned_itr->second << " into winners\n" << endl;
+            //oss << "Collision: " << endl << chunks_itr->second << endl
+            //    << ret.first->second << endl;
+            if ( ret.first->second.end_timestamp 
+                    < chunks_itr->second.end_timestamp ) 
+            {
+                winners.erase(ret.first);
+                winners.insert(make_pair(chunks_itr->first,chunks_itr->second));
+            }
         }
     }
+
+    oss << "Entries have now been trimmed:" << endl;
+    for(cur=winners.begin();cur!=winners.end();cur++) oss << cur->second <<endl;
 
     // now put the winners back into the global index
     global_index.insert(winners.begin(),winners.end());
-
-    // boy this is tricky code.....  Figure out how to split both the existing
-    // and incoming into largest possible unique and perfectly overlapped
-    // chunks.  Then insert all of those chunks back into global_index.
-    // when there is a collision, compare timestamps and deal accordingly.
-    // or put all chunks into a new multimap and then iterate through the
-    // multimap, insert unique entries and insert one of each pair of overlaps
-
-    // now we need to iterate through all of the removed droppings
-    // and compare them to the incoming and split them into chunks
-    // such that each chunk is not overlapped or is perfectly overlapped
-    // where perfectly overlapped means logical offset and length are both equal
-    plfs_debug("%s\n", oss.str().c_str()); 
-    plfs_debug("Cowardly refusing to handle overlapped writes\n");
-    errno = ENOSYS;
-    return -errno;
-
-
-        // we currently break if the overlap doesn't perfectly match
-        // (i.e. logical offset and length)
-        // so return ENOSYS to reflect this until we fix it
-
-        // if the first insert attempt failed due to collision, remove
-        // the one already at that offset, insert the new one, and fix
-        // the old one by either adjusting or discarding as the case may be
-    if ( insert_ret.second == false ) {
-        // one already existed at this offset
-        ContainerEntry old = insert_ret.first->second;
-        global_index.erase( insert_ret.first );
-        insert_ret = insertGlobalEntry( incoming ); 
-        if ( insert_ret.second == false ) {
-            plfs_debug( "WTF? Deleted old entry but couldn't insert new" );
-            return -1;
-        }
-
-        if (old.length != incoming->length || 
-            old.logical_offset != incoming->logical_offset) 
-        {
-            plfs_debug("%s cowardly refusing to handle partial overlaps\n");
-            errno = ENOSYS; // hopefully this persists
-            return -errno;
-        }
-
-        // does the old one still have valid data?
-        if ( old.length > incoming->length ) {
-            old.length         -= incoming->length;
-            old.logical_offset += incoming->length;
-            old.physical_offset+= incoming->length;
-            pair< map<off_t,ContainerEntry>::iterator, bool > insert_old;
-            insert_old = insertGlobalEntry( &old );
-            if ( insert_old.second == false ) {
-                ostringstream oss;
-                oss << "Adjusted old entry " << old << " but couldn't insert" 
-                     << endl;
-                plfs_debug("%s\n", oss.str().c_str() );
-                return -1;
-            }
-        }
-    }
-
-    // when we get here, we have successfully inserted the new entry
-    // it might overlap with the previous, if so, truncate previous
-    map<off_t,ContainerEntry>::iterator next, prev;
-    prev = insert_ret.first; prev--;
-    if ( insert_ret.first!=global_index.begin() && 
-            prev->second.overlap(*incoming) )
-    {
-        off_t  old_tail  = prev->second.logical_tail();
-        off_t  new_tail  = incoming->logical_offset - 1;
-        size_t truncated = old_tail - new_tail;
-        prev->second.length -= truncated;
-    }
-
-        // it might overlap with multiple subsequent, if so, handle that too
-    while( 1 ) {
-        next = insert_ret.first; next++;
-        if ( next != global_index.end() && incoming->overlap( next->second ) ) {
-            // new might completely or just partially overwrite next
-            if ( incoming->logical_tail() >= next->second.logical_tail() ) {
-                    // completely overwrites it, remove it
-                global_index.erase( next );
-            } else {
-                // just adjust it here and we're all done
-                off_t  new_loff   = incoming->logical_tail() + 1;
-                off_t  old_loff   = next->second.logical_offset;
-                off_t  adjustment = new_loff - old_loff; 
-                next->second.length         -= adjustment;
-                next->second.logical_offset += adjustment;
-                next->second.physical_offset+= adjustment;
-                break;
-            }
-        } else {
-            break;
-        }
-    }
-
-    return 0; // don't return 0 here until we get it all the way done
+    plfs_debug("%s",oss.str().c_str());
+    return 0;
 }
 
 pair <map<off_t,ContainerEntry>::iterator,bool> Index::insertGlobalEntry(
@@ -612,19 +517,16 @@ pair <map<off_t,ContainerEntry>::iterator,bool> Index::insertGlobalEntry(
 int Index::insertGlobal( ContainerEntry *g_entry ) {
     pair<map<off_t,ContainerEntry>::iterator,bool> ret;
     bool overlap  = false;
-    bool inserted = true;   // assume it works, adjust if necessary
 
     plfs_debug("Inserting offset %ld into index of %s\n",
             (long)g_entry->logical_offset, logical_path.c_str());
     ret = insertGlobalEntry( g_entry ); 
     if ( ret.second == false ) {
         ostringstream oss;
-        oss << "overlap(1) at " << *g_entry << " with " << ret.first->second 
-             << endl;
-        plfs_debug("%s\n", oss.str().c_str() );
+        oss << "overlap1" <<endl<< *g_entry <<endl << ret.first->second << endl;
+        plfs_debug("%s", oss.str().c_str() );
         overlap  = true;
-        inserted = false;
-    } 
+    }
 
         // also, need to check against prev and next for overlap 
     map<off_t,ContainerEntry>::iterator next, prev;
@@ -632,14 +534,14 @@ int Index::insertGlobal( ContainerEntry *g_entry ) {
     prev = ret.first; prev--;
     if ( next != global_index.end() && g_entry->overlap( next->second ) ) {
         ostringstream oss;
-        oss << "overlap2 at " << *g_entry << " and " <<next->second <<endl;
-        plfs_debug("%s\n", oss.str().c_str() );
+        oss << "overlap2 " << endl << *g_entry << endl <<next->second << endl;
+        plfs_debug("%s", oss.str().c_str() );
         overlap = true;
     }
     if (ret.first!=global_index.begin() && prev->second.overlap(*g_entry) ){
         ostringstream oss;
-        oss << "overlap3 at " << *g_entry << " and " <<prev->second <<endl;
-        plfs_debug("%s\n", oss.str().c_str() );
+        oss << "overlap3 " << endl << *g_entry << endl <<prev->second << endl;
+        plfs_debug("%s", oss.str().c_str() );
         overlap = true;
     }
 
@@ -647,12 +549,8 @@ int Index::insertGlobal( ContainerEntry *g_entry ) {
         ostringstream oss;
         oss << __FUNCTION__ << " of " << logical_path << " trying to insert "
             << "overlap at " << g_entry->logical_offset << endl;
-        plfs_debug("%s\n", oss.str().c_str() );
-        if ( inserted ) { 
-            // remove since handleOverlap assumes it's not yet inserted 
-            global_index.erase(ret.first);
-        }
-        return handleOverlap( g_entry, ret );
+        plfs_debug("%s", oss.str().c_str() );
+        return handleOverlap( *g_entry, ret );
     } else {
             // might as well try to merge any potentially adjoining regions
         /*

@@ -130,12 +130,13 @@ class Index : public Metadata {
                 string &, pid_t *, ContainerEntry* );
         int cleanupReadIndex(int, void *, off_t, int, const char*, const char*);
         void *mapIndex( string, int *, off_t * );
-        int handleOverlap( ContainerEntry *g_entry,
-            pair< map<off_t,ContainerEntry>::iterator, bool > insert_ret );
+        int handleOverlap( ContainerEntry &g_entry,
+            pair< map<off_t,ContainerEntry>::iterator, bool > &insert_ret );
         pair <map<off_t,ContainerEntry>::iterator,bool> insertGlobalEntry(
             ContainerEntry *g_entry );
         size_t splitEntry(ContainerEntry*,set<off_t> &,
                 multimap<off_t,ContainerEntry> &);
+        void findSplits(ContainerEntry&,set<off_t> &);
 
             // where we buffer the host index (i.e. write)
         vector< HostEntry > hostIndex;
