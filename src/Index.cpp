@@ -31,7 +31,7 @@
 #endif
 
 bool HostEntry::overlap( const HostEntry &other ) {
-    return ( contains( other.logical_offset ) || other.contains( logical_offset ) );
+    return(contains(other.logical_offset) || other.contains(logical_offset));
 }
 
 bool HostEntry::contains( off_t offset ) const {
