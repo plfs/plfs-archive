@@ -430,7 +430,7 @@ int Index::global_from_stream(void *addr) {
     tokenize((char*)addr,"\n",chunk_paths); // might be inefficient...
     for( size_t i = 0; i < chunk_paths.size(); i++ ) {
         ChunkFile cf;
-        cf.path = chunk_paths[i];
+        cf.path = logical_path + "/" + chunk_paths[i];
         cf.fd = -1;
         chunk_map.push_back(cf);
     }
@@ -438,11 +438,105 @@ int Index::global_from_stream(void *addr) {
     return 0;
 }
 
+// Helper function to debug global_to_stream
+int Index::debug_from_stream(void *addr){
+
+    // first read the header to know how many entries there are
+    size_t quant = 0;
+    size_t *sarray = (size_t*)addr;
+    quant = sarray[0];
+    if ( quant < 0 ) {
+        plfs_debug("WTF the size of your stream index is less than 0\n");
+        return -1;
+    }
+    plfs_debug("%s for %s has %ld entries\n",
+        __FUNCTION__,logical_path.c_str(),(long)quant);
+    // then skip past the entries
+    ContainerEntry *entries = (ContainerEntry*)addr;
+    addr = (void*)&(entries[quant]);
+
+    // now read in the vector of chunk files
+    plfs_debug("%s of %s now parsing data chunk paths\n",
+                __FUNCTION__,logical_path.c_str());
+    vector<string> chunk_paths;
+    tokenize((char*)addr,"\n",chunk_paths); // might be inefficient...
+    for( size_t i = 0; i < chunk_paths.size(); i++ ) {
+        plfs_debug("Chunk path:%d is :%s\n",i,chunk_paths[i].c_str());
+    }
+    return 0;
+}
+
 // returns 0 or -errno
 int Index::global_to_file(int fd){
 
-    // first write the number of container entries
+    void *buffer; 
+    size_t length;
+    int ret = global_to_stream(&buffer,&length);
+    if (ret==0) {
+        ret = Util::Writen(fd,buffer,length);
+        ret = ( ret == length ? 0 : -errno );
+        free(buffer); 
+    }
+    return ret;
+}
+
+char *Index::memcpy_helper(char *dst, void *src, size_t len) {
+    char *ret = (char*)memcpy((void*)dst,src,len);
+    ret += len;
+    return ret;
+}
+
+int Index::global_to_stream(void **buffer,size_t *length) {
+    int ret = 0;
     size_t quant = global_index.size();
+
+    // first build the vector of chunk paths, trim them to relative
+    // to the container so they're smaller and still valid after rename
+    // this gets written last but compute it first to compute length
+    ostringstream chunks;
+    for(int i = 0; i < chunk_map.size(); i++ ) {
+        chunks << chunk_map[i].path.substr(logical_path.length()) << endl;
+    }
+    chunks << '\0'; // null term the file
+    size_t chunks_length = chunks.str().length();
+
+    // compute the length 
+    *length = sizeof(quant);    // the header
+    *length += quant*sizeof(ContainerEntry); 
+    *length += chunks_length; 
+
+    // allocate the buffer
+    *buffer = malloc(*length);
+    char *ptr = (char*)*buffer;
+
+    // copy in the header
+    ptr = memcpy_helper(ptr,&quant,sizeof(quant));
+    plfs_debug("%s: Copied header for global index of %s\n",
+            __FUNCTION__, logical_path.c_str()); 
+
+    // copy in each container entry
+    size_t  centry_length = sizeof(ContainerEntry);
+    map<off_t,ContainerEntry>::iterator itr;
+    for( itr = global_index.begin(); itr != global_index.end(); itr++ ) {
+        void *start = &(itr->second);
+        ptr = memcpy_helper(ptr,start,centry_length);
+    }
+    plfs_debug("%s: Copied %ld entries for global index of %s\n",
+            __FUNCTION__, (long)quant,logical_path.c_str()); 
+
+    // copy the chunk paths
+    ptr = memcpy_helper(ptr,(void*)chunks.str().c_str(),chunks_length);
+    plfs_debug("%s: Copied the chunk map for global index of %s\n",
+            __FUNCTION__, logical_path.c_str()); 
+    assert(ptr==(char*)*buffer+*length);
+
+    return ret;
+}
+
+/*
+    *buffer = new char[
+
+    // first write the number of container entries
     int ret = Util::Writen(fd,(void*)(&quant),sizeof(size_t));
     plfs_debug("Wrote header for global index of %s\n",
             logical_path.c_str(),ret); 
@@ -470,6 +564,67 @@ int Index::global_to_file(int fd){
             logical_path.c_str(),ret); 
     return (ret == chunks.str().length() ? 0 : -errno); 
 }
+
+
+int Index::global_to_stream(void **buffer){
+
+    plfs_debug("Entering global_to_stream\n");
+    // Let's determine the size of the global index stream
+    // First thing is the size of the index entries
+    size_t stream_size = sizeof(size_t);
+    plfs_debug("Base address is %u\n",*&buffer);
+    plfs_debug("Stream_size is %d\n",sizeof(size_t));
+    // Next we need to get the size of all of the Container Entries
+    stream_size += global_index.size()*sizeof(ContainerEntry);
+    plfs_debug("Container entry size is %d\n",sizeof(ContainerEntry));
+    // Lastly we need to get the chunk map size
+    ostringstream chunks;
+    for(int i = 0; i < chunk_map.size(); i++ ) {
+        // for each chunk, just put in the part from container root forward
+         chunks << chunk_map[i].path.substr(logical_path.length()) << endl;
+    }
+    chunks << '\0'; // null term the file
+    // Chunk map size
+    stream_size += chunks.str().length();
+    plfs_debug("Chunk maps size is %d\n",chunks.str().length());
+    // Now have the total size of the stream lets malloc our buffer
+    *buffer = (void *)malloc(stream_size);
+    if(*buffer==NULL){
+        plfs_debug("We didn't get the malloc\n");
+    }
+        
+    plfs_debug("We are mallocing %d bytes\n",stream_size);
+    // Place the size of the index in the buffer
+    size_t quant = global_index.size();
+    plfs_debug("Quant has a value of %d\n",quant);
+    *buffer = &quant;
+    // Make sure to increase the pointer by the size of the object we just wrote
+    (size_t *)*buffer++;
+    plfs_debug("Increased the buffer pointer after the quant was written address now %u\n",*&buffer);
+    map<off_t,ContainerEntry>::iterator itr;
+    // Place all the container entries in the buffer
+    int count=0;
+    for( itr = global_index.begin(); itr != global_index.end(); itr++ ) {
+        void *start = &(itr->second);
+        *buffer=start;
+        int y;
+        for(y=0;y<7;y++){
+            (ContainerEntry *)*buffer++;
+        }
+        plfs_debug("Wrote container entry %d and increased the pointeri to %u\n",count,*&buffer);
+        count++;
+    }
+    plfs_debug("Wrote the container entries\n");
+    // Place the chunk map in the buffer
+    *buffer = (char *)chunks.str().c_str();
+    plfs_debug("Wrote the chunk map\n");
+    // Return the size of the stream
+    //plfs_debug("In index global to stream size is %d\n",stream_size);
+    //plfs_debug("Now spitting out the buffer\n");
+    //debug_from_stream(*buffer);
+    return stream_size;
+}
+*/
 
 size_t Index::splitEntry( ContainerEntry *entry, 
         set<off_t> &splits, 

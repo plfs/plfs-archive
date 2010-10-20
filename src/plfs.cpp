@@ -194,15 +194,16 @@ plfs_dump_index( FILE *fp, const char *logical, int compress ) {
     PLFS_EXIT(ret);
 }
 
+
 // should be called with a logical path and already_expanded false
 // or called with a physical path and already_expanded true
 // returns 0 or -errno
 int
-plfs_flatten_index(Plfs_fd *pfd, const char *logical,int already_expanded) {
+plfs_flatten_index(Plfs_fd *pfd, const char *logical,Plfs_path_type path_type) {
     PLFS_ENTER;
     Index *index;
     bool newly_created = false;
-    if ( already_expanded ) path = logical; // we were passed physical
+    if ( path_type==PHYSICAL_PATH  ) path = logical; // we were passed physical
     ret = 0;
     if ( pfd && pfd->getIndex() ) {
         index = pfd->getIndex();
@@ -212,14 +213,14 @@ plfs_flatten_index(Plfs_fd *pfd, const char *logical,int already_expanded) {
         // before we populate, need to blow away any old one
         ret = Container::populateIndex(path,index,false);
     }
-    if (already_expanded || is_plfs_file(logical,NULL)) {
+    if (path_type==PHYSICAL_PATH || is_plfs_file(logical,NULL)) {
         // if it's already expanded, the caller has already verified that
         // it's a plfs file
         ret = Container::flattenIndex(path,index);
     } else {
         ret = -EBADF; // not sure here.  Maybe return SUCCESS?
     }
-    if ( newly_created ) delete index;
+    if (newly_created) delete index;
     PLFS_EXIT(ret);
 }
 
@@ -944,13 +945,22 @@ get_plfs_conf() {
     return pconf;
 }
 
+// Can't directly access the FD struct in ADIO 
+int plfs_index_stream(Plfs_fd **pfd, char ** buffer,size_t *length){
+    int ret = (*pfd)->getIndex()->global_to_stream((void **)buffer,length);
+    plfs_debug("In plfs_index_stream global to stream has size %d", ret);
+    plfs_debug("Now spitting out the index\n");
+    (*pfd)->getIndex()->debug_from_stream((void *)*buffer);
+    return ret;
+}
+
 // pass in a NULL Plfs_fd to have one created for you
 // pass in a valid one to add more writers to it
 // one problem is that we fail if we're asked to overwrite a normal file
 // in RDWR mode, we increment reference count twice.  make sure to decrement
 // twice on the close
 int
-plfs_open(Plfs_fd **pfd,const char *logical,int flags,pid_t pid,mode_t mode) {
+plfs_open(Plfs_fd **pfd,const char *logical,int flags,pid_t pid,mode_t mode, char * index_stream) {
     PLFS_ENTER;
     WriteFile *wf      = NULL;
     Index     *index   = NULL;
@@ -1019,14 +1029,20 @@ plfs_open(Plfs_fd **pfd,const char *logical,int flags,pid_t pid,mode_t mode) {
             // do we delete this on error?
             index = new Index( path );  
             new_index = true;
-            ret = Container::populateIndex(path,index,true);
-            if ( ret != 0 ) {
-                plfs_debug("%s failed to create index on %s: %s\n",
-                        __FUNCTION__, path.c_str(), strerror(errno));
-                delete(index);
-                index = NULL;
+            // Did someone pass in an index stream
+            if ( index_stream !=NULL){
+                // Convert the index stream to a global index
+                index->global_from_stream(index_stream);
+            }else{
+                ret = Container::populateIndex(path,index,true);
+                if ( ret != 0 ) {
+                    plfs_debug("%s failed to create index on %s: %s\n",
+                            __FUNCTION__, path.c_str(), strerror(errno));
+                    delete(index);
+                    index = NULL;
+                }
+                EISDIR_DEBUG;
             }
-            EISDIR_DEBUG;
         }
         if ( ret == 0 ) {
             index->incrementOpens(1);

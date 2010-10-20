@@ -7,7 +7,8 @@
 
 int main (int argc, char **argv) {
     const char *target  = argv[1];
-    int ret = plfs_flatten_index(NULL,target,false);
+    Plfs_path_type path_type=LOGICAL_PATH;
+    int ret = plfs_flatten_index(NULL,target,path_type);
     if ( ret != 0 ) {
         fprintf( stderr, "Couldn't read index from %s: %s\n", 
                 target, strerror(-ret));

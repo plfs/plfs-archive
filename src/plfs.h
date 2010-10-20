@@ -19,6 +19,13 @@
     typedef void * Plfs_fd;
 #endif
 
+
+typedef enum {
+    LOGICAL_PATH,
+    PHYSICAL_PATH
+}Plfs_path_type;
+
+
 /*
    All PLFS function declarations in this file are in alphabetical order.
    Please retain this as edits are made.
@@ -73,13 +80,14 @@ void plfs_debug( const char *format, ... );
 
 int plfs_dump_index( FILE *fp, const char *path, int compress );
 
-int plfs_flatten_index( Plfs_fd *, const char *path, int already_expanded );
+int plfs_flatten_index( Plfs_fd *, const char *path, Plfs_path_type path_type);
 
 /* Plfs_fd can be NULL */
 int plfs_getattr( Plfs_fd *, const char *path, struct stat *stbuf );
 
-int plfs_link( const char *path, const char *to );
+int plfs_index_stream(Plfs_fd **pfd, char ** buffer);
 
+int plfs_link( const char *path, const char *to );
 /* 
    query the mode that was used to create the file
    this should only be called on a plfs file
@@ -91,7 +99,7 @@ int plfs_mkdir( const char *path, mode_t );
 /* plfs_open
 */
 int plfs_open( Plfs_fd **, const char *path, 
-        int flags, pid_t pid, mode_t );
+        int flags, pid_t pid, mode_t , char *index_stream=NULL);
 
 /* query a plfs_fd about how many writers and readers are using it */
 int plfs_query( Plfs_fd *, size_t *writers, size_t *readers );
