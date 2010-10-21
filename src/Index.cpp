@@ -295,8 +295,8 @@ void *Index::mapIndex( string hostindex, int *fd, off_t *length ) {
 }
 
 
+// this builds a global in-memory index from a physical host index dropping
 // return 0 for sucess, -errno for failure
-// this builds a global index from a local index
 int Index::readIndex( string hostindex ) {
     off_t length = (off_t)-1;
     int   fd = -1;
@@ -397,6 +397,7 @@ int Index::readIndex( string hostindex ) {
     return cleanupReadIndex(fd, maddr, length, 0, "DONE",hostindex.c_str());
 }
 
+// constructs a global index from a "stream" (i.e. a chunk of memory)
 // returns 0 or -errno
 int Index::global_from_stream(void *addr) {
 
@@ -466,9 +467,9 @@ int Index::debug_from_stream(void *addr){
     return 0;
 }
 
+// this writes a flattened in-memory global index to a physical file
 // returns 0 or -errno
 int Index::global_to_file(int fd){
-
     void *buffer; 
     size_t length;
     int ret = global_to_stream(&buffer,&length);
@@ -480,12 +481,16 @@ int Index::global_to_file(int fd){
     return ret;
 }
 
+// a helper routine for global_to_stream: copies to a pointer and advances it
 char *Index::memcpy_helper(char *dst, void *src, size_t len) {
     char *ret = (char*)memcpy((void*)dst,src,len);
     ret += len;
     return ret;
 }
 
+// this writes a flattened in-memory global index to a memory address
+// it allocates the memory.  The caller must free it.
+// returns 0 or -errno
 int Index::global_to_stream(void **buffer,size_t *length) {
     int ret = 0;
     size_t quant = global_index.size();
@@ -508,6 +513,7 @@ int Index::global_to_stream(void **buffer,size_t *length) {
     // allocate the buffer
     *buffer = malloc(*length);
     char *ptr = (char*)*buffer;
+    if ( ! *buffer ) return -ENOMEM;
 
     // copy in the header
     ptr = memcpy_helper(ptr,&quant,sizeof(quant));
