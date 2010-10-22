@@ -946,12 +946,14 @@ get_plfs_conf() {
 }
 
 // Can't directly access the FD struct in ADIO 
-int plfs_index_stream(Plfs_fd **pfd, char ** buffer,size_t *length){
-    int ret = (*pfd)->getIndex()->global_to_stream((void **)buffer,length);
-    plfs_debug("In plfs_index_stream global to stream has size %d", ret);
+int plfs_index_stream(Plfs_fd **pfd, char ** buffer){
+    size_t length;
+    if ( (*pfd)->getIndex() == NULL ) return -1;
+    int ret = (*pfd)->getIndex()->global_to_stream((void **)buffer,&length);
+    plfs_debug("In plfs_index_stream global to stream has size %d", length);
     plfs_debug("Now spitting out the index\n");
     (*pfd)->getIndex()->debug_from_stream((void *)*buffer);
-    return ret;
+    return length;
 }
 
 // pass in a NULL Plfs_fd to have one created for you
