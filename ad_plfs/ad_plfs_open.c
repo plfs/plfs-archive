@@ -48,7 +48,8 @@
     MPI_Barrier(MPI_COMM_WORLD);
     
 
-int open_helper(ADIO_File fd,Plfs_fd **pfd,int *error_code,int perm, int amode,int rank);
+int open_helper(ADIO_File fd,Plfs_fd **pfd,int *error_code,int perm, 
+        int amode,int rank);
 int check_index_broadcast(ADIO_File fd,int rank);
 int broadcast_index(Plfs_fd **pfd, ADIO_File fd, 
         int *error_code,int perm,int amode,int rank);
@@ -92,7 +93,7 @@ void ADIOI_PLFS_Open(ADIO_File fd, int *error_code)
     if (fd->access_mode & ADIO_CREATE) {
         err = plfs_create(fd->filename, perm, amode, rank);
         if ( err != 0 ) {
-            *error_code = MPIO_Err_create_code(MPI_SUCCESS, MPIR_ERR_RECOVERABLE,
+            *error_code =MPIO_Err_create_code(MPI_SUCCESS, MPIR_ERR_RECOVERABLE,
 					   myname, __LINE__, MPI_ERR_IO,
 					   "**io",
 					   "**io %s", strerror(-err));
@@ -103,7 +104,6 @@ void ADIOI_PLFS_Open(ADIO_File fd, int *error_code)
         return;
     }
     
-
     // if we make it here, we're doing RDONLY, WRONLY, or RDWR
     err=open_helper(fd,&pfd,error_code,perm,amode,rank);
     MPIBCAST( &err, 1, MPI_INT, 0, MPI_COMM_WORLD );
@@ -130,44 +130,32 @@ int check_index_broadcast(ADIO_File fd, int rank) {
     value = (char *) ADIOI_Malloc((MPI_MAX_INFO_VAL+1)*sizeof(char));
     int mpi_ret=MPI_Info_get(fd->info,"plfs_disable_broadcast",
             MPI_MAX_INFO_VAL,value,&flag);
-    ADIOI_Free(value);
-    //
+
     // If there is an error on the info get the rank and the error message
     if(mpi_ret!=MPI_SUCCESS){   
         MPI_Error_string(mpi_ret,err_buffer,&resultlen);
-        printf("Error:%s | Rank:%d\n",err_buffer,rank);
+        MPI_Abort(MPI_COMM_WORLD,MPI_ERR_IO);
+        return -1;
     }else{
-        // Only set this flag on MPI Success
-        // MPI_Info sets the flag so lets set broadcast to 0 
-        if(flag){ 
-            // Got what we were looking for lets set broadcast to hint value 
-            broadcast=0;
-            printf("Rank:%d | Broadcast is %d\n",rank,broadcast);
-        }
+        if(flag) broadcast= (atoi(value) ? 0 : 1);
     }
+    ADIOI_Free(value);
     return broadcast;
 }
 
-int open_helper(ADIO_File fd,Plfs_fd **pfd,int *error_code,int perm,int amode,int rank)
+// a helper that determines whether 0 distributes the index to everyone else
+// or whether everyone just calls plfs_open directly
+int open_helper(ADIO_File fd,Plfs_fd **pfd,int *error_code,int perm,
+        int amode,int rank)
 {
     int err = 0, broadcast=0;
-
     static char myname[] = "ADIOI_PLFS_OPENHELPER";
     
-    // if we're in read mode, do we want to serialize the index creation?
     if (fd->access_mode==ADIO_RDONLY) {
         if ( rank == 0 ) {
-            int bc_mes;
-            bc_mes=broadcast = check_index_broadcast(fd,rank);
-            MPIBCAST( &bc_mes, 1, MPI_INT, 0, MPI_COMM_WORLD );
+            broadcast = check_index_broadcast(fd,rank);
         }
-        else{
-            int bc_mes; 
-            MPIBCAST( &bc_mes, 1, MPI_INT, 0, MPI_COMM_WORLD );
-            broadcast=bc_mes;
-            POORMANS_GDB;
-        }
-        MPI_Barrier(MPI_COMM_WORLD);
+        MPIBCAST( &broadcast, 1, MPI_INT, 0, MPI_COMM_WORLD );
     } else {
         broadcast = 0; // we don't create an index unless we're in read mode 
     }
@@ -196,41 +184,31 @@ int open_helper(ADIO_File fd,Plfs_fd **pfd,int *error_code,int perm,int amode,in
     }
 }
 
+// 0 gets the index by calling plfs_open() first and then extracting the index
+// it then broadcasts that to the rest who then pass it to their own plfs_open()
 int broadcast_index(Plfs_fd **pfd, ADIO_File fd, 
         int *error_code,int perm,int amode,int rank) 
 {
     int err = 0;
-    // Rank is zero, let's get the index and then broadcast it to everyone else
-    if(rank==0){
+    char *index_stream;
+    int msg_len;
+
+    if(rank==0){ 
         err = plfs_open(pfd, fd->filename, amode, rank, perm , NULL);
     }
     MPIBCAST(&err,1,MPI_INT,0,MPI_COMM_WORLD);   // was 0's open successful?
-    if(err !=0 ){
-        return err;
-    }
+    if(err !=0 ) return err;
 
+    // rank 0 turns the index into a stream, broadcasts its size, then it
     if(rank==0){
-        // rank 0 turns the index into a stream, broadcasts its size, then it
-        char *global_index_stream;
-        int msg_len;
-        msg_len = plfs_index_stream(pfd,&global_index_stream); 
-        if(msg_len<0){
-            MPI_Abort(MPI_COMM_WORLD,MPI_ERR_IO);
-        }
-        MPIBCAST(&msg_len, 1, MPI_INT, 0, MPI_COMM_WORLD);
-        MPIBCAST(global_index_stream,msg_len,MPI_CHAR,0,MPI_COMM_WORLD);
-        MPI_Barrier(MPI_COMM_WORLD); // is this barrier needed?
-        free(global_index_stream);
-    } else{         
-        int msg_len;
-        // receive the len, malloc the index, receive the index, then open
-        MPIBCAST(&msg_len, 1, MPI_INT, 0, MPI_COMM_WORLD);
-        char *index_stream=malloc(msg_len);
-        MPIBCAST(index_stream,msg_len,MPI_CHAR,0,MPI_COMM_WORLD);
-        MPI_Barrier(MPI_COMM_WORLD); // is this barrier needed?
-        err = plfs_open( pfd, fd->filename, amode, rank, perm , index_stream);
-        free(index_stream);
+        msg_len = plfs_index_stream(pfd,&index_stream); 
+        if(msg_len<0) MPI_Abort(MPI_COMM_WORLD,MPI_ERR_IO);
     }
+    MPIBCAST(&msg_len, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    if(rank!=0) index_stream = malloc(msg_len);
+    MPIBCAST(index_stream,msg_len,MPI_CHAR,0,MPI_COMM_WORLD);
+    if(rank!=0) err = plfs_open(pfd,fd->filename,amode,rank,perm,index_stream);
+    free(index_stream);
     return 0;
 } 
 
