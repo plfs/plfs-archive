@@ -512,6 +512,11 @@ int Index::global_to_stream(void **buffer,size_t *length) {
 
     // allocate the buffer
     *buffer = malloc(*length);
+    // Let's check this malloc and make sure it succeeds
+    if(!buffer){
+        plfs_debug("%s, Malloc of stream buffer failed\n",__FUNCTION__);
+        return -1;
+    }
     char *ptr = (char*)*buffer;
     if ( ! *buffer ) return -ENOMEM;
 

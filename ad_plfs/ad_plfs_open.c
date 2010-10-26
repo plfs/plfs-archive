@@ -44,8 +44,11 @@
             MPI_Abort(MPI_COMM_WORLD,MPI_ERR_IO); \
         } \
     } \
-    POORMANS_GDB\
-    MPI_Barrier(MPI_COMM_WORLD);
+    POORMANS_GDB
+    
+
+// I removed this from POORMANS_GDB
+// MPI_Barrier(MPI_COMM_WORLD);
     
 
 int open_helper(ADIO_File fd,Plfs_fd **pfd,int *error_code,int perm, 
@@ -205,7 +208,14 @@ int broadcast_index(Plfs_fd **pfd, ADIO_File fd,
         if(msg_len<0) MPI_Abort(MPI_COMM_WORLD,MPI_ERR_IO);
     }
     MPIBCAST(&msg_len, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    if(rank!=0) index_stream = malloc(msg_len);
+    if(rank!=0) {
+        index_stream = malloc(msg_len);
+        // We need to check that the malloc succeeded or the broadcast is in vain
+        if(!index_stream){
+            plfs_debug("Rank %d aborting because of a failed malloc\n");
+            MPI_Abort(MPI_COMM_WORLD,MPI_ERR_IO);
+        }
+    }
     MPIBCAST(index_stream,msg_len,MPI_CHAR,0,MPI_COMM_WORLD);
     if(rank!=0) err = plfs_open(pfd,fd->filename,amode,rank,perm,index_stream);
     free(index_stream);
