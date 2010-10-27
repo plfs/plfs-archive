@@ -950,6 +950,7 @@ int plfs_index_stream(Plfs_fd **pfd, char ** buffer){
     size_t length;
     if ( (*pfd)->getIndex() == NULL ) return -1;
     int ret = (*pfd)->getIndex()->global_to_stream((void **)buffer,&length);
+    if(ret!=0) return -1;
     plfs_debug("In plfs_index_stream global to stream has size %d", length);
     return length;
 }
@@ -1111,7 +1112,8 @@ int
 plfs_link(const char *logical, const char *to) {
     PLFS_ENTER;
     plfs_debug( "Can't make a hard link to a container.\n" );
-    PLFS_EXIT(-ENOSYS);
+    ret = -ENOSYS;
+    PLFS_EXIT(ret);
     /*
     string toPath = expandPath(to);
     ret = retValue(Util::Link(logical,toPath.c_str()));

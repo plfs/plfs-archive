@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include <sys/dir.h>
 #include <dirent.h>
+#include <stdlib.h>
 #include <math.h>
 #include <assert.h>
 #include <sys/syscall.h>
@@ -100,7 +101,7 @@ ostream& operator <<(ostream &os,const ContainerEntry &entry) {
 ostream& operator <<(ostream &os,const Index &ndx ) {
     os << "# Index of " << ndx.logical_path << endl;
     os << "# Data Droppings" << endl;
-    for(int i = 0; i < ndx.chunk_map.size(); i++ ) {
+    for(size_t i = 0; i < ndx.chunk_map.size(); i++ ) {
         os << "# " << i << " " << ndx.chunk_map[i].path << endl;
     }
     map<off_t,ContainerEntry>::const_iterator itr;
@@ -136,7 +137,6 @@ Index::Index( string logical, int fd ) : Metadata::Metadata() {
 void
 Index::lock( const char *function ) {
     Util::MutexLock( &fd_mux, function );
-
 }
 
 void
@@ -264,8 +264,8 @@ int Index::flush() {
     // valgrind complains about writing uninitialized bytes here....
     // but it's fine as far as I can tell.
     void *start = &(hostIndex.front());
-    int ret     = Util::Writen( fd, start, len );
-    if ( ret != (size_t)len ) {
+    size_t ret     = Util::Writen( fd, start, len );
+    if ( ret != len ) {
         plfs_debug("%s failed write to fd %d: %s\n", 
                 __FUNCTION__, fd, strerror(errno));
     }
@@ -474,8 +474,8 @@ int Index::global_to_file(int fd){
     size_t length;
     int ret = global_to_stream(&buffer,&length);
     if (ret==0) {
-        ret = Util::Writen(fd,buffer,length);
-        ret = ( ret == length ? 0 : -errno );
+        size_t sz = Util::Writen(fd,buffer,length);
+        ret = ( sz == length ? 0 : -errno );
         free(buffer); 
     }
     return ret;
@@ -499,7 +499,7 @@ int Index::global_to_stream(void **buffer,size_t *length) {
     // to the container so they're smaller and still valid after rename
     // this gets written last but compute it first to compute length
     ostringstream chunks;
-    for(int i = 0; i < chunk_map.size(); i++ ) {
+    for(size_t i = 0; i < chunk_map.size(); i++ ) {
         chunks << chunk_map[i].path.substr(logical_path.length()) << endl;
     }
     chunks << '\0'; // null term the file
