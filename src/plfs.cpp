@@ -961,7 +961,9 @@ int plfs_index_stream(Plfs_fd **pfd, char ** buffer){
 // in RDWR mode, we increment reference count twice.  make sure to decrement
 // twice on the close
 int
-plfs_open(Plfs_fd **pfd,const char *logical,int flags,pid_t pid,mode_t mode, char * index_stream) {
+plfs_open(Plfs_fd **pfd,const char *logical,int flags,pid_t pid,mode_t mode, 
+        char * index_stream) 
+{
     PLFS_ENTER;
     WriteFile *wf      = NULL;
     Index     *index   = NULL;
