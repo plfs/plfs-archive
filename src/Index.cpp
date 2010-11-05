@@ -1023,48 +1023,18 @@ void Index::truncateHostIndex( off_t offset ) {
 
 // ok, someone is truncating a file, so we reread a local index,
 // created a partial global index, and truncated that global
-// index, so now we need to dump the modified global index into
+// index, so now we just need to dump the modified global index into
 // a new local index
 int Index::rewriteIndex( int fd ) {
     this->fd = fd;
     map<off_t,ContainerEntry>::iterator itr;
     map<double,ContainerEntry> global_index_timesort;
     map<double,ContainerEntry>::iterator itrd;
-    
-    // so this is confusing.  before we dump the global_index back into
-    // a physical index entry, we have to resort it by timestamp instead
-    // of leaving it sorted by offset.
-    // this is because we have a small optimization in that we don't 
-    // actually write the physical offsets in the physical index entries.
-    // we don't need to since the writes are log-structured so the order
-    // of the index entries matches the order of the writes to the data
-    // chunk.  Therefore when we read in the index entries, we know that
-    // the first one to a physical data dropping is to the 0 offset at the
-    // physical data dropping and the next one is follows that, etc.
-    //
-    // update, we know include physical offsets in the index entries so
-    // we don't have to order them by timestamps anymore.  However, I'm
-    // reluctant to change this code so near a release date and it doesn't
-    // hurt them to be sorted so just leave this for now even though it
-    // is technically unnecessary
-    for( itr = global_index.begin(); itr != global_index.end(); itr++ ) {
-        global_index_timesort.insert(
-                make_pair(itr->second.begin_timestamp,itr->second));
-    }
 
-    for( itrd = global_index_timesort.begin(); itrd != 
-            global_index_timesort.end(); itrd++ ) 
-    {
-        double begin_timestamp = 0, end_timestamp = 0;
-        begin_timestamp = itrd->second.begin_timestamp;
-        end_timestamp   = itrd->second.end_timestamp;
-        addWrite( itrd->second.logical_offset,itrd->second.length, 
-                itrd->second.original_chunk, begin_timestamp, end_timestamp );
-        /*
-        ostringstream os;
-        os << __FUNCTION__ << " added : " << itr->second << endl; 
-        plfs_debug("%s", os.str().c_str() );
-        */
+    for( itr = global_index.begin(); itr != global_index.end(); itr++ ) {
+        addWrite( itr->second.logical_offset,itr->second.length, 
+                itr->second.original_chunk, itr->second.begin_timestamp, 
+                itr->second.end_timestamp );
     }
     return flush(); 
 }
