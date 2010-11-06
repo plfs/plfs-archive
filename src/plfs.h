@@ -19,13 +19,6 @@
     typedef void * Plfs_fd;
 #endif
 
-
-typedef enum {
-    LOGICAL_PATH,
-    PHYSICAL_PATH
-}Plfs_path_type;
-
-
 /*
    All PLFS function declarations in this file are in alphabetical order.
    Please retain this as edits are made.
@@ -80,7 +73,7 @@ void plfs_debug( const char *format, ... );
 
 int plfs_dump_index( FILE *fp, const char *path, int compress );
 
-int plfs_flatten_index( Plfs_fd *, const char *path, Plfs_path_type path_type);
+int plfs_flatten_index( Plfs_fd *, const char *path );
 
 /* Plfs_fd can be NULL */
 int plfs_getattr( Plfs_fd *, const char *path, struct stat *stbuf );

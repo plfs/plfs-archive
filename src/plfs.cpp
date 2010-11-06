@@ -195,15 +195,11 @@ plfs_dump_index( FILE *fp, const char *logical, int compress ) {
 }
 
 
-// should be called with a logical path and already_expanded false
-// or called with a physical path and already_expanded true
-// returns 0 or -errno
 int
-plfs_flatten_index(Plfs_fd *pfd, const char *logical,Plfs_path_type path_type) {
+plfs_flatten_index(Plfs_fd *pfd, const char *logical) {
     PLFS_ENTER;
     Index *index;
     bool newly_created = false;
-    if ( path_type==PHYSICAL_PATH  ) path = logical; // we were passed physical
     ret = 0;
     if ( pfd && pfd->getIndex() ) {
         index = pfd->getIndex();
@@ -213,9 +209,7 @@ plfs_flatten_index(Plfs_fd *pfd, const char *logical,Plfs_path_type path_type) {
         // before we populate, need to blow away any old one
         ret = Container::populateIndex(path,index,false);
     }
-    if (path_type==PHYSICAL_PATH || is_plfs_file(logical,NULL)) {
-        // if it's already expanded, the caller has already verified that
-        // it's a plfs file
+    if (is_plfs_file(logical,NULL)) {
         ret = Container::flattenIndex(path,index);
     } else {
         ret = -EBADF; // not sure here.  Maybe return SUCCESS?
