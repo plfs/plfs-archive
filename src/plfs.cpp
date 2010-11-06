@@ -1314,7 +1314,8 @@ plfs_getattr( Plfs_fd *of, const char *logical, struct stat *stbuf ) {
     }
     plfs_debug("%s on logical %s (%s)\n", __FUNCTION__, logical, path.c_str());
     mode_t mode = 0;
-    if ( ! is_plfs_file( logical, &mode ) ) {
+    if ( ! backwards && ! is_plfs_file( logical, &mode ) ) {
+        // if it's backwards, it means we were already passed the physical path
        /* if ( errno == EACCES ) {
             ret = -errno;
         } else {
