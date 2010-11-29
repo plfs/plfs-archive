@@ -195,11 +195,15 @@ plfs_dump_index( FILE *fp, const char *logical, int compress ) {
 }
 
 
+// should be called with a logical path and already_expanded false
+// or called with a physical path and already_expanded true
+// returns 0 or -errno
 int
-plfs_flatten_index(Plfs_fd *pfd, const char *logical) {
+plfs_flatten_index(Plfs_fd *pfd, const char *logical,Plfs_path_type path_type) {
     PLFS_ENTER;
     Index *index;
     bool newly_created = false;
+    if ( path_type==PHYSICAL_PATH  ) path = logical; // we were passed physical
     ret = 0;
     if ( pfd && pfd->getIndex() ) {
         index = pfd->getIndex();
@@ -209,7 +213,9 @@ plfs_flatten_index(Plfs_fd *pfd, const char *logical) {
         // before we populate, need to blow away any old one
         ret = Container::populateIndex(path,index,false);
     }
-    if (is_plfs_file(logical,NULL)) {
+    if (path_type==PHYSICAL_PATH || is_plfs_file(logical,NULL)) {
+        // if it's already expanded, the caller has already verified that
+        // it's a plfs file
         ret = Container::flattenIndex(path,index);
     } else {
         ret = -EBADF; // not sure here.  Maybe return SUCCESS?
@@ -939,13 +945,55 @@ get_plfs_conf() {
     return pconf;
 }
 
+int plfs_merge_indexes(Plfs_fd **pfd, char *index_streams, 
+                        int *index_sizes, int procs){
+    int count;
+    Index *root_index;
+    plfs_debug("Entering plfs_merge_indexes\n");
+    plfs_debug("Grabbing the path from the pfd\n");
+    string path=(*pfd)->getPath();
+    // Root has no real Index set it to the writefile index
+    plfs_debug("Setting writefile index to pfd index\n");
+    (*pfd)->setIndex((*pfd)->getWritefile()->getIndex());
+    plfs_debug("Getting the index from the pfd\n");
+    root_index=(*pfd)->getIndex();  
+    
+    for(count=1;count<procs;count++){
+        char *index_stream;
+        // Skip to the next index 
+        index_streams+=(index_sizes[count-1]-1);
+        index_stream=index_streams;
+        // Turn the stream into an index
+        plfs_debug("Merging the stream into one Index\n");
+        // Merge the index
+        root_index->global_from_stream(index_stream);
+        plfs_debug("Merge success\n");
+        // Free up the memory for the index stream
+        plfs_debug("Index stream free success\n");
+    }
+    plfs_debug("%s:Done merging indexes\n",__FUNCTION__);
+    // Let's slap the flatten in here also
+    plfs_debug("%s:About to flatten with path:%s\n",__FUNCTION__,path.c_str());
+    plfs_flatten_index((*pfd),path.c_str(),PHYSICAL_PATH);
+    plfs_debug("%s:Done with the flatten\n",__FUNCTION__);
+}
+
 // Can't directly access the FD struct in ADIO 
 int plfs_index_stream(Plfs_fd **pfd, char ** buffer){
     size_t length;
-    if ( (*pfd)->getIndex() == NULL ) return -1;
-    int ret = (*pfd)->getIndex()->global_to_stream((void **)buffer,&length);
-    if(ret!=0) return -1;
-    plfs_debug("In plfs_index_stream global to stream has size %d", length);
+    int ret;
+    if ( (*pfd)->getIndex() !=  NULL ) {
+        plfs_debug("Getting index stream from a reader\n");
+        ret = (*pfd)->getIndex()->global_to_stream((void **)buffer,&length);
+    }else if( (*pfd)->getWritefile()->getIndex()!=NULL){
+        plfs_debug("The write file has the index\n");
+        ret = (*pfd)->getWritefile()->getIndex()->global_to_stream(
+                    (void **)buffer,&length);
+    }else{
+        plfs_debug("Error in plfs_index_stream\n");
+        return -1;
+    }
+    plfs_debug("In plfs_index_stream global to stream has size %d\n", length);
     return length;
 }
 
@@ -956,15 +1004,19 @@ int plfs_index_stream(Plfs_fd **pfd, char ** buffer){
 // twice on the close
 int
 plfs_open(Plfs_fd **pfd,const char *logical,int flags,pid_t pid,mode_t mode, 
-        char * index_stream) 
-{
+            Plfs_open_opt *open_opt) {
     PLFS_ENTER;
     WriteFile *wf      = NULL;
     Index     *index   = NULL;
     bool new_writefile = false;
     bool new_index     = false;
     bool new_pfd       = false;
+    bool opt_pass      = false;
 
+    if(open_opt!=NULL){
+        opt_pass=true;
+    }
+     
     /*
     if ( pid == 0 ) { // this should be MPI rank 0
         // just one message per MPI open to make sure the version is right
@@ -1008,6 +1060,11 @@ plfs_open(Plfs_fd **pfd,const char *logical,int flags,pid_t pid,mode_t mode,
             new_writefile = true;
         }
         ret = addWriter( wf, pid, path.c_str(), mode );
+        // We are using MPI and a flatten on close has been passed 
+        if(opt_pass && open_opt->buffer_index) {
+            plfs_debug("Buffer index is set to true from ADIO\n");
+            wf->setBuffer();
+        }
         plfs_debug("%s added writer: %d\n", __FUNCTION__, ret );
         if ( ret > 0 ) ret = 0; // add writer returns # of current writers
         EISDIR_DEBUG;
@@ -1027,9 +1084,9 @@ plfs_open(Plfs_fd **pfd,const char *logical,int flags,pid_t pid,mode_t mode,
             index = new Index( path );  
             new_index = true;
             // Did someone pass in an index stream
-            if ( index_stream !=NULL){
-                // Convert the index stream to a global index
-                index->global_from_stream(index_stream);
+            if ( opt_pass && open_opt->index_stream !=NULL){
+                 //Convert the index stream to a global index
+                index->global_from_stream(open_opt->index_stream);
             }else{
                 ret = Container::populateIndex(path,index,true);
                 if ( ret != 0 ) {
@@ -1058,8 +1115,15 @@ plfs_open(Plfs_fd **pfd,const char *logical,int flags,pid_t pid,mode_t mode,
         // we create one open record for all the pids using a file
         // only create the open record for files opened for writing
         if ( wf ) {
-            ret = Container::addOpenrecord(path, 
-                Util::hostname(), pid );
+            if(opt_pass && open_opt->mpi){
+                if(pid==0){
+                    ret = Container::addOpenrecord(path,
+                            Util::hostname(),pid);
+                }
+            }else{
+                ret = Container::addOpenrecord(path, 
+                    Util::hostname(), pid );
+            }
             EISDIR_DEBUG;
         }
         //cerr << __FUNCTION__ << " added open record for " << path << endl;
@@ -1108,8 +1172,7 @@ int
 plfs_link(const char *logical, const char *to) {
     PLFS_ENTER;
     plfs_debug( "Can't make a hard link to a container.\n" );
-    ret = -ENOSYS;
-    PLFS_EXIT(ret);
+    PLFS_EXIT(-ENOSYS);
     /*
     string toPath = expandPath(to);
     ret = retValue(Util::Link(logical,toPath.c_str()));
@@ -1314,8 +1377,7 @@ plfs_getattr( Plfs_fd *of, const char *logical, struct stat *stbuf ) {
     }
     plfs_debug("%s on logical %s (%s)\n", __FUNCTION__, logical, path.c_str());
     mode_t mode = 0;
-    if ( ! backwards && ! is_plfs_file( logical, &mode ) ) {
-        // if it's backwards, it means we were already passed the physical path
+    if ( ! is_plfs_file( logical, &mode ) ) {
        /* if ( errno == EACCES ) {
             ret = -errno;
         } else {
@@ -1570,7 +1632,8 @@ ssize_t plfs_reference_count( Plfs_fd *pfd ) {
 
 // returns number of open handles or -errno
 int
-plfs_close( Plfs_fd *pfd, pid_t pid, int open_flags ) {
+plfs_close( Plfs_fd *pfd, pid_t pid, int open_flags, 
+            Plfs_close_opt *close_opt ) {
     int ret = 0;
     WriteFile *wf    = pfd->getWritefile();
     Index     *index = pfd->getIndex();
@@ -1587,13 +1650,22 @@ plfs_close( Plfs_fd *pfd, pid_t pid, int open_flags ) {
         if ( writers == 0 ) {
             off_t  last_offset;
             size_t total_bytes;
-            wf->getMeta( &last_offset, &total_bytes );
-            Container::addMeta( last_offset, total_bytes, pfd->getPath(), 
-                    Util::hostname() );
+            if(close_opt && pid==0){
+                last_offset=close_opt->last_offset;
+                total_bytes=close_opt->total_bytes;
+                Container::addMeta( last_offset, total_bytes, pfd->getPath(), 
+                        Util::hostname() );
+                Container::removeOpenrecord( pfd->getPath(), Util::hostname(), 
+                        pfd->getPid() );
+            }else if(!close_opt){
+                wf->getMeta( &last_offset, &total_bytes );
+                Container::addMeta( last_offset, total_bytes, pfd->getPath(), 
+                        Util::hostname() );
+                Container::removeOpenrecord( pfd->getPath(), Util::hostname(), 
+                        pfd->getPid() );
+            }
             // the pfd remembers the first pid added which happens to be the
             // one we used to create the open-record
-            Container::removeOpenrecord( pfd->getPath(), Util::hostname(), 
-                    pfd->getPid() );
             delete wf;
             wf = NULL;
             pfd->setWritefile(NULL);

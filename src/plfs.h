@@ -19,6 +19,23 @@
     typedef void * Plfs_fd;
 #endif
 
+
+typedef enum {
+    LOGICAL_PATH,
+    PHYSICAL_PATH
+}Plfs_path_type;
+
+
+typedef struct{
+    char *index_stream; /* Index stream passed in from another proc */
+    int  mpi;           /* Flag indicating that mpi is being used   */
+    int  buffer_index;  /* Buffer index yes/no                      */
+}Plfs_open_opt;
+
+typedef struct{
+    off_t last_offset;
+    size_t total_bytes;
+}Plfs_close_opt;
 /*
    All PLFS function declarations in this file are in alphabetical order.
    Please retain this as edits are made.
@@ -62,7 +79,7 @@ int plfs_chmod( const char *path, mode_t mode );
 
 int plfs_chown( const char *path, uid_t, gid_t );
 
-int plfs_close( Plfs_fd *, pid_t, int open_flags );
+int plfs_close( Plfs_fd *, pid_t, int open_flags ,Plfs_close_opt *close_opt);
 
 /* plfs_create
    you don't need to call this, you can also pass O_CREAT to plfs_open
@@ -73,12 +90,21 @@ void plfs_debug( const char *format, ... );
 
 int plfs_dump_index( FILE *fp, const char *path, int compress );
 
-int plfs_flatten_index( Plfs_fd *, const char *path );
+int plfs_flatten_index( Plfs_fd *, const char *path, Plfs_path_type path_type);
 
 /* Plfs_fd can be NULL */
 int plfs_getattr( Plfs_fd *, const char *path, struct stat *stbuf );
 
+
+/* Index stream related functions */
 int plfs_index_stream(Plfs_fd **pfd, char ** buffer);
+
+
+int plfs_merge_indexes(Plfs_fd **pfd, char *index_streams, 
+                        int *index_sizes, int procs);
+
+/* Have ADIO set a flag indicating that MPI is being used*/
+int plfs_set_mpi(Plfs_fd **pfd);
 
 int plfs_link( const char *path, const char *to );
 /* 
@@ -92,7 +118,7 @@ int plfs_mkdir( const char *path, mode_t );
 /* plfs_open
 */
 int plfs_open( Plfs_fd **, const char *path, 
-        int flags, pid_t pid, mode_t , char *index_stream);
+        int flags, pid_t pid, mode_t , Plfs_open_opt *open_opt);
 
 /* query a plfs_fd about how many writers and readers are using it */
 int plfs_query( Plfs_fd *, size_t *writers, size_t *readers );

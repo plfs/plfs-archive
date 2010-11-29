@@ -1,6 +1,6 @@
 /* -*- Mode: C; c-basic-offset:4 ; -*- */
 /* 
- *   $Id: ad_plfs_write.c,v 1.17 2004/10/07 16:15:18 rross Exp $    
+ *   $Id: ad_plfs_write.c,v 1.1 2010/11/29 19:59:01 adamm Exp $    
  *
  *   Copyright (C) 1997 University of Chicago. 
  *   See COPYRIGHT notice in top-level directory.
@@ -8,6 +8,9 @@
 
 #include "ad_plfs.h"
 #include "adio_extern.h"
+
+off_t last_offset=0;
+size_t total_bytes=0;
 
 void ADIOI_PLFS_WriteContig(ADIO_File fd, void *buf, int count, 
 			    MPI_Datatype datatype, int file_ptr_type,
@@ -29,10 +32,13 @@ void ADIOI_PLFS_WriteContig(ADIO_File fd, void *buf, int count,
     } else {
         myoff = fd->fp_ind;
     }
-    plfs_debug( stderr, "%s: offset %ld len %ld rank %d\n", 
+    // Grab the last offset
+    if(myoff>last_offset) last_offset=myoff;
+    // Count up those bytes
+    total_bytes+=len;
+    plfs_debug( "%s: offset %ld len %ld rank %d\n", 
             myname, (long)myoff, (long)len, rank );
     err = plfs_write( fd->fs_ptr, buf, len, myoff, rank );
-
 #ifdef HAVE_STATUS_SET_BYTES
     if (err >= 0 ) MPIR_Status_set_bytes(status, datatype, err);
 #endif
