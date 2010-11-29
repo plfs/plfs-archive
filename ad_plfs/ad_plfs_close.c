@@ -160,6 +160,8 @@ int flatten_on_close(Plfs_fd *fd,int rank,int amode,int procs,Plfs_close_opt *cl
     // This should be fine before the previous if statement
     err = plfs_close(fd, rank, amode,close_opt);
     
+    //free(index_stream);
+    
     if(!rank){
         // Only root needs to complete these frees
         free(index_sizes);
@@ -168,7 +170,8 @@ int flatten_on_close(Plfs_fd *fd,int rank,int amode,int procs,Plfs_close_opt *cl
     }
     // Everyone needs to free their index stream
     // Root doesn't really need to make this call
-    free(index_stream);
+    // Could take out the plfs_index_stream call for root
+    // This is causing errors does the free to index streams clean this up?
 
     return err;
 }
