@@ -1,6 +1,6 @@
 /* -*- Mode: C; c-basic-offset:4 ; -*- */
 /* 
- *   $Id: ad_plfs_close.c,v 1.1 2010/11/29 19:59:01 adamm Exp $    
+ *   $Id: ad_plfs_close.c,v 1.2 2010/11/29 20:41:32 adamm Exp $    
  *
  *   Copyright (C) 1997 University of Chicago. 
  *   See COPYRIGHT notice in top-level directory.
@@ -10,6 +10,7 @@
 
 int flatten_on_close(Plfs_fd *fd,int rank,int amode,int procs,
             Plfs_close_opt *close_opt);
+void check_error(int err,int rank);
 extern off_t last_offset;
 extern size_t total_bytes;
 
@@ -123,16 +124,13 @@ int flatten_on_close(Plfs_fd *fd,int rank,int amode,int procs,Plfs_close_opt *cl
         }
     }
     
-    /*err=MPI_Bcast(&streams_malloc,1,MPI_INT,0,MPI_COMM_WORLD);
+    err=MPI_Bcast(&streams_malloc,1,MPI_INT,0,MPI_COMM_WORLD);
+    check_error(err,rank);
 
-    if(err != MPI_SUCCESS){
-        int resultlen; 
-        char err_buffer[MPI_MAX_ERROR_STRING]; 
-        MPI_Error_string(err,err_buffer,&resultlen); 
-        printf("Error:%s | Rank:%d\n",err_buffer,rank); 
-        MPI_Abort(MPI_COMM_WORLD,MPI_ERR_IO); 
-    }
-    */
+    err=MPI_Bcast(&stop_buffer,1,MPI_INT,0,MPI_COMM_WORLD);
+    check_error(err,rank);
+    
+    
     if(!rank) start_time=MPI_Wtime();
     
     // Gather all of the subindexes only if malloc succeeded
@@ -160,13 +158,13 @@ int flatten_on_close(Plfs_fd *fd,int rank,int amode,int procs,Plfs_close_opt *cl
     // This should be fine before the previous if statement
     err = plfs_close(fd, rank, amode,close_opt);
     
-    //free(index_stream);
+    if(index_size>0) free(index_stream);
     
     if(!rank){
         // Only root needs to complete these frees
         free(index_sizes);
         free(index_disp);
-        free(index_streams);
+        if(streams_malloc) free(index_streams);
     }
     // Everyone needs to free their index stream
     // Root doesn't really need to make this call
@@ -174,4 +172,16 @@ int flatten_on_close(Plfs_fd *fd,int rank,int amode,int procs,Plfs_close_opt *cl
     // This is causing errors does the free to index streams clean this up?
 
     return err;
+}
+
+void check_error(int err,int rank){
+
+    if(err != MPI_SUCCESS){
+        int resultlen; 
+        char err_buffer[MPI_MAX_ERROR_STRING]; 
+        MPI_Error_string(err,err_buffer,&resultlen); 
+        printf("Error:%s | Rank:%d\n",err_buffer,rank); 
+        MPI_Abort(MPI_COMM_WORLD,MPI_ERR_IO); 
+    }
+
 }

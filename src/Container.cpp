@@ -413,7 +413,8 @@ int Container::flattenIndex( const string &path, Index *index ) {
     }
 
     // compress then dump and then close the files
-    index->compress();
+    // compress adds overhead and no benefit if the writes weren't through FUSE
+    //index->compress();  
     int ret = index->global_to_file(index_fd);
     Util::Close(index_fd);
 
