@@ -421,7 +421,7 @@ int Container::flattenIndex( const string &path, Index *index ) {
 
 
 int Container::populateReadIndex( const string &path, ReadIndex *readIndex) {
-    aggregateReadIndices(path,readIndex);
+    return  aggregateReadIndices(path,readIndex);
 }
 
 // this is the function that returns the container index
@@ -605,7 +605,21 @@ Index Container::parAggregateIndices(vector<IndexFileInfo>& index_list,
 
 int Container::aggregateReadIndices ( const string &path, ReadIndex *readIndex){
     plfs_debug("Hello World from aggregate read indices\n");
+    string hostindex;
+    int ret = 0;
+
+    
+    // create the list of tasks
+    DIR *td = NULL, *hd = NULL; struct dirent *tent = NULL;
+    while((ret = nextdropping(path,&hostindex,
+                    READINDEXPREFIX, &td,&hd,&tent)) == 1){
+        hostindex;
+        // Not  currently multithreaded should change me eventually
+        readIndex->readIndex(hostindex);
+    }
+    return ret;
 }
+
 
 // this function traverses the container, finds all the index droppings,
 // and aggregates them into a global in-memory index structure
@@ -623,7 +637,6 @@ int Container::aggregateIndices(const string &path, Index *index) {
     while((ret = nextdropping(path,&hostindex,INDEXPREFIX, &td,&hd,&tent))== 1){
         task.path = hostindex;
         tasks.push_back(task);  // makes a copy and pushes it
-        plfs_debug("Ag indices path is %s\n",path.c_str());
     }
     ret=indexTaskManager(tasks,index,path);
     return ret;
@@ -644,6 +657,17 @@ string Container::getIndexHostPath(const string &path,const string &host, int pi
     oss << path << "/" << INDEXPREFIX;  
     oss << ts << "." << host << "." << pid;
     return oss.str();
+}
+
+string Container::getReadIndexPath( const string &path, const string &host, 
+        int pid)
+{
+    ostringstream oss;
+    string ext_path;
+    ext_path = getHostDirPath(path,host);
+    oss << "/" << READINDEXPREFIX << pid;
+    ext_path += oss.str();
+    return ext_path;
 }
 
 string Container::getIndexPath(const string &path, const string &host, int pid,

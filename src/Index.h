@@ -91,21 +91,22 @@ typedef struct {
     int fd;
 } ChunkFile;
 
-typedef struct {
-    size_t size;
-    off_t offset;
-    pid_t pid; // Could be moved into the ReadIndex
-    double begin_timestamp;
-    double end_timestamp;
-}ReadTraceElement;
+class ReadTraceElement {
+    public:
+        size_t size;
+        off_t offset;
+        pid_t pid; // Could be moved into the ReadIndex
+        double begin_timestamp;
+        double end_timestamp;
+};
 
 class ReadIndex {
     public:
     ReadIndex();
     void insertLocal(ReadTraceElement readInfo);
     int insertGlobal(ReadTraceElement readInfo);
-    int flush();
-    int aggReadIndex();
+    int flush(string , int );
+    int readIndex( string hostindex );
     friend ostream& operator <<(ostream &,const ReadIndex &);
     private:
     vector<ReadTraceElement> readTrace;
@@ -120,6 +121,8 @@ class Index : public Metadata {
 
         int readIndex( string hostindex );
     
+        static int cleanupReadIndex(int, void *, off_t, int, const char*, const char*);
+        static void *mapIndex( string, int *, off_t * );
         void setPath( string );
 
         bool ispopulated( );
@@ -169,8 +172,6 @@ class Index : public Metadata {
         void init( string );
         int chunkFound( int *, off_t *, size_t *, off_t, 
                 string &, pid_t *, ContainerEntry* );
-        int cleanupReadIndex(int, void *, off_t, int, const char*, const char*);
-        void *mapIndex( string, int *, off_t * );
         int handleOverlap( ContainerEntry &g_entry,
             pair< map<off_t,ContainerEntry>::iterator, bool > &insert_ret );
         map<off_t,ContainerEntry>::iterator insertGlobalEntryHint(

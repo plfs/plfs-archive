@@ -26,6 +26,7 @@ using namespace std;
 #define DROPPINGPREFIX "dropping."
 #define DATAPREFIX     DROPPINGPREFIX"data."
 #define INDEXPREFIX    DROPPINGPREFIX"index."
+#define READINDEXPREFIX DROPPINGPREFIX"readindex."
 #define METADIR        "meta"         // where to stash shortcut metadata
 #define VERSIONPREFIX  "version"      // where to stash the version info 
 // OPENHOSTDIR is now the same as METADIR
@@ -64,6 +65,8 @@ class Container {
         static bool isContainer(const string &physical_path,mode_t*); 
         static string getIndexPath( const string &, const string &, 
                 int pid,double);
+        static string getReadIndexPath( const string &, const string &,
+                int pid);
         static string getDataPath(  const string &, const string &, 
                 int pid, double);
         static string getIndexHostPath(const string &path,

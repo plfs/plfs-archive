@@ -284,9 +284,70 @@ int ReadIndex::insertGlobal( ReadTraceElement readInfo){
     return ret;
 }
 
+int ReadIndex::readIndex( string hostindex ) {
+    
+    off_t length = (off_t)-1;
+    int   fd = -1;
+    void  *maddr = NULL;
+
+    ostringstream os;
+    os << __FUNCTION__ << ": " << this << " reading index on " <<
+        hostindex << endl;
+    plfs_debug("%s", os.str().c_str() );
+
+    maddr = Index::mapIndex( hostindex, &fd, &length );
+    if( maddr == (void*)-1 ) {
+        return Index::cleanupReadIndex( fd, maddr, length, 0, "mapIndex",
+            hostindex.c_str() );
+    }
+
+
+    ReadTraceElement *h_index = (ReadTraceElement*)maddr;
+    size_t entries     = length / sizeof(ReadTraceElement); // shouldn't be partials
+    plfs_debug("There are %d in %s\n", entries, hostindex.c_str() );
+    for( size_t i = 0; i < entries; i++ ) {
+        ReadTraceElement c_entry;
+        ReadTraceElement h_entry = h_index[i];
+        
+        int ret = insertGlobal( h_entry );
+        if ( ret != 0 ) {
+            return Index::cleanupReadIndex( fd, maddr, length, ret, "insertGlobal",
+                hostindex.c_str() );
+        }
+    }
+    return Index::cleanupReadIndex(fd, maddr, length, 0, "DONE",hostindex.c_str());
+}
+
+int ReadIndex::flush(string path,int pid){
+    int ret=0;
+    string readIndexPath = Container::getReadIndexPath(path,
+            Util::hostname(),pid);
+    plfs_debug("Going to open %s for the readIndex flush\n",readIndexPath.c_str());
+    mode_t mode = S_IRWXU | S_IRGRP | S_IROTH;
+    int flags = O_WRONLY | O_APPEND | O_CREAT;
+    int fd = Util::Open( readIndexPath.c_str(), flags, mode );
+        
+    ret = fd;
+    if( ret > 0 ){
+        size_t  len = readTrace.size() * sizeof(ReadTraceElement);
+        if ( len == 0 ) return 0;   // could be 0 if we weren't buffering
+        // valgrind complains about writing uninitialized bytes here....
+        // but it's fine as far as I can tell.
+        void *start = &(readTrace.front());
+        int ret     = Util::Writen( fd, start, len );
+        if ( (size_t)ret != (size_t)len ) {
+            plfs_debug("%s failed write to fd %d: %s\n", 
+                __FUNCTION__, fd, strerror(errno));
+        }
+    }
+    
+    return ret;
+}
+
 int agReadIndex(){
 
 }
+
 
 Index::Index( string logical, int fd ) : Metadata::Metadata() {
     init( logical );

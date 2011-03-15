@@ -252,6 +252,7 @@ plfs_dump_readindex ( FILE *fp, const char *logical) {
         oss << readIndex;
         fprintf(fp,"%s",oss.str().c_str());
     }
+    return ret;
 }
 
 // should be called with a logical path and already_expanded false
@@ -1337,7 +1338,7 @@ plfs_open(Plfs_fd **pfd,const char *logical,int flags,pid_t pid,mode_t mode,
             index = NULL;
         }
         // If read tracing is on lets set it up
-        readIndex = new ReadIndex;
+        if( PLFS_READ_TRACE )readIndex = new ReadIndex;
     }
 
     if ( ret == 0 && ! *pfd ) {
@@ -1980,6 +1981,8 @@ plfs_close( Plfs_fd *pfd, pid_t pid, uid_t uid, int open_flags,
         }
         ref_count = pfd->incrementOpens(-1);
         if( PLFS_READ_TRACE ) {
+            plfs_debug("About to flush the read trace\n");
+            readIndex->flush(pfd->getPath(), (int)pfd->getPid());
         }
     }
 
