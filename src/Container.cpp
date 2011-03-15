@@ -419,6 +419,11 @@ int Container::flattenIndex( const string &path, Index *index ) {
     return ret;
 }
 
+
+int Container::populateReadIndex( const string &path, ReadIndex *readIndex) {
+    aggregateReadIndices(path,readIndex);
+}
+
 // this is the function that returns the container index
 // should first check for top-level index and if it exists, just use it
 // returns -errno or 0 
@@ -596,6 +601,10 @@ Index Container::parAggregateIndices(vector<IndexFileInfo>& index_list,
     return index;
 
 
+}
+
+int Container::aggregateReadIndices ( const string &path, ReadIndex *readIndex){
+    plfs_debug("Hello World from aggregate read indices\n");
 }
 
 // this function traverses the container, finds all the index droppings,

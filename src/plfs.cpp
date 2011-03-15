@@ -14,6 +14,9 @@
 #include <queue>
 #include <vector>
 #include <stdlib.h>
+
+#define PLFS_READ_TRACE 1 
+
 using namespace std;
 
 // some functions require that the path passed be a PLFS path
@@ -236,6 +239,19 @@ plfs_dump_index( FILE *fp, const char *logical, int compress ) {
         fprintf(fp,"%s",oss.str().c_str());
     }
     PLFS_EXIT(ret);
+}
+
+// returns 0 or - errno
+int 
+plfs_dump_readindex ( FILE *fp, const char *logical) {
+    PLFS_ENTER;
+    ReadIndex readIndex;
+    ostringstream oss;
+    ret = Container::populateReadIndex(path,&readIndex);
+    if ( ret == 0 ) {
+        oss << readIndex;
+        fprintf(fp,"%s",oss.str().c_str());
+    }
 }
 
 // should be called with a logical path and already_expanded false
@@ -830,11 +846,19 @@ ssize_t
 plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
     bool new_index_created = false;
     Index *index = pfd->getIndex(); 
+    ReadIndex *readIndex = pfd->getReadIndex();
     ssize_t ret = 0;
+    ReadTraceElement curReadInfo; 
 
     plfs_debug("Read request on %s at offset %ld for %ld bytes\n",
             pfd->getPath(),long(offset),long(size));
 
+    if( PLFS_READ_TRACE ) {
+        curReadInfo.size = size;
+        curReadInfo.offset = offset;
+        curReadInfo.begin_timestamp = Util::getTime();
+        curReadInfo.pid = pfd->getPid();
+    }
     // possible that we opened the file as O_RDWR
     // if so, we don't have a persistent index
     // build an index now, but destroy it after this IO
@@ -864,6 +888,10 @@ plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
                 __FUNCTION__, pfd->getPath() );
         delete( index );
         index = NULL;
+    }
+    if( PLFS_READ_TRACE ) {
+        curReadInfo.end_timestamp = Util::getTime();
+        readIndex->insertLocal(curReadInfo);
     }
     PLFS_EXIT(ret);
 }
@@ -1212,11 +1240,12 @@ int
 plfs_open(Plfs_fd **pfd,const char *logical,int flags,pid_t pid,mode_t mode, 
             Plfs_open_opt *open_opt) {
     PLFS_ENTER;
-    WriteFile *wf      = NULL;
-    Index     *index   = NULL;
-    bool new_writefile = false;
-    bool new_index     = false;
-    bool new_pfd       = false;
+    WriteFile *wf        = NULL;
+    Index     *index     = NULL;
+    ReadIndex *readIndex = NULL;
+    bool new_writefile   = false;
+    bool new_index       = false;
+    bool new_pfd         = false;
 
     /*
     if ( pid == 0 && open_opt && open_opt->pinter == PLFS_MPIIO ) { 
@@ -1307,11 +1336,13 @@ plfs_open(Plfs_fd **pfd,const char *logical,int flags,pid_t pid,mode_t mode,
             delete index;
             index = NULL;
         }
+        // If read tracing is on lets set it up
+        readIndex = new ReadIndex;
     }
 
     if ( ret == 0 && ! *pfd ) {
         // do we delete this on error?
-        *pfd = new Plfs_fd( wf, index, pid, mode, path.c_str() ); 
+        *pfd = new Plfs_fd( wf, index, pid, mode, path.c_str() , readIndex); 
         new_pfd       = true;
         // we create one open record for all the pids using a file
         // only create the open record for files opened for writing
@@ -1883,8 +1914,10 @@ plfs_close( Plfs_fd *pfd, pid_t pid, uid_t uid, int open_flags,
             Plfs_close_opt *close_opt ) 
 {
     int ret = 0;
-    WriteFile *wf    = pfd->getWritefile();
-    Index     *index = pfd->getIndex();
+    WriteFile *wf        = pfd->getWritefile();
+    Index     *index     = pfd->getIndex();
+    ReadIndex *readIndex = pfd->getReadIndex();
+
     size_t writers = 0, readers = 0, ref_count = 0;
 
     // be careful.  We might enter here when we have both writers and readers
@@ -1946,6 +1979,8 @@ plfs_close( Plfs_fd *pfd, pid_t pid, uid_t uid, int open_flags,
             pfd->setIndex(NULL);
         }
         ref_count = pfd->incrementOpens(-1);
+        if( PLFS_READ_TRACE ) {
+        }
     }
 
     

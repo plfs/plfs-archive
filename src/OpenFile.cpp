@@ -2,8 +2,8 @@
 #include "COPYRIGHT.h"
 #include <stdlib.h>
 
-Plfs_fd::Plfs_fd( WriteFile *wf, Index *i, pid_t pi, mode_t m, const char *p ) :
-        Metadata::Metadata() 
+Plfs_fd::Plfs_fd( WriteFile *wf, Index *i, pid_t pi, mode_t m, const char *p, 
+        ReadIndex *ri):Metadata::Metadata() 
 {
     struct timeval t;
     gettimeofday( &t, NULL );
@@ -13,6 +13,7 @@ Plfs_fd::Plfs_fd( WriteFile *wf, Index *i, pid_t pi, mode_t m, const char *p ) :
     this->path      = p;
     this->mode      = m;
     this->ctime     = t.tv_sec;
+    this->readIndex = ri;
 }
 
 // this should be in a mutex when it is called
@@ -30,6 +31,9 @@ Index *Plfs_fd::getIndex( ) {
     return this->index;
 }
 
+ReadIndex *Plfs_fd::getReadIndex( ) {
+    return this->readIndex;
+}
 pid_t Plfs_fd::getPid() {
     return pid;
 }

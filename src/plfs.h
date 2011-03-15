@@ -92,6 +92,8 @@ void plfs_debug( const char *format, ... );
 
 int plfs_dump_index( FILE *fp, const char *path, int compress );
 
+/* Read tracing */
+int plfs_dump_readindex ( FILE *fp , const char *path );
 // Bool sneaked in here
 int plfs_dump_config(int check_dirs);
 

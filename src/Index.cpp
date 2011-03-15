@@ -235,6 +235,59 @@ void Index::init( string logical ) {
     pthread_mutex_init( &fd_mux, NULL );
 }
 
+ostream& operator <<(ostream &os,const ReadTraceElement &entry) {
+    double begin_timestamp = 0, end_timestamp = 0;
+    begin_timestamp = entry.begin_timestamp;
+    end_timestamp  = entry.end_timestamp;
+    os  << setw(5) 
+        << entry.pid             << " w " 
+        << setw(16)
+        << entry.offset << " " 
+        << setw(8) << entry.size << " "
+        << setw(16) << fixed << setprecision(16) 
+        << begin_timestamp << " "
+        << setw(16) << fixed << setprecision(16) 
+        << end_timestamp   << " "
+        << setw(16)
+        << entry.offset + entry.size << " "
+        << " [" << entry.pid << "." << setw(10) << 0 << "]";
+    return os;
+}
+ostream& operator <<(ostream &os,const ReadIndex &ndx ) {
+    os << "# ReadIndex " << endl;
+    map<off_t,ReadTraceElement>::const_iterator itr;
+    os << "# ID Logical_offset Length Begin_timestamp End_timestamp "
+       << " Logical_tail ID.Chunk_offset " << endl;
+    for(itr = ndx.globalReadIndex.begin();itr != ndx.globalReadIndex.end();itr++){
+        os << itr->second << endl;
+    }
+    return os;
+}
+
+
+ReadIndex::ReadIndex (){
+}
+
+// Used on a read operation
+void ReadIndex::insertLocal( ReadTraceElement readInfo){
+    readTrace.push_back(readInfo);
+}
+
+// Used when we are aggregating reads from scattered read trace files
+int ReadIndex::insertGlobal( ReadTraceElement readInfo){
+    int ret = 0;
+    pair<map<off_t,ReadTraceElement>::iterator,bool> result;
+    result = globalReadIndex.insert(
+            pair<off_t,ReadTraceElement>( readInfo.offset, readInfo ) );
+    if( result.second == false ) ret = 1;
+
+    return ret;
+}
+
+int agReadIndex(){
+
+}
+
 Index::Index( string logical, int fd ) : Metadata::Metadata() {
     init( logical );
     this->fd = fd;

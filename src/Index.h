@@ -91,6 +91,27 @@ typedef struct {
     int fd;
 } ChunkFile;
 
+typedef struct {
+    size_t size;
+    off_t offset;
+    pid_t pid; // Could be moved into the ReadIndex
+    double begin_timestamp;
+    double end_timestamp;
+}ReadTraceElement;
+
+class ReadIndex {
+    public:
+    ReadIndex();
+    void insertLocal(ReadTraceElement readInfo);
+    int insertGlobal(ReadTraceElement readInfo);
+    int flush();
+    int aggReadIndex();
+    friend ostream& operator <<(ostream &,const ReadIndex &);
+    private:
+    vector<ReadTraceElement> readTrace;
+    map<off_t,ReadTraceElement> globalReadIndex;
+};
+
 class Index : public Metadata {
     public:
         Index( string ); 

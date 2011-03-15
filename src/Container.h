@@ -103,7 +103,9 @@ class Container {
 
         static int flattenIndex( const string &, Index * );
         static int populateIndex(const string &,Index *,bool use_cached_global);
+        static int populateReadIndex( const string &, ReadIndex *);
         static int aggregateIndices( const string &, Index * );
+        static int aggregateReadIndices (const string &, ReadIndex *);
         static int freeIndex( Index ** );
         static size_t hashValue( const char *str );
         static blkcnt_t bytesToBlocks( size_t total_bytes );
