@@ -37,15 +37,17 @@ void ADIOI_PLFS_WriteContig(ADIO_File fd, void *buf, int count,
 		      *error_code);   
 void ADIOI_PLFS_Fcntl(ADIO_File fd, int flag, ADIO_Fcntl_t *fcntl_struct, int
 		*error_code); 
-/*
+
 void ADIOI_PLFS_WriteStrided(ADIO_File fd, void *buf, int count,
 		       MPI_Datatype datatype, int file_ptr_type,
 		       ADIO_Offset offset, ADIO_Status *status, int
 		       *error_code);
+
 void ADIOI_PLFS_ReadStrided(ADIO_File fd, void *buf, int count,
 		       MPI_Datatype datatype, int file_ptr_type,
 		       ADIO_Offset offset, ADIO_Status *status, int
 		       *error_code);
+/*
 void ADIOI_PLFS_SetInfo(ADIO_File fd, MPI_Info users_info, int *error_code);
 */
 void ADIOI_PLFS_Flush(ADIO_File fd, int *error_code);
@@ -56,6 +58,7 @@ void ADIOI_PLFS_SetInfo(ADIO_File fd, MPI_Info users_info, int *error_code);
 int ad_plfs_amode( int access_mode );
 void malloc_check(void *test_me,int rank);
 void check_stream(int size,int rank);
+
 /* Check for hints passed from the command line
  * Current hints
  * plfs_enable_broadcast : Turn broadcast of index from root on

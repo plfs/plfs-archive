@@ -48,3 +48,41 @@ void ADIOI_PLFS_ReadContig(ADIO_File fd, void *buf, int count,
         *error_code = MPI_SUCCESS;
     }
 }
+
+void ADIOI_PLFS_ReadStrided(ADIO_File fd, void *buf, int count,
+                            MPI_Datatype datatype, int file_ptr_type,
+                            ADIO_Offset offset, ADIO_Status *status, 
+                            int *error_code){
+    
+    int err=-1, buftype_size,rank,filetype_size;
+    int buftype_is_contig,filetype_is_contig;
+
+    ADIO_Offset myoff;
+    long int bufsize;
+    static char myname[] = "ADIOI_PLFS_READCONTIG";
+
+    MPI_Comm_rank( fd->comm, &rank );
+    MPI_Type_size(datatype, &buftype_size);
+    
+    bufsize = buftype_size * count;
+    myoff = rank * bufsize;
+
+    // Lets figure out if the buffer and filetype are contiguous
+    ADIOI_Datatype_iscontig(datatype, &buftype_is_contig);
+    ADIOI_Datatype_iscontig(fd->filetype, &filetype_is_contig);
+
+    MPI_Type_size(fd->filetype, &filetype_size);
+    if ( ! filetype_size ) {
+        *error_code = MPI_SUCCESS;
+        return;
+    }
+
+    if (buftype_is_contig && !filetype_is_contig) {
+        /* contiguous in memory, noncontiguous in file. should be the most
+                                         common case. */
+            plfs_read( fd->fs_ptr,buf,bufsize,myoff);
+
+    }
+
+                    
+}
