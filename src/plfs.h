@@ -142,6 +142,8 @@ int plfs_query( Plfs_fd *, size_t *writers, size_t *readers );
 
 ssize_t plfs_read( Plfs_fd *, char *buf, size_t size, off_t offset );
 
+ssize_t plfs_readv( Plfs_fd *, char *, size_t *, off_t *,int);
+
 /* plfs_readdir
  * the void * needs to be a pointer to a vector<string> but void * is
  * used here so it compiles with C code
@@ -190,6 +192,7 @@ int plfs_file_version(const char *, char **);
 
 ssize_t plfs_write( Plfs_fd *, const char *, size_t, off_t, pid_t );
 
+ssize_t plfs_writev( Plfs_fd *, const char *, size_t *, off_t *, int , pid_t);
 double plfs_wtime();
 
 // parindex read functions

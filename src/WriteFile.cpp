@@ -206,6 +206,72 @@ int WriteFile::extend( off_t offset ) {
     return 0;
 }
 
+
+ssize_t WriteFile::writev(const char *buf, size_t *sizes, off_t *offsets,
+                            int count, pid_t pid)
+{
+    int ret = 0, iter; 
+    ssize_t written;
+    size_t buf_size=0;
+    OpenFd *ofd = getFd( pid );
+    if ( ofd == NULL ) {
+        // we used to return -ENOENT here but we can get here legitimately 
+        // when a parent opens a file and a child writes to it.
+        // so when we get here, we need to add a child datafile
+        ret = addWriter( pid, true );
+        if ( ret > 0 ) {
+            // however, this screws up the reference count
+            // it looks like a new writer but it's multiple writers
+            // sharing an fd ...
+            ofd = getFd( pid );
+        }
+    }
+    // Calculate the size of the buffer
+    for(iter=0;iter<count;iter++){
+        buf_size += sizes[iter]; 
+    }
+
+    if ( ofd && ret >= 0 ) {
+        int fd = ofd->fd;
+        // write the data file
+        double begin, end;
+        
+
+        begin = Util::getTime();
+        ret = written = ( buf_size ? Util::Write( fd, buf, buf_size ) : 0 );
+        end = Util::getTime();
+
+        // then the index
+        if ( ret >= 0 ) {
+            Util::MutexLock(   &index_mux , __FUNCTION__);
+            for(iter=0;iter<count;iter++){
+                index->addWrite( offsets[iter], sizes[iter], pid, begin, end );
+            }
+            // TODO: why is 1024 a magic number?
+            if (write_count%1024==0 && write_count>0) {
+                ret = index->flush();
+                // Check if the index has grown too large stop buffering
+                if(index->memoryFootprintMBs() > index_buffer_mbs) {
+                    index->stopBuffering();
+                    plfs_debug("The index grew too large, no longer buffering");
+                }
+            }
+            if (ret >= 0) {
+                for(iter=0;iter<count;iter++){
+                    addWrite(offsets[iter], sizes[iter]); // track our own metadata
+                }
+            }
+            Util::MutexUnlock( &index_mux, __FUNCTION__ );
+        }
+    }
+    write_count++;
+    // return bytes written or error
+    return ( ret >= 0 ? written : -errno );
+
+
+    return 0;
+}
+
 // we are currently doing synchronous index writing.
 // this is where to change it to buffer if you'd like
 // We were thinking about keeping the buffer around the

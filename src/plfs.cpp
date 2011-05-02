@@ -1048,6 +1048,53 @@ plfs_reader(Plfs_fd *pfd, char *buf, size_t size, off_t offset, Index *index){
     return( error < 0 ? error : total );
 }
 
+ssize_t
+plfs_readv( Plfs_fd *pfd,char *buf, size_t *sizes, off_t *offsets,int count){
+
+    bool new_index_created = false;
+    Index *index = pfd->getIndex(); 
+    ssize_t ret = 0;
+
+    plfs_debug("Readv request on %s\n",pfd->getPath());
+
+    // possible that we opened the file as O_RDWR
+    // if so, we don't have a persistent index
+    // build an index now, but destroy it after this IO
+    // so that new writes are re-indexed for new reads
+    // basically O_RDWR is possible but it can reduce read BW
+    if ( index == NULL ) {
+        index = new Index( pfd->getPath() );
+        if ( index ) {
+            new_index_created = true;
+            ret = Container::populateIndex(pfd->getPath(),index,false);
+        } else {
+            ret = -EIO;
+        }
+    }
+
+    if ( ret == 0 ) {
+        int iter;
+        // Loop over all the requests filling up the buffer
+        for(iter=0;iter<count;iter++){
+            if(ret >= 0) {
+                // Advance the pointer
+                buf += ret;
+                ret = plfs_reader(pfd,buf,sizes[iter],offsets[iter],index);
+            }
+        }
+    }
+
+    plfs_debug("Read requestv on %s\n",pfd->getPath());
+
+    if ( new_index_created ) {
+        plfs_debug("%s removing freshly created index for %s\n",
+                __FUNCTION__, pfd->getPath() );
+        delete( index );
+        index = NULL;
+    }
+    PLFS_EXIT(ret);
+}
+
 // returns -errno or bytes read
 ssize_t 
 plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
@@ -1647,6 +1694,18 @@ plfs_rename( const char *logical, const char *to ) {
         ret = Container::Utime( topath, NULL );
     }
     PLFS_EXIT(ret);
+}
+
+ssize_t 
+plfs_writev(Plfs_fd *pfd, const char *buf, size_t * sizes, 
+                off_t* offsets, int count, pid_t pid){
+    int ret = 0, iter; ssize_t written;
+    WriteFile *wf = pfd->getWritefile();
+
+    plfs_debug("Writev to %s\n",pfd->getPath());
+    ret = written = wf->writev(buf, sizes, offsets, count, pid);
+    ret = 0;
+    PLFS_EXIT( ret >= 0 ? written : ret );
 }
 
 ssize_t 

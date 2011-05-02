@@ -42,6 +42,7 @@ class WriteFile : public Metadata {
 
         ssize_t write( const char*, size_t, off_t, pid_t );
 
+        ssize_t writev( const char*, size_t *, off_t *, int, pid_t);
         int sync( pid_t pid );
 
         void       setPath( string path ); 

@@ -64,7 +64,7 @@ void ADIOI_PLFS_WriteStrided(ADIO_File fd, void *buf, int count,
        as on Unix */
 
     ADIOI_Flatlist_node *flat_buf, *flat_file;
-    int i, j, k, bwr_size, fwr_size=0, st_index=0;
+    int i, j, k, rank, bwr_size, fwr_size=0, st_index=0;
     int bufsize, sum, n_etypes_in_filetype, size_in_filetype;
     int n_filetypes, etype_in_filetype;
     ADIO_Offset abs_off_in_filetype=0;
@@ -78,7 +78,7 @@ void ADIOI_PLFS_WriteStrided(ADIO_File fd, void *buf, int count,
     int mem_list_count, file_list_count;
     int64_t *file_offsets;
     int *mem_lengths;
-    int32_t *file_lengths;
+    int64_t *file_lengths;
     int total_blks_to_write;
 
     int64_t *mem_offsets;
@@ -97,6 +97,7 @@ void ADIOI_PLFS_WriteStrided(ADIO_File fd, void *buf, int count,
     /* note: don't increase this: several parts of PVFS2 now 
      * assume this limit*/
 #define MAX_ARRAY_SIZE 64
+    MPI_Comm_rank( fd->comm, &rank );
 
     /* --BEGIN ERROR HANDLING-- */
     if (fd->atomicity) {
@@ -135,13 +136,12 @@ void ADIOI_PLFS_WriteStrided(ADIO_File fd, void *buf, int count,
     
     bufsize = buftype_size * count;
 
-    pvfs_fs = (ADIOI_PVFS2_fs*)fd->fs_ptr;
 
     if (!buftype_is_contig && filetype_is_contig) {
 
 /* noncontiguous in memory, contiguous in file.  */
     int64_t file_offsets;
-	int32_t file_lengths;
+	int64_t file_lengths;
 
 	ADIOI_Flatten_datatype(datatype);
 	flat_buf = ADIOI_Flatlist;
@@ -188,23 +188,10 @@ void ADIOI_PLFS_WriteStrided(ADIO_File fd, void *buf, int count,
 			/* in case last write list call fills max arrays */
 			if (!mem_list_count) mem_list_count = MAX_ARRAY_SIZE;
 		    }
-		    		    total_bytes_written += resp_io.total_completed;
 		   
-            err_flag = plfs_writev(mem_offsets,file_lengths,
-                                   file_offsets,file_list_count);
-            /* in the case of error or the last write list call, 
-		     * leave here */
-		    /* --BEGIN ERROR HANDLING-- */
-		    if (err_flag) {
-			*error_code = MPIO_Err_create_code(MPI_SUCCESS,
-							   MPIR_ERR_RECOVERABLE,
-							   myname, __LINE__,
-							   ADIOI_PVFS2_error_convert(err_flag),
-							   "Error in PVFS_sys_write", 0);
-			break;
-		    }
-		    /* --END ERROR HANDLING-- */
-		    if (b_blks_wrote == total_blks_to_write) break;
+            err_flag = plfs_writev(fd->fs_ptr,(const char *)mem_offsets,
+                    (off_t *)&file_lengths,&file_offsets,file_list_count,rank);
+            
 
 		    file_offsets += file_lengths;
 		    file_lengths = 0;
@@ -338,16 +325,16 @@ void ADIOI_PLFS_WriteStrided(ADIO_File fd, void *buf, int count,
 	if (n_write_lists) {
 	    file_offsets = (int64_t*)ADIOI_Malloc(MAX_ARRAY_SIZE*
 						  sizeof(int64_t));
-	    file_lengths = (int32_t*)ADIOI_Malloc(MAX_ARRAY_SIZE*
-						  sizeof(int32_t));
+	    file_lengths = (int64_t*)ADIOI_Malloc(MAX_ARRAY_SIZE*
+						  sizeof(int64_t));
 	}
 	/* if there's no full writelist allocate file arrays according
 	   to needed size (extra_blks) */
 	else {
 	    file_offsets = (int64_t*)ADIOI_Malloc(extra_blks*
                                                   sizeof(int64_t));
-            file_lengths = (int32_t*)ADIOI_Malloc(extra_blks*
-                                                  sizeof(int32_t));
+            file_lengths = (int64_t*)ADIOI_Malloc(extra_blks*
+                                                  sizeof(int64_t));
         }
         
         /* for file arrays that are of MAX_ARRAY_SIZE, build arrays */
@@ -373,21 +360,13 @@ void ADIOI_PLFS_WriteStrided(ADIO_File fd, void *buf, int count,
                 }
             } /* for (k=0; k<MAX_ARRAY_SIZE; k++) */
 
-	    	    
-            err_flag = plfs_writev(mem_offsets,file_lengths,
-                            file_offsets,file_list_count);
+            
+            err_flag = plfs_writev(fd->fs_ptr,(const char *)mem_offsets,
+                    (size_t *)file_lengths,(off_t *)file_offsets,
+                    file_list_count,rank);
+            
             /* --BEGIN ERROR HANDLING-- */
-        if (err_flag != 0) {
-		*error_code = MPIO_Err_create_code(MPI_SUCCESS,
-						   MPIR_ERR_RECOVERABLE,
-						   myname, __LINE__,
-						   ADIOI_PVFS2_error_convert(err_flag),
-						   "Error in PVFS_sys_write", 0);
-		goto error_state;
-	    }
-	    /* --END ERROR HANDLING-- */
-	    total_bytes_written += resp_io.total_completed;
-
+        
         mem_offsets += mem_lengths;
         mem_lengths = 0;
 
@@ -419,20 +398,10 @@ void ADIOI_PLFS_WriteStrided(ADIO_File fd, void *buf, int count,
                 }
             } /* for (k=0; k<extra_blks; k++) */
 
-            err_flag = plfs_writev(mem_offsets,file_lengths,
-                            file_offsets,file_list_count);
+            err_flag = plfs_writev(fd->fs_ptr,(const char *)mem_offsets,
+                    (size_t *)file_lengths,(off_t *)file_offsets,
+                    file_list_count,rank);
 	    
-        /* --BEGIN ERROR HANDLING-- */
-	    if (err_flag != 0) {
-		*error_code = MPIO_Err_create_code(MPI_SUCCESS,
-						   MPIR_ERR_RECOVERABLE,
-						   myname, __LINE__,
-						   ADIOI_PVFS2_error_convert(err_flag),
-						   "Error in PVFS_sys_write", 0);
-		goto error_state;
-	    }
-	    /* --END ERROR HANDLING-- */
-	    total_bytes_written += resp_io.total_completed;
         }
     } 
     else {
@@ -629,7 +598,7 @@ void ADIOI_PLFS_WriteStrided(ADIO_File fd, void *buf, int count,
 	mem_offsets = (int64_t*)ADIOI_Malloc(max_mem_list*sizeof(int64_t));
 	mem_lengths = (int *)ADIOI_Malloc(max_mem_list*sizeof(int));
 	file_offsets = (int64_t *)ADIOI_Malloc(max_file_list*sizeof(int64_t));
-	file_lengths = (int32_t *)ADIOI_Malloc(max_file_list*sizeof(int32_t));
+	file_lengths = (int64_t *)ADIOI_Malloc(max_file_list*sizeof(int32_t));
 	    
 	size_wrote = 0;
 	n_filetypes = st_n_filetypes;
@@ -800,19 +769,8 @@ void ADIOI_PLFS_WriteStrided(ADIO_File fd, void *buf, int count,
 		}
 	    } /* for (i=0; i<file_list_count; i++) */
 
-	    	    /* --BEGIN ERROR HANDLING-- */
-	    if (err_flag != 0) {
-		*error_code = MPIO_Err_create_code(MPI_SUCCESS,
-						   MPIR_ERR_RECOVERABLE,
-						   myname, __LINE__,
-						   ADIOI_PVFS2_error_convert(err_flag),
-						   "Error in PVFS_sys_write", 0);
-		goto error_state;
-	    }
-	    /* --END ERROR HANDLING-- */
 
 	    size_wrote += new_buffer_write;
-	    total_bytes_written += resp_io.total_completed;
 	    start_k = k;
 	    start_j = j;
 	} /* while (size_wrote < bufsize) */
