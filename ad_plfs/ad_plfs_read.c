@@ -49,6 +49,10 @@ void ADIOI_PLFS_ReadContig(ADIO_File fd, void *buf, int count,
     }
 }
 
+/* Thank you PVFS2, allows us to set up strided read for contiguous/non 
+ *  files/memory regions. For more information take a look at plfs_readv
+ */
+
 void ADIOI_PLFS_ReadStrided(ADIO_File fd, void *buf, int count,
                             MPI_Datatype datatype, int file_ptr_type,
                             ADIO_Offset offset, ADIO_Status *status, 

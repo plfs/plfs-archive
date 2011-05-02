@@ -49,8 +49,9 @@ void ADIOI_PLFS_WriteContig(ADIO_File fd, void *buf, int count,
     }
 }
 
-// Borrows heavily from ADIOI_PVFS2_WriteStrided
-// Allows us to write a simple plfs_writev function 
+/* Borrows heavily from ADIOI_PVFS2_WriteStrided
+ * Allows us to write a simple plfs_writev function
+ * see plfs_writev for more information */
 void ADIOI_PLFS_WriteStrided(ADIO_File fd, void *buf, int count,
                               MPI_Datatype datatype, int file_ptr_type,
                               ADIO_Offset offset, ADIO_Status *status,
@@ -62,6 +63,9 @@ void ADIOI_PLFS_WriteStrided(ADIO_File fd, void *buf, int count,
 
     /* Since PVFS2 does not support file locking, can't do buffered writes
        as on Unix */
+    /* PLFS is able to write the array of writes into one region because of 
+     * of the log structure. The index still has to contain all of the offsets
+     * so our index will be the same size */
 
     ADIOI_Flatlist_node *flat_buf, *flat_file;
     int i, j, k, rank, bwr_size, fwr_size=0, st_index=0;
@@ -94,8 +98,8 @@ void ADIOI_PLFS_WriteStrided(ADIO_File fd, void *buf, int count,
     MPI_Offset total_bytes_written=0;
     static char myname[] = "ADIOI_PLFS_WRITESTRIDED";
 
-    /* note: don't increase this: several parts of PVFS2 now 
-     * assume this limit*/
+    /* note: we may increase this: limit borrowed from PVFS2 
+     * PLFS code does not assume this limit */
 #define MAX_ARRAY_SIZE 64
     MPI_Comm_rank( fd->comm, &rank );
 
@@ -170,9 +174,6 @@ void ADIOI_PLFS_WriteStrided(ADIO_File fd, void *buf, int count,
 	while (b_blks_wrote < total_blks_to_write) {
 	    for (i=0; i<flat_buf->count; i++) {
 		mem_offsets[b_blks_wrote % MAX_ARRAY_SIZE] = 
-		    /* TODO: fix this warning by casting to an integer that's
-		     * the same size as a char * and /then/ casting to
-		     * PVFS_size */
 		    ((int64_t)buf + j*buftype_extent + flat_buf->indices[i]);
 		mem_lengths[b_blks_wrote % MAX_ARRAY_SIZE] = 
 		    flat_buf->blocklens[i];

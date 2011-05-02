@@ -1048,6 +1048,9 @@ plfs_reader(Plfs_fd *pfd, char *buf, size_t size, off_t offset, Index *index){
     return( error < 0 ? error : total );
 }
 
+// Implements listIO read, very similar to plfs_read. Just need to fill up the 
+// buffer with all of the requested offsets and their corresponding 
+// requested amount of data. 
 ssize_t
 plfs_readv( Plfs_fd *pfd,char *buf, size_t *sizes, off_t *offsets,int count){
 
@@ -1696,6 +1699,7 @@ plfs_rename( const char *logical, const char *to ) {
     PLFS_EXIT(ret);
 }
 
+// ListIO write, basically a wrapper to the Writefile writev
 ssize_t 
 plfs_writev(Plfs_fd *pfd, const char *buf, size_t * sizes, 
                 off_t* offsets, int count, pid_t pid){

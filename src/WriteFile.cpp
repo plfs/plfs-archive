@@ -207,6 +207,8 @@ int WriteFile::extend( off_t offset ) {
 }
 
 
+// Actually performs the contiguous write to the data file, then 
+// writes all of the offsets
 ssize_t WriteFile::writev(const char *buf, size_t *sizes, off_t *offsets,
                             int count, pid_t pid)
 {
@@ -238,14 +240,18 @@ ssize_t WriteFile::writev(const char *buf, size_t *sizes, off_t *offsets,
         
 
         begin = Util::getTime();
+        // We just write all of the data into the log file
         ret = written = ( buf_size ? Util::Write( fd, buf, buf_size ) : 0 );
         end = Util::getTime();
 
         // then the index
         if ( ret >= 0 ) {
             Util::MutexLock(   &index_mux , __FUNCTION__);
+            // Need to iterate over the list of writes and place each offset 
+            // into the index
             for(iter=0;iter<count;iter++){
                 index->addWrite( offsets[iter], sizes[iter], pid, begin, end );
+                write_count++;
             }
             // TODO: why is 1024 a magic number?
             if (write_count%1024==0 && write_count>0) {
@@ -264,7 +270,6 @@ ssize_t WriteFile::writev(const char *buf, size_t *sizes, off_t *offsets,
             Util::MutexUnlock( &index_mux, __FUNCTION__ );
         }
     }
-    write_count++;
     // return bytes written or error
     return ( ret >= 0 ? written : -errno );
 
