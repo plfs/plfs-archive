@@ -471,12 +471,15 @@ struct dirent *HDFSIOStore::Readdir(DIR *dirp)
     //std::cout << "Processing entry.\n";
     // Fill in the struct dirent curEntry field.
     dir->curEntry.d_ino = 0; // No inodes in HDFS.
-    // I'm not sure how offset is used in this context. Technically
-    // only d_name is required in non-Linux deployments.
-    dir->curEntry.d_off = 0;
-    dir->curEntry.d_reclen = sizeof(struct dirent);
+	dir->curEntry.d_reclen = sizeof(struct dirent);
     dir->curEntry.d_type = (dir->infos[dir->curEntryNum].mKind == kObjectKindFile
                             ? DT_REG : DT_DIR);
+
+	// I'm not sure how offset is used in this context. Technically
+    // only d_name is required in non-Linux deployments.
+#ifdef __linux__
+    dir->curEntry.d_off = 0;
+#endif
 
     lastComponent = strrchr(dir->infos[dir->curEntryNum].mName, '/');
     if (!lastComponent) { 
@@ -504,11 +507,12 @@ int HDFSIOStore::Rename(const char *oldpath, const char *newpath)
 }
 
 /**
- * Rmdir. HDFS doesn't distinguish between deleting a file and a directory.
+ * Rmdir. Previously HDFS didn't distinguish between deleting a file and a directory.
+ * In 0.21, we do.
  */
 int HDFSIOStore::Rmdir(const char* path)
 {
-    return hdfsDelete(fs, path);
+    return hdfsDelete(fs, path, 1);
 }
 /**
  * Stat. This one is mostly a matter of datat structure conversion to keep everything
@@ -570,7 +574,7 @@ int HDFSIOStore::Stat(const char* path, struct stat* buf)
  * Statvfs. This one we actually could fill in, but I have not yet done so, as PLFS's
  * logic doesn't depend on it.
  */
-int HFDFSIOStore::Statvfs( const char *path, struct statvfs* stbuf )
+int HDFSIOStore::Statvfs( const char *path, struct statvfs* stbuf )
 {
 	errno = EIO; // This seems the most appropriate, although EACCES is arguable.
 	return -1;
@@ -643,7 +647,7 @@ int HDFSIOStore::Truncate(const char* path, off_t length)
  */
 int HDFSIOStore::Unlink(const char* path)
 {
-    return hdfsDelete(fs, path);
+    return hdfsDelete(fs, path, 1);
 }
 
 /**

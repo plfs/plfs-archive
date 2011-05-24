@@ -30,7 +30,7 @@
 #include <iostream>
 #include <sstream>
 #include <map>
-
+#include "IOStore.h"
 using namespace std;
 
 #ifndef MAP_NOCACHE
