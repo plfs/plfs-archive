@@ -1234,6 +1234,7 @@ plfs_init(PlfsConf *pconf) {
     // Set up our ioStore. This should eventually be based upon the configuration
 	// file's parameters.
 	plfs_posix_init();
+	plfs_debug("posix IO Store inited.\n");
 	map<string,PlfsMount*>::iterator itr = pconf->mnt_pts.begin();
     if (itr==pconf->mnt_pts.end()) return false;
     ExpansionInfo exp_info;
