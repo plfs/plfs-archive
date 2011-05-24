@@ -21,28 +21,28 @@ ${TOP}:
 
 ${BIN}/m4: 
 	${BEGIN}; \
-	wget http://ftp.gnu.org/gnu/m4/m4-${MVERS}.tar.bz2; \
+	curl -O http://ftp.gnu.org/gnu/m4/m4-${MVERS}.tar.bz2; \
 	tar xvfj m4-${MVERS}.tar.bz2; \
 	cd m4-${MVERS}; \
 	${FINI}
 
 ${BIN}/autoconf: 
 	${BEGIN}; \
-	wget http://ftp.gnu.org/gnu/autoconf/autoconf-${ACVERS}.tar.bz2; \
+	curl -O http://ftp.gnu.org/gnu/autoconf/autoconf-${ACVERS}.tar.bz2; \
 	tar xvfj autoconf-${ACVERS}.tar.bz2; \
 	cd autoconf-${ACVERS}; \
 	${FINI}
 
 ${BIN}/automake: 
 	${BEGIN}; \
-	wget http://ftp.gnu.org/gnu/automake/automake-${AMVERS}.tar.bz2; \
+	curl -O http://ftp.gnu.org/gnu/automake/automake-${AMVERS}.tar.bz2; \
 	tar xvfj automake-${AMVERS}.tar.bz2; \
 	cd automake-${AMVERS}; \
 	${FINI}
 
 ${BIN}/libtool: 
 	${BEGIN}; \
-	wget http://ftp.gnu.org/gnu/libtool/libtool-${LVERS}.tar.gz; \
+	curl -O http://ftp.gnu.org/gnu/libtool/libtool-${LVERS}.tar.gz; \
 	tar xvfz libtool-${LVERS}.tar.gz; \
 	cd libtool-${LVERS}; \
 	${FINI}

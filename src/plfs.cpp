@@ -7,6 +7,9 @@
 #include "OpenFile.h"
 #include "ThreadPool.h"
 #include "FileOp.h"
+#include "hdfs.h"
+#include "PosixIOStore.h"
+#include "HDFSIOStore.h"
 
 #include <errno.h>
 #include <list>
@@ -277,6 +280,15 @@ plfs_check_dir(string type, string dir,int previous_ret) {
         return previous_ret;
     }
 }
+
+void plfs_posix_init() {
+    Util::ioStore = new PosixIOStore;
+}
+
+void plfs_hdfs_init(const char* host, int port) {
+    Util::ioStore = new HDFSIOStore(host, port);
+}
+
 
 int
 plfs_dump_index_size() {
@@ -1219,7 +1231,10 @@ plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
 
 bool
 plfs_init(PlfsConf *pconf) { 
-    map<string,PlfsMount*>::iterator itr = pconf->mnt_pts.begin();
+    // Set up our ioStore. This should eventually be based upon the configuration
+	// file's parameters.
+	plfs_posix_init();
+	map<string,PlfsMount*>::iterator itr = pconf->mnt_pts.begin();
     if (itr==pconf->mnt_pts.end()) return false;
     ExpansionInfo exp_info;
     expandPath(itr->first,&exp_info,HASH_BY_FILENAME,-1,0);

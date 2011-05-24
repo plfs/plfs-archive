@@ -64,6 +64,9 @@ OpenFile.h \
 plfs_private.h \
 ThreadPool.h \
 WriteFile.h \
+HDFSIOStore.h \
+IOStore.h \
+PosixIOStore.h \
 $(include_HEADERS) \
 $(dist_pkginclude_HEADERS)
 
@@ -76,6 +79,7 @@ LogMessage.cpp \
 OpenFile.cpp \
 ThreadPool.cpp \
 WriteFile.cpp \
+HDFSIOStore.cpp \
 plfs.cpp
 
 libplfs_la_SOURCES = \

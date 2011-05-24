@@ -6,6 +6,7 @@
 #endif
 
 #include "COPYRIGHT.h"
+#include "IOStore.h"
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -60,7 +61,6 @@ class Util {
         static int Fsync( int );
         static uid_t Getuid();
         static gid_t Getgid();
-        static int Link(const char*,const char*);
         static int Lseek( int fildes, off_t offset, int whence, off_t *result );
         static int Lstat( const char*, struct stat * );
         static int Mkdir( const char*, mode_t );
@@ -106,6 +106,8 @@ class Util {
         static void addTime( string, double, bool );
         static char *hostname();
         static int retValue( int res );
+		// Used to access underlying filesystems
+		static IOStore* ioStore;
     private:
         static void addBytes( string, size_t );
         static string timeToString(      HASH_MAP<string,double>::iterator,

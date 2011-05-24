@@ -285,32 +285,32 @@ void Util::addTime( string function, double elapsed, bool error ) {
 
 int Util::Utime( const char *path, const struct utimbuf *buf ) {
     ENTER_PATH;
-    ret = utime( path, buf );
+    ret = ioStore->Utime( path, buf );
     EXIT_UTIL;
 }
 
 int Util::Unlink( const char *path ) {
     ENTER_PATH;
-    ret = unlink( path );
+    ret = ioStore->Unlink( path );
     EXIT_UTIL;
 }
 
 
 int Util::Access( const char *path, int mode ) {
     ENTER_PATH;
-    ret = access( path, mode );
+    ret = ioStore->Access( path, mode );
     EXIT_UTIL;
 }
 
 int Util::Mknod( const char *path, mode_t mode, dev_t dev ) {
     ENTER_PATH;
-    ret = mknod( path, mode, dev );
+    ret = ioStore->Mknod( path, mode, dev );
     EXIT_UTIL;
 }
 
 int Util::Truncate( const char *path, off_t length ) {
     ENTER_PATH;
-    ret = truncate( path, length ); 
+    ret = ioStore->Truncate( path, length ); 
     EXIT_UTIL;
 }
 
@@ -337,73 +337,67 @@ int Util::MutexUnlock( pthread_mutex_t *mux, const char *where ) {
 
 ssize_t Util::Pread( int fd, void *buf, size_t size, off_t off ) {
     ENTER_IO;
-    ret = pread( fd, buf, size, off );
+    ret = ioStore->Pread( fd, buf, size, off );
     EXIT_IO;
 }
 
 ssize_t Util::Pwrite( int fd, const void *buf, size_t size, off_t off ) {
     ENTER_IO;
-    ret = pwrite( fd, buf, size, off );
+    ret = ioStore->Pwrite( fd, buf, size, off );
     EXIT_IO;
 }
 
 int Util::Rmdir( const char *path ) {
     ENTER_PATH;
-    ret = rmdir( path );
+    ret = ioStore->Rmdir( path );
     EXIT_UTIL;
 }
 
 int Util::Lstat( const char *path, struct stat *st ) {
     ENTER_PATH;
-    ret = lstat( path, st );
+    ret = ioStore->Lstat( path, st );
     EXIT_UTIL;
 }
 
 int Util::Rename( const char *path, const char *to ) {
     ENTER_PATH;
-    ret = rename( path, to );
+    ret = ioStore->Rename( path, to );
     EXIT_UTIL;
 }
         
 ssize_t Util::Readlink(const char*link, char *buf, size_t bufsize) {
     ENTER_IO;
-    ret = readlink(link,buf,bufsize);
-    EXIT_UTIL;
-}
-
-int Util::Link( const char *path, const char *to ) {
-    ENTER_PATH;
-    ret = link( path, to );
+    ret = ioStore->Readlink(link,buf,bufsize);
     EXIT_UTIL;
 }
 
 int Util::Symlink( const char *path, const char *to ) {
     ENTER_PATH;
-    ret = symlink( path, to );
+    ret = ioStore->Symlink( path, to );
     EXIT_UTIL;
 }
 
 ssize_t Util::Read( int fd, void *buf, size_t size) {
     ENTER_IO;
-    ret = read( fd, buf, size ); 
+    ret = ioStore->Read( fd, buf, size ); 
     EXIT_IO;
 }
 
 ssize_t Util::Write( int fd, const void *buf, size_t size) {
     ENTER_IO;
-    ret = write( fd, buf, size ); 
+    ret = ioStore->Write( fd, buf, size ); 
     EXIT_IO;
 }
 
 int Util::Close( int fd ) {
     ENTER_UTIL;
-    ret = close( fd ); 
+    ret = ioStore->Close( fd ); 
     EXIT_UTIL;
 }
 
 int Util::Creat( const char *path, mode_t mode ) {
     ENTER_PATH;
-    ret = creat( path, mode );
+    ret = ioStore->Creat( path, mode );
     if ( ret > 0 ) {
         ret = close( ret );
     }
@@ -413,7 +407,7 @@ int Util::Creat( const char *path, mode_t mode ) {
 
 int Util::Statvfs( const char *path, struct statvfs* stbuf ) {
     ENTER_PATH;
-    ret = statvfs(path,stbuf);
+    ret = ioStore->Statvfs(path,stbuf);
     EXIT_UTIL;
 }
 
@@ -427,7 +421,7 @@ int Util::Readdir(DIR *dir, struct dirent **de) {
     ENTER_UTIL;
     errno = 0;
     *de = NULL;
-    *de = readdir(dir);
+    *de = ioStore->Readdir(dir);
     if (*de) ret = 0;
     else if (errno == 0) ret = 1;
     else ret = -errno;
@@ -438,20 +432,20 @@ int Util::Readdir(DIR *dir, struct dirent **de) {
 // returns 0 or -errno
 int Util::Opendir( const char *path, DIR **dp ) {
     ENTER_PATH;
-    *dp = opendir( path );
+    *dp = ioStore->Opendir( path );
     ret = ( *dp == NULL ? -errno : 0 );
     EXIT_UTIL;
 }
 
 int Util::Closedir( DIR *dp ) {
     ENTER_UTIL;
-    ret = closedir( dp );
+    ret = ioStore->Closedir( dp );
     EXIT_UTIL;
 }
 
 int Util::Munmap(void *addr,size_t len) {
     ENTER_UTIL;
-    ret = munmap(addr,len);
+    ret = ioStore->Munmap(addr,len);
     EXIT_UTIL;
 }
 
@@ -459,27 +453,27 @@ int Util::Mmap( size_t len, int fildes, void **retaddr) {
     ENTER_UTIL;
     int prot  = PROT_READ;
     int flags = MAP_PRIVATE|MAP_NOCACHE;
-    *retaddr = mmap( NULL, len, prot, flags, fildes, 0 );
+    *retaddr = ioStore->Mmap( NULL, len, prot, flags, fildes, 0 );
     ret = ( *retaddr == (void*)NULL || *retaddr == (void*)-1 ? -1 : 0 );
     EXIT_UTIL;
 }
 
 int Util::Lseek( int fildes, off_t offset, int whence, off_t *result ) {
     ENTER_UTIL;
-    *result = lseek( fildes, offset, whence );
+    *result = ioStore->Lseek( fildes, offset, whence );
     ret = (int)*result;
     EXIT_UTIL;
 }
 
 int Util::Open( const char *path, int flags ) {
     ENTER_PATH;
-    ret = open( path, flags ); 
+    ret = ioStore->Open( path, flags ); 
     EXIT_UTIL;
 }
 
 int Util::Open( const char *path, int flags, mode_t mode ) {
     ENTER_PATH;
-    ret = open( path, flags, mode ); 
+    ret = ioStore->Open( path, flags, mode ); 
     EXIT_UTIL;
 }
 
@@ -511,25 +505,25 @@ bool Util::isDirectory( const char *path ) {
 
 int Util::Chown( const char *path, uid_t uid, gid_t gid ) {
     ENTER_PATH;
-    ret = chown( path, uid, gid );
+    ret = ioStore->Chown( path, uid, gid );
     EXIT_UTIL;
 }
 
 int Util::Chmod( const char *path, int flags ) {
     ENTER_PATH;
-    ret = chmod( path, flags );
+    ret = ioStore->Chmod( path, flags );
     EXIT_UTIL;
 }
 
 int Util::Mkdir( const char *path, mode_t mode ) {
     ENTER_PATH;
-    ret = mkdir( path, mode );
+    ret = ioStore->Mkdir( path, mode );
     EXIT_UTIL;
 }
 
 int Util::Fsync( int fd) {
     ENTER_UTIL;
-    ret = fsync( fd ); 
+    ret = ioStore->Fsync( fd ); 
     EXIT_UTIL;
 }
 
@@ -719,5 +713,5 @@ char *Util::hostname() {
 }
 
 int Util::Stat(const char *path, struct stat * file_info) {
-    return stat( path , file_info );
+    return ioStore->Stat( path , file_info );
 }  

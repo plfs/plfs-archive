@@ -1,3 +1,4 @@
+#include <assert.h>
 #include "FileOp.h"
 #include "Util.h"
 #include "Container.h"

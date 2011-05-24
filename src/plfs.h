@@ -38,6 +38,7 @@ typedef struct{
     size_t num_procs;
 } Plfs_close_opt;
 
+
 /*
    All PLFS function declarations in this file are in alphabetical order.
    Please retain this as edits are made.
@@ -72,6 +73,8 @@ typedef struct{
     no: it is a symbolic link
     etc.
 */
+
+
 int is_plfs_file( const char *path, mode_t * );
 
 int plfs_access( const char *path, int mask );

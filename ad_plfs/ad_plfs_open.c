@@ -449,7 +449,8 @@ int par_index_read(ADIO_File fd,Plfs_fd **pfd,int *error_code,int perm,
 
     // Every other rank can figures this out using num_host_dir
     int ranks_per_comm=0;
-    // Only used is ranks per comm equals zero
+    // Only used if ranks per comm equals zero, 
+    // i.e. if we have more hostdirs than ranks.
     int hostdir_per_rank=0;
     char * filename;
 

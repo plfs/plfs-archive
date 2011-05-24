@@ -27,6 +27,8 @@ bucketSizes = [] # How many writes were in this bucket.
 chunkMapStopPattern = re.compile("^# ID Logical_offset Length Begin_timestamp End_timestamp  Logical_tail ID\.Chunk_offset")
 entryCountPattern = re.compile("^# Entry Count: (.*)$")
 
+
+
 def slurpChunkMap(f):
 	"""We don't care about anything prior to the actual index entries,"""
 	"""except possibly an entry count. This function goes through stdin"""
