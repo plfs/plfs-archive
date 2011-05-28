@@ -887,10 +887,9 @@ string Container::getOpenHostsDir( const string &path ) {
 // now the open hosts file has a pid in it so we need to separate this out
 int Container::discoverOpenHosts( DIR *openhostsdir, set<string> *openhosts ) {
     struct dirent *dent = NULL;
-    // TODO: Check these returns.
-    Util::Readdir(openhostsdir, &dent);
-    while( dent != NULL ) {
+    while( (dent = Util::Readdir(openhostsdir)) != NULL ) {
         string host;
+        plfs_debug("Entry: %s\n", dent->d_name);
         if ( ! strncmp( dent->d_name, ".", 1 ) ) continue;  // skip . and ..
         // also skip anything that isn't an opendropping
         if ( strncmp( dent->d_name, OPENPREFIX, strlen(OPENPREFIX))) continue;
@@ -899,7 +898,6 @@ int Container::discoverOpenHosts( DIR *openhostsdir, set<string> *openhosts ) {
         host.erase( host.rfind("."), host.size() );
         plfs_debug("Host %s (%s) has open handle\n", dent->d_name,host.c_str());
         openhosts->insert( host );
-        Util::Readdir(openhostsdir, &dent);
     }
     return 0;
 }

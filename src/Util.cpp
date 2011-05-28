@@ -425,6 +425,7 @@ struct dirent* Util::Readdir(DIR *dir) {
 int Util::Readdir(DIR *dir, struct dirent **de) {
     ENTER_UTIL;
     errno = 0;
+    *de = NULL;
     *de = ioStore->Readdir(dir);
     if (*de) ret = 0;
     else if (errno == 0) ret = 1;
