@@ -10,13 +10,11 @@
 
 void ADIOI_PLFS_Close(ADIO_File fd, int *error_code)
 {
-    int err, rank, amode;
+    int err, rank;
     static char myname[] = "ADIOI_PLFS_CLOSE";
 
     MPI_Comm_rank( fd->comm, &rank );
-    amode = ad_plfs_amode( fd->access_mode );
-    plfs_debug("%s %d with flags %d\n", myname, rank, fd->access_mode );
-    err = plfs_close(fd->fs_ptr, rank, amode);
+    err = plfs_close(fd->fs_ptr, rank);
     fd->fs_ptr = NULL;
 
     if (err < 0 ) {

@@ -13,7 +13,6 @@ void ADIOI_PLFS_Delete(char *filename, int *error_code)
 {
     int err;
     static char myname[] = "ADIOI_PLFS_DELETE";
-    plfs_debug("%s: begin\n", myname );
 
     err = plfs_unlink(filename);
     if (err < 0) {

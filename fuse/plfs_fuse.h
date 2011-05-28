@@ -28,7 +28,6 @@ struct dir_op {
 typedef struct {
     bool   bufferindex;
     bool   sync_on_close;
-    bool   direct_io;
     vector< string >             backends;
     size_t subdirs;
 } Params;
@@ -84,8 +83,6 @@ class Plfs : public fusexx::fuse<Plfs> {
         static bool isdebugfile( const char*, const char * );
         static bool isdebugfile( const char* );
         static int writeDebug( char *buf, size_t, off_t, const char* );
-        static int addOpenFile( string, pid_t, Plfs_fd * );
-        static int removeOpenFile( string, pid_t, Plfs_fd * );
         static Plfs_fd *findOpenFile( string ); 
         //static int removeWriteFile( WriteFile *, string );
         //static int getIndex( string, mode_t, Index ** );
@@ -95,8 +92,6 @@ class Plfs : public fusexx::fuse<Plfs> {
         static string openFilesToString();
         static mode_t getMode( string expanded );
         static int getattr_helper( const char *path, struct stat *, Plfs_fd *);
-        static int get_groups( vector<gid_t> * );
-        static int set_groups( uid_t );
 
             // is a set the best here?  doesn't need to be sorted.
             // just needs to be associative.  This needs to be static
@@ -122,13 +117,12 @@ class Plfs : public fusexx::fuse<Plfs> {
             int bward_skips;
             int nonskip_writes;
         #endif
-        pthread_mutex_t             container_mutex;
-        pthread_mutex_t             fd_mutex;
-        pthread_mutex_t             group_mutex;
-        map< uid_t, vector<gid_t> > memberships;
-        set< string >               createdContainers;
+        pthread_mutex_t           container_mutex;
+        pthread_mutex_t           fd_mutex;
+        pthread_mutex_t           index_mutex;
+        set< string >             createdContainers;
         HASH_MAP<string, Plfs_fd *> open_files;
-        string                      myhost;
-        string                      trashdir;
-        Params                      params;
+        string                    myhost;
+        string                    trashdir;
+        Params                    params;
 };

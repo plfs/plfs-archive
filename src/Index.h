@@ -77,8 +77,6 @@ class Index : public Metadata {
         ~Index();
 
         int readIndex( string hostindex );
-
-        void setPath( string );
     
         bool ispopulated( );
 

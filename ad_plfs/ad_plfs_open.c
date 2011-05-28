@@ -17,6 +17,7 @@ void ADIOI_PLFS_Open(ADIO_File fd, int *error_code)
 
     MPI_Comm_rank( fd->comm, &rank );
     static char myname[] = "ADIOI_PLFS_OPEN";
+    fprintf( stderr, "%s: begin\n", myname );
 
     if (fd->perm == ADIO_PERM_NULL) {
         old_mask = umask(022);
@@ -25,15 +26,24 @@ void ADIOI_PLFS_Open(ADIO_File fd, int *error_code)
     }
     else perm = fd->perm;
 
-    amode = ad_plfs_amode( fd->access_mode ); 
-    plfs_debug("%s %d with flags %d (%d)\n", 
-            myname, rank, fd->access_mode, amode );
+    amode = 0;//O_META;
+    if (fd->access_mode & ADIO_RDONLY)
+        amode = amode | O_RDONLY;
+    if (fd->access_mode & ADIO_WRONLY)
+        amode = amode | O_WRONLY;
+    if (fd->access_mode & ADIO_RDWR)
+        amode = amode | O_RDWR;
+    if (fd->access_mode & ADIO_EXCL)
+        amode = amode | O_EXCL;
 
     // MPI_File_open is a collective call so only create it once
-    // unless comm = MPI_COMM_SELF in which case
-    // it appears that ad_common only passes the ADIO_CREATE to 0
     if (fd->access_mode & ADIO_CREATE) {
-        err = plfs_create( fd->filename, perm, amode );
+        // first create the top-level directory with just one proc
+        if ( rank == 0 ) {
+            err = plfs_create( fd->filename, perm, amode );
+        }
+        MPI_Bcast( &err, 1, MPI_INT, 0, fd->comm );
+
         // then create the individual hostdirs with one proc per node
         // this fd->hints->ranklist thing doesn't work
         /*
@@ -50,7 +60,7 @@ void ADIOI_PLFS_Open(ADIO_File fd, int *error_code)
 					   myname, __LINE__, MPI_ERR_IO,
 					   "**io",
 					   "**io %s", strerror(-err));
-        plfs_debug("%s: failure on create\n", myname );
+        fprintf( stderr, "%s: failure on create\n", myname );
         return;
     }
 
@@ -63,9 +73,9 @@ void ADIOI_PLFS_Open(ADIO_File fd, int *error_code)
 					   myname, __LINE__, MPI_ERR_IO,
 					   "**io",
 					   "**io %s", strerror(-err));
-        plfs_debug("%s: failure\n", myname );
+        fprintf( stderr, "%s: failure\n", myname );
     } else {
-        plfs_debug("%s: Success (%d)!\n", myname, rank );
+        fprintf( stderr, "%s: Success!\n", myname );
         fd->fs_ptr = pfd;
         *error_code = MPI_SUCCESS;
     }

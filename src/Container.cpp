@@ -49,23 +49,11 @@ size_t Container::hashValue( const char *str ) {
 // makes makeTopLevel much more complicated and S_ISUID isn't available
 // everywhere.
 // when we make containers, we mkdir tmp, creat access, rename tmp 
-//
-// OK.  This might be creating a problem for layered PLFS's.  For example
-// if someone, for some silly reason, uses PLFS-MPI onto a PLFS-MNT, then
-// the PLFS-MPI will create a container for file foo.  It will do a mkdir
-// foo which the PLFS-MNT will just do a mkdir for that as well, and then 
-// PLFS-MPI will do a create of foo/access which the PLFS-MNT will then 
-// create a container for foo/access.  At this point, the PLFS-MNT will
-// think that the directory foo is a container since it has a file called
-// access in it.  OK, this means that we can't ever have an access file
-// in a directory or PLFS will think it's a container.  We need to make
-// sure the access name is sufficiently strange.  Also we need to make 
-// sure the access file is a file and not a directory
 bool Container::isContainer( const char *physical_path ) {
     struct stat buf;
     string accessfile = getAccessFilePath(physical_path); 
     int ret = Util::Lstat( accessfile.c_str(), &buf );
-    return ( ret==0 ? !Util::isDirectory(&buf) : false );
+    return ( ret == 0 ); 
 }
 
 int Container::freeIndex( Index **index ) {
@@ -95,7 +83,6 @@ int Container::Utime( const char *path, const struct utimbuf *buf ) {
 }
 
 int Container::Chown( const char *path, uid_t uid, gid_t gid ) {
-    Util::Debug("Chowning to %d:%d\n", uid, gid );
     return Container::Modify( CHOWN, path, uid, gid, NULL, 0 );  
 }
 
@@ -106,19 +93,19 @@ int Container::Modify( DirectoryOperation type,
         const struct utimbuf *utbuf,
         mode_t mode )
 {
-    Util::Debug("%s on %s\n", __FUNCTION__, path );
+    Util::Debug( stderr, "%s on %s\n", __FUNCTION__, path );
     struct dirent *dent = NULL;
     DIR *dir            = NULL; 
     int ret             = 0;
 
     Util::Opendir( path, &dir );
     if ( dir == NULL ) { 
-        Util::Debug("%s wtf\n", __FUNCTION__ );
+        Util::Debug( stderr, "%s wtf\n", __FUNCTION__ );
         return 0; 
     }
     while( ret == 0 && (dent = Util::ioStore->Readdir( dir )) != NULL ) {
         mode_t use_mode = mode;
-        if (!strcmp(dent->d_name,".")||!strcmp(dent->d_name,"..")) continue; 
+        if ( ! strncmp( dent->d_name, ".", 1 ) ) continue;  // skip . and .. 
         string full_path( path ); full_path += "/"; full_path += dent->d_name;
         if ( Util::isDirectory( full_path.c_str() ) ) {
             ret = Container::Modify(type,full_path.c_str(),uid, gid,utbuf,mode);
@@ -132,8 +119,7 @@ int Container::Modify( DirectoryOperation type,
         } else if ( type == CHMOD ) {
             ret = Util::Chmod( full_path.c_str(), use_mode );
         }
-        Util::Debug("Modified dropping %s: %s\n", 
-		full_path.c_str(), strerror(errno) );
+        Util::Debug( stderr, "Modified dropping %s\n", full_path.c_str() );
     }
     Util::Closedir( dir );
     return ret;
@@ -147,7 +133,7 @@ int Container::populateIndex( const char *path, Index *index ) {
     
     DIR *td = NULL, *hd = NULL; struct dirent *tent = NULL;
     while((ret = nextdropping(path,&hostindex,INDEXPREFIX, &td,&hd,&tent))== 1){
-        //Util::Debug("# need to build index from %s\n", 
+        //Util::Debug(stderr, "# need to build index from %s\n", 
         // hostindex.c_str());
         ret = index->readIndex( hostindex );
         if ( ret != 0 ) break;
@@ -216,7 +202,7 @@ int Container::addMeta( off_t last_offset, size_t total_bytes,
     string metafile;
     struct timeval time;
     if ( gettimeofday( &time, NULL ) != 0 ) {
-        Util::Debug("WTF: gettimeofday in %s failed: %s\n",
+        Util::Debug( stderr, "WTF: gettimeofday in %s failed: %s\n",
                 __FUNCTION__, strerror(errno ) );
         return -errno;
     }
@@ -226,7 +212,7 @@ int Container::addMeta( off_t last_offset, size_t total_bytes,
         << time.tv_sec << "." << time.tv_usec << "."
         << host;
     metafile = oss.str();
-    Util::Debug("Creating metafile %s\n", metafile.c_str() );
+    Util::Debug( stderr, "Creating metafile %s\n", metafile.c_str() );
     return ignoreNoEnt(Util::Creat( metafile.c_str(), DEFAULT_MODE ));
 }
 
@@ -264,7 +250,7 @@ int Container::discoverOpenHosts( const char *path, set<string> *openhosts ) {
         if ( ! strncmp( dent->d_name, ".", 1 ) ) continue;  // skip . and ..
         host = dent->d_name;
         host.erase( host.rfind("."), host.size() );
-        Util::Debug("Host %s has open handle on %s\n", 
+        Util::Debug( stderr, "Host %s has open handle on %s\n", 
                 dent->d_name, path );
         openhosts->insert( host );
     }
@@ -275,7 +261,7 @@ int Container::discoverOpenHosts( const char *path, set<string> *openhosts ) {
 string Container::getOpenrecord( const char *path, const char *host, pid_t pid){
     ostringstream oss;
     oss << getOpenHostsDir( path ) << "/" << host << "." << pid;
-    Util::Debug("created open record path %s\n", oss.str().c_str() );
+    Util::Debug( stderr, "created open record path %s\n", oss.str().c_str() );
     return oss.str();
 }
 
@@ -289,7 +275,7 @@ int Container::addOpenrecord( const char *path, const char *host, pid_t pid ) {
         ret = Util::Creat( openrecord.c_str(), DEFAULT_MODE );
     }
     if ( ret != 0 ) {
-        Util::Debug("Couldn't make openrecord %s: %s\n", 
+        Util::Debug( stderr, "Couldn't make openrecord %s: %s\n", 
                 openrecord.c_str(), strerror( errno ) );
     }
     return ret;
@@ -305,7 +291,7 @@ int Container::removeOpenrecord( const char *path, const char *host, pid_t pid){
 mode_t Container::getmode( const char *path ) {
     struct stat stbuf;
     if ( Util::Lstat( path, &stbuf ) < 0 ) {
-        Util::Debug("Failed to getmode for %s\n", path );
+        Util::Debug( stderr, "Failed to getmode for %s\n", path );
         return DEFAULT_MODE;
     } else {
         return fileMode(stbuf.st_mode);
@@ -339,7 +325,7 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
         // but get the permissions and stuff from the access file
     string accessfile = getAccessFilePath( path );
     if ( Util::Lstat( accessfile.c_str(), stbuf ) < 0 ) {
-        Util::Debug("lstat of %s failed: %s\n",
+        Util::Debug( stderr, "lstat of %s failed: %s\n",
                 accessfile.c_str(), strerror( errno ) );
     }
     stbuf->st_size    = 0;  
@@ -372,14 +358,14 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
             string host = fetchMeta( dent->d_name, 
                     &last_offset, &total_bytes, &time );
             if ( openHosts.find(host) != openHosts.end() ) {
-                Util::Debug("Can't use metafile %s because %s has an "
+                Util::Debug( stderr, "Can't use metafile %s because %s has an "
                         " open handle.\n", dent->d_name, host.c_str() );
                 continue;
             }
             oss  << "Pulled meta " << last_offset << " " << total_bytes
                  << ", " << time.tv_sec << "." << time.tv_nsec 
                  << " on host " << host << endl;
-            Util::Debug("%s", oss.str().c_str() );
+            Util::Debug( stderr, "%s", oss.str().c_str() );
 
             // oh, let's get rewrite correct.  if someone writes
             // a file, and they close it and then later they
@@ -407,7 +393,7 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
         {
             string host = hostFromChunk( dropping, prefix );
             if ( validMeta.find(host) != validMeta.end() ) {
-                Util::Debug("Used stashed stat info for %s\n", 
+                Util::Debug( stderr, "Used stashed stat info for %s\n", 
                         host.c_str() );
                 continue;
             } else {
@@ -420,7 +406,7 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
             struct stat dropping_st;
             if (Util::Lstat(dropping.c_str(), &dropping_st) < 0 ) {
                 ret = -errno;
-                Util::Debug("lstat of %s failed: %s\n",
+                Util::Debug( stderr, "lstat of %s failed: %s\n",
                     dropping.c_str(), strerror( errno ) );
                 continue;   // shouldn't this be break?
             }
@@ -429,11 +415,11 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
             stbuf->st_mtime = max( dropping_st.st_mtime, stbuf->st_mtime );
 
             if ( dropping.find(DATAPREFIX) != dropping.npos ) {
-                Util::Debug("Getting stat info from data dropping\n" );
+                Util::Debug( stderr, "Getting stat info from data dropping\n" );
                 data_blocks += dropping_st.st_blocks;
                 data_size   += dropping_st.st_size;
             } else {
-                Util::Debug("Getting stat info from index dropping\n");
+                Util::Debug(stderr, "Getting stat info from index dropping\n");
                 Index *index = new Index( path );
                 index->readIndex( dropping ); 
                 index_blocks     += bytesToBlocks( index->totalBytes() );
@@ -449,7 +435,7 @@ int Container::getattr( const char *path, struct stat *stbuf ) {
     oss  << "Examined " << chunks << " droppings:"
          << path << " total size " << stbuf->st_size <<  ", usage "
          << stbuf->st_blocks << " at " << stbuf->st_blksize << endl;
-    Util::Debug("%s", oss.str().c_str() );
+    Util::Debug( stderr, "%s", oss.str().c_str() );
     return ret;
 }
 
@@ -486,31 +472,20 @@ int Container::makeTopLevel( const char *expanded_path,
     // ok, here's the real code:  mkdir tmp ; chmod tmp; rename tmp
     // get rid of the chmod; now it's mkdir tmp; create accessfile; rename tmp
     string strPath( expanded_path );
-    ostringstream oss;
-    oss << strPath << "." << hostname << "." << getpid();
-    string tmpName( oss.str() ); 
-    string tmpAccess( getAccessFilePath(tmpName) );
+    string tmpName( strPath + "." + hostname ); 
     if ( Util::Mkdir( tmpName.c_str(), dirMode(mode) ) < 0 ) {
         if ( errno != EEXIST && errno != EISDIR ) {
-            Util::Debug("Mkdir %s to %s failed: %s\n",
+            Util::Debug( stderr, "Mkdir %s to %s failed: %s\n",
                 tmpName.c_str(), expanded_path, strerror(errno) );
             return -errno;
-        } else if ( errno == EEXIST ) {
-            if ( ! Container::isContainer(tmpName.c_str() ) ) {
-                Util::Debug("Mkdir %s to %s failed: %s\n",
-                    tmpName.c_str(), expanded_path, strerror(errno) );
-            } else {
-                Util::Debug("%s is already a container.\n",
-                        tmpName.c_str() );
-            }
         }
     }
-    if ( makeMeta( tmpAccess, S_IFREG, mode ) < 0 ) {
-        Util::Debug("create access file in %s failed: %s\n",
+    if ( makeMeta( getAccessFilePath(tmpName), S_IFREG, mode ) < 0 ) {
+        Util::Debug( stderr, "create access file in %s failed: %s\n",
                 tmpName.c_str(), strerror(errno) );
         int saveerrno = errno;
         if ( Util::Rmdir( tmpName.c_str() ) != 0 ) {
-            Util::Debug("rmdir of %s failed : %s\n",
+            Util::Debug( stderr, "rmdir of %s failed : %s\n",
                 tmpName.c_str(), strerror(errno) );
         }
         return -saveerrno;
@@ -522,62 +497,38 @@ int Container::makeTopLevel( const char *expanded_path,
     // this just moves the bottleneck to the isDirectory
     // plus scared it could double it if they were both slow...
     //if ( ! isDirectory( expanded_path ) ) 
-    int attempts = 0;
-    while (attempts < 2 ) {
-        attempts++;
-        if ( Util::Rename( tmpName.c_str(), expanded_path ) < 0 ) {
-            int saveerrno = errno;
-            Util::Debug("rename of %s -> %s failed: %s\n",
-                tmpName.c_str(), expanded_path, strerror(errno) );
-            if ( saveerrno == ENOTDIR ) {
-                // there's a normal file where we want to make our container
-                Util::Unlink( expanded_path );
-                continue;
-            }
-            // if we get here, we lost the race
-            if ( Util::Unlink( tmpAccess.c_str() ) < 0 ) {
-                Util::Debug("unlink of temporary %s failed : %s\n",
-                        tmpAccess.c_str(), strerror(errno) );
-            }
-            if ( Util::Rmdir( tmpName.c_str() ) < 0 ) {
-                Util::Debug("rmdir of temporary %s failed : %s\n",
-                        tmpName.c_str(), strerror(errno) );
-            }
-            // probably what happened is some other node outraced us
-            // if it is here now as a container, that's what happened
-            // this check for whether it's a container might be slow
-            // if worried about that, change it to check saveerrno
-            // if it's something like EEXIST or ENOTEMPTY or EISDIR
-            // then that probably means the same thing 
-            //if ( ! isContainer( expanded_path ) ) 
-            if ( saveerrno != EEXIST && saveerrno != ENOTEMPTY 
-                    && saveerrno != EISDIR && saveerrno != ENOENT ) {
-                Util::Debug("rename %s to %s failed: %s\n",
-                        tmpName.c_str(), expanded_path, strerror(saveerrno) );
-                return -saveerrno;
-            }
-        } else {
-            // we made the top level container
-            // this is like the only time we know that we won the global race
-            // hmmm, any optimizations we could make here?
-            // make the metadir after we do the rename so that all nodes
-            // don't make an extra unnecessary dir, but this does create
-            // a race if someone wants to use the meta dir and it doesn't
-            // exist, so we need to make sure we never assume the metadir
-            if ( makeMeta(getMetaDirPath(strPath), S_IFDIR, DEFAULT_MODE ) < 0){
-                return -errno;
-            }
-            if ( makeMeta( getOpenHostsDir(strPath), S_IFDIR, DEFAULT_MODE)< 0){
-                return -errno;
-            }
-            string versiondir = getVersionDir(strPath);
-            string versionfile( versiondir + "/" + STR(TAG_VERSION) );
-            if ( makeMeta( versiondir, S_IFDIR, DEFAULT_MODE)< 0) {
-                return -errno;
-            }
-            if ( makeMeta( versionfile, S_IFREG, mode ) < 0 ) {
-                return -errno;
-            }
+    if ( Util::Rename( tmpName.c_str(), expanded_path ) < 0 ) {
+        int saveerrno = errno;
+        if ( Util::Rmdir( tmpName.c_str() ) < 0 ) {
+            Util::Debug( stderr, "rmdir of %s failed : %s\n",
+                    tmpName.c_str(), strerror(errno) );
+        }
+        // probably what happened is some other node outraced us
+        // if it is here now as a container, that's what happened
+        // this check for whether it's a container might be slow
+        // if worried about that, change it to check saveerrno
+        // if it's something like EEXIST or ENOTEMPTY or EISDIR
+        // then that probably means the same thing 
+        //if ( ! isContainer( expanded_path ) ) 
+        if ( saveerrno != EEXIST && saveerrno != ENOTEMPTY 
+                && saveerrno != EISDIR && saveerrno != ENOENT ) {
+            Util::Debug( stderr, "rename %s to %s failed: %s\n",
+                    tmpName.c_str(), expanded_path, strerror(saveerrno) );
+            return -saveerrno;
+        }
+    } else {
+        // we made the top level container
+        // this is like the only time we know that we won the global race
+        // hmmm, any optimizations we could make here?
+        // make the metadir after we do the rename so that all nodes
+        // don't make an extra unnecessary dir, but this does create
+        // a race if someone wants to use the meta dir and it doesn't
+        // exist, so we need to make sure we never assume the metadir
+        if ( makeMeta( getMetaDirPath( strPath ), S_IFDIR, DEFAULT_MODE ) < 0 ){
+            return -errno;
+        }
+        if ( makeMeta( getOpenHostsDir(strPath), S_IFDIR, DEFAULT_MODE ) < 0 ) {
+            return -errno;
         }
     }
     return 0;
@@ -612,11 +563,6 @@ string Container::getMetaDirPath( string strPath ) {
     return metadir;
 }
 
-string Container::getVersionDir( string path ) {
-    string versiondir( path + "/" + VERSIONDIR );
-    return versiondir;
-}
-
 string Container::getAccessFilePath( string path ) {
     string accessfile( path + "/" + ACCESSFILE );
     return accessfile;
@@ -628,7 +574,7 @@ string Container::getHostDirPath( const char* expanded_path,
     ostringstream oss;
     size_t host_value = (hashValue( hostname ) % PLFS_SUBDIRS) + 1;
     oss << expanded_path << "/" << HOSTDIRPREFIX << host_value; 
-    //Util::Debug("%s : %s %s -> %s\n", 
+    //Util::Debug( stderr, "%s : %s %s -> %s\n", 
     //        __FUNCTION__, hostname, expanded_path, oss.str().c_str() );
     return oss.str();
 }
@@ -670,12 +616,12 @@ int Container::createHelper( const char *expanded_path, const char *hostname,
     double begin_time, end_time;
     int res = 0;
     if ( ! isContainer( expanded_path ) ) {
-        Util::Debug("Making top level container %s\n", expanded_path );
+        Util::Debug( stderr, "Making top level container %s\n", expanded_path );
         begin_time = time(NULL);
         res = makeTopLevel( expanded_path, hostname, mode );
         end_time = time(NULL);
         if ( end_time - begin_time > 2 ) {
-            Util::Debug("WTF: TopLevel create of %s took %.2f\n", 
+            Util::Debug( stderr, "WTF: TopLevel create of %s took %.2f\n", 
                     expanded_path, end_time - begin_time );
         }
         if ( res != 0 ) return res;
@@ -717,7 +663,7 @@ struct dirent *Container::getnextent( DIR *dir, const char *prefix ) {
     struct dirent *next = NULL;
     do {
         next = Util::ioStore->Readdir( dir );
-        if (next) Util::Debug( "Processing entry %s\n", next->d_name);
+        if (next) Util::Debug( stderr, "Processing entry %s\n", next->d_name);
     } while( next && prefix && 
             strncmp( next->d_name, prefix, strlen(prefix) ) != 0 );
     return next;
@@ -733,13 +679,13 @@ int Container::nextdropping( string physical_path,
         DIR **topdir, DIR **hostdir, struct dirent **topent ) 
 {
     ostringstream oss;
-    oss << "looking for nextdropping in " << physical_path; 
-    //Util::Debug("%s\n", oss.str().c_str() );
+    oss << "looking for nextdropping in " << physical_path << endl;
+    Util::Debug( stderr, "%s\n", oss.str().c_str() );
         // open it on the initial 
     if ( *topdir == NULL ) {
         Util::Opendir( physical_path.c_str(), topdir );
         if ( *topdir == NULL ) {
-            Util::Debug( "Error opening topdir for %s\n", physical_path.c_str());
+            Util::Debug( stderr, "Error opening topdir for %s\n", physical_path.c_str());
             return -errno;
         }
     }
@@ -749,7 +695,7 @@ int Container::nextdropping( string physical_path,
             // here is where nextdropping is specific to HOSTDIR
         *topent = getnextent( *topdir, HOSTDIRPREFIX );
         if ( *topent == NULL ) {
-            Util::Debug( "Done with entries\n");
+            Util::Debug( stderr, "Done with entries\n");
             // all done
             Util::Closedir( *topdir );
             *topdir = NULL;
@@ -770,11 +716,11 @@ int Container::nextdropping( string physical_path,
     if ( *hostdir == NULL ) {
         Util::Opendir( hostpath.c_str(), hostdir );
         if ( *hostdir == NULL ) {
-            Util::Debug("opendir %s: %s\n",
+            Util::Debug(stderr,"opendir %s: %s\n",
                     hostpath.c_str(),strerror(errno));
             return -errno;
         } else {
-            Util::Debug("%s opened dir %s\n", 
+            Util::Debug( stderr, "%s opened dir %s\n", 
                     __FUNCTION__, hostpath.c_str() );
         }
     }
@@ -830,7 +776,7 @@ int Container::Truncate( const char *path, off_t offset ) {
             if ( strcmp( ".", tent->d_name ) && strcmp( "..", tent->d_name ) ) {
                 string metadropping = getMetaDirPath( path );
                 metadropping += "/"; metadropping += tent->d_name;
-                Util::Debug("Need to remove meta dropping %s\n",
+                Util::Debug( stderr, "Need to remove meta dropping %s\n",
                         metadropping.c_str() );
                 Util::Unlink( metadropping.c_str() ); 
             }

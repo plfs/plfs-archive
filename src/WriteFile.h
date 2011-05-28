@@ -34,7 +34,7 @@ class WriteFile : public Metadata {
 
         int addWriter( pid_t );
         int removeWriter( pid_t );
-        size_t numWriters();
+        size_t numWriters( );
 
         int truncate( off_t offset );
         int extend( off_t offset );
@@ -42,8 +42,6 @@ class WriteFile : public Metadata {
         ssize_t write( const char*, size_t, off_t, pid_t );
 
         int sync( pid_t pid );
-
-        void       setPath( string path ); 
 
         int restoreFds();
     private:
@@ -58,13 +56,14 @@ class WriteFile : public Metadata {
         string hostname;
         map< pid_t, OpenFd * > fds;
         map< int, string > paths;      // need to remember fd paths to restore
-        pthread_mutex_t    index_mux;  // to use the shared index 
+        pthread_mutex_t    *index_mux; // only used if multiple writers
         pthread_mutex_t    data_mux;   // to access our map of fds 
         bool synchronous_index;
-        bool has_been_renamed; // use this to guard against a truncate following
-                               // a rename
         Index *index;
         mode_t mode;
+        int writers;    // be nice to not maintain this and just use fds.size
+                        // but an OpenFd can be shared and we would rather
+                        // maintain this than walk the damn fds
 };
 
 #endif

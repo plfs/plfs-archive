@@ -4,9 +4,6 @@ HDRS       = $(wildcard *.h)
 OBJS       = $(addsuffix .o, $(basename $(SRCS) ) ) 
 HADOOP_CXXFLAGS	= -I${HADOOP_HOME}/src/c++/libhdfs/ -I${JAVA_HOME}/include -I${JAVA_HOME}/include/linux
 HADOOP_LDFLAGS = -L${HADOOP_HOME}/src/c++/install/lib -L${JAVA_HOME}/jre/lib/amd64/server/ -lhdfs -ljvm
-VERSION    = $(shell /usr/bin/svnversion ..)
-TAG_VERSION := $(shell cat ../VERSION)
-
 # put -DNDEBUG in to turn off assertions, this can make a big difference
 # as many of the asserts are doing stats
 # put -DNUTIL in to turn off timing in Util
@@ -16,8 +13,7 @@ TAG_VERSION := $(shell cat ../VERSION)
 # add -DVERBOSE to get verbose output
 DEBUG   =  -DPLFS_TIMES -DNUTIL -DINDEX_CONTAINS_TIMESTAMPS \
 	      -DCOUNT_SKIPS -DVERBOSE
-CXXFLAGS  = -g -Wall $(DEBUG) -D_FILE_OFFSET_BITS=64 $(HADOOP_CXXFLAGS) \
-	    -DVERSION=$(VERSION) -DTAG_VERSION=$(TAG_VERSION)
+CXXFLAGS  = -g -Wall $(DEBUG) -D_FILE_OFFSET_BITS=64 $(HADOOP_CXXFLAGS)
 LDFLAGS = -lpthread $(HADOOP_LDFLAGS)
 
 
