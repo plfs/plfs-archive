@@ -26,6 +26,7 @@ public:
     virtual int Open( const char*, int )=0;
     virtual int Open( const char*, int, mode_t )=0;
     virtual DIR* Opendir( const char*) =0;
+    virtual void Rewinddir( DIR*) =0;
     virtual ssize_t Pread( int, void*, size_t, off_t)=0;
     virtual ssize_t Pwrite( int, const void*, size_t, off_t)=0;
     virtual ssize_t Read( int, void*, size_t)=0;

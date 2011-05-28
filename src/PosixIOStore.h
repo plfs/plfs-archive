@@ -76,6 +76,10 @@ public:
         return opendir(name);
     }
 
+    void Rewinddir(DIR *dp) {
+        rewinddir(dp);
+    }
+
     ssize_t Pread(int fd, void* buf, size_t count, off_t offset) {
         return pread(fd, buf, count, offset);
     }

@@ -31,6 +31,7 @@ public:
     int Open(const char* path, int flags);
     int Open(const char* path, int flags, mode_t mode);
     DIR* Opendir(const char *name);
+    void Rewinddir(DIR* dirp);
     ssize_t Pread(int fd, void* buf, size_t count, off_t offset);
     ssize_t Pwrite(int fd, const void* buf, size_t count, off_t offset);
     ssize_t Read(int fd, void *buf, size_t count);

@@ -8,6 +8,7 @@
 
 #include <set>
 #include <vector>
+#include <string>
 using namespace std;
 
 // this is a pure virtual class

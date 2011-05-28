@@ -18,6 +18,8 @@ HDFSIOStore::HDFSIOStore(const char* host, int port)
 {
     // Get ourselves a filesystem connection.
     fs = hdfsConnect(hostName, portNum);
+    if (!fs)
+        Util::Debug("Couldn't connect to HDFS server %s on port %d\n", host, port);
 
     // Initialize our mutex for protecting the fd count.
     pthread_mutex_init(&fd_count_mutex, NULL);
@@ -159,7 +161,8 @@ int HDFSIOStore::Close(int fd)
 int HDFSIOStore::Closedir(DIR* dirp)
 {
     struct openDir *theDir = (struct openDir*)dirp;
-    hdfsFreeFileInfo(theDir->infos, theDir->numEntries);
+    if (theDir->infos)
+        hdfsFreeFileInfo(theDir->infos, theDir->numEntries);
     delete theDir;
     return 0;
 }
@@ -392,24 +395,40 @@ int HDFSIOStore::Open(const char* path, int flags, mode_t mode)
  */
 DIR* HDFSIOStore::Opendir(const char *name) 
 {
+    std::cout << "OpenDir called in HDFS!" << name << "\n";
     openDir* dir = new openDir;
     // I assume new returns NULL on error.
     if (!dir)
         return NULL;
     dir->curEntryNum = 0;
+    // We set this to negative one to differentiate between an error and
+    // an empty directory.
+    dir->numEntries = -1; 
     // We have space to remember the directory. Now slurp in all its files.
     dir->infos = hdfsListDirectory(fs, name, &dir->numEntries);
-    if (!dir->infos) {
+    if (!dir->infos && dir->numEntries != 0) {
         delete dir;
         return NULL;
     }
     
     // Temporary debugging measure:
+    Util::Debug("Opening a directory with %u entries. Contents:\n",
+                dir->numEntries);
     for (int i = 0; i < dir->numEntries; i++) {
         Util::Debug("%s\n", dir->infos[i].mName);
     }
 
     return (DIR*)dir;
+}
+
+/**
+ * Rewinddir. Pretty simple. We cast our DIR* into what it really is
+ * (as described in Opendir() above) and then set its offset appropriately.
+ */
+void HDFSIOStore::Rewinddir(DIR* dirp)
+{
+    struct openDir* dir = (struct openDir*)dirp;
+    dir->curEntryNum = 0;
 }
 
 /**
@@ -460,18 +479,21 @@ ssize_t HDFSIOStore::Read(int fd, void *buf, size_t count)
  */
 struct dirent *HDFSIOStore::Readdir(DIR *dirp)
 {
-    Util::Debug("readdir called\n");
+    if (!dirp)
+        Util::Debug("HDFSIOStore's Dirp is null... that's probably an issue.\n");
     char* lastComponent; // For locating the last part of the string name.
     struct openDir* dir = (struct openDir*)dirp;
+    std::cout << "Just did the cast.\n";
     if (dir->curEntryNum == dir->numEntries) {
         // We've read all the entries! Return NULL.
         Util::Debug("Done reading directory\n");
         return NULL;
     }
+    std::cout << "Looked up a field.\n";
     //std::cout << "Processing entry.\n";
     // Fill in the struct dirent curEntry field.
     dir->curEntry.d_ino = 0; // No inodes in HDFS.
-	dir->curEntry.d_reclen = sizeof(struct dirent);
+    dir->curEntry.d_reclen = sizeof(struct dirent);
     dir->curEntry.d_type = (dir->infos[dir->curEntryNum].mKind == kObjectKindFile
                             ? DT_REG : DT_DIR);
 

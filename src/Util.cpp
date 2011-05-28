@@ -400,7 +400,7 @@ int Util::Creat( const char *path, mode_t mode ) {
     ENTER_PATH;
     ret = ioStore->Creat( path, mode );
     if ( ret > 0 ) {
-        ret = close( ret );
+        ret = ioStore->Close( ret );
     }
     else ret = -errno;
     EXIT_UTIL;
@@ -416,12 +416,15 @@ char * Util::Strdup(const char *s1) {
     return strdup(s1);
 }
 
+// Again, this doesn't match up well with our macros due to return types.
+struct dirent* Util::Readdir(DIR *dir) {
+    return ioStore->Readdir(dir);
+}
         
 // returns 0 if success, 1 if end of dir, -errno if error 
 int Util::Readdir(DIR *dir, struct dirent **de) {
     ENTER_UTIL;
     errno = 0;
-    *de = NULL;
     *de = ioStore->Readdir(dir);
     if (*de) ret = 0;
     else if (errno == 0) ret = 1;
@@ -436,6 +439,11 @@ int Util::Opendir( const char *path, DIR **dp ) {
     *dp = ioStore->Opendir( path );
     ret = ( *dp == NULL ? -errno : 0 );
     EXIT_UTIL;
+}
+
+// As this is void, we can't use our ENTER/EXIT macros.
+void Util::Rewinddir(DIR* dp) {
+    ioStore->Rewinddir( dp );
 }
 
 int Util::Closedir( DIR *dp ) {

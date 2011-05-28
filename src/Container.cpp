@@ -233,7 +233,7 @@ int Container::cleanupChmod( const string &path, mode_t mode , int top ,
         plfs_debug("%s wtf\n", __FUNCTION__ );
         return 0; 
     }
-    while( ret == 0 && (dent = readdir( dir )) != NULL ) {
+    while( ret == 0 && (dent = Util::Readdir( dir )) != NULL ) {
         string full_path( path ); full_path += "/"; full_path += dent->d_name;
         if (!strcmp(dent->d_name,".")||!strcmp(dent->d_name,"..")
                 ||!strcmp(dent->d_name, ACCESSFILE )) continue;
@@ -279,7 +279,7 @@ int Container::cleanupChown( const string &path, uid_t uid, gid_t gid) {
         plfs_debug("%s wtf\n", __FUNCTION__ );
         return 0; 
     }
-    while( ret == 0 && (dent = readdir( dir )) != NULL ) {
+    while( ret == 0 && (dent = Util::Readdir( dir )) != NULL ) {
         string full_path( path ); full_path += "/"; full_path += dent->d_name;
         if (!strcmp(dent->d_name,".")||!strcmp(dent->d_name,"..")) continue;
 
@@ -329,7 +329,7 @@ int Container::Modify( DirectoryOperation type,
         plfs_debug("%s wtf\n", __FUNCTION__ );
         return 0; 
     }
-    while( ret == 0 && (dent = readdir( dir )) != NULL ) {
+    while( ret == 0 && (dent = Util::Readdir( dir )) != NULL ) {
         if (!strcmp(dent->d_name,".")||!strcmp(dent->d_name,"..")) continue; 
         string full_path( path.c_str() ); 
         full_path += "/"; 
@@ -526,7 +526,7 @@ char *Container::version(const string &path) {
     bool found = false;
     int ret = Util::Opendir( path.c_str(), &dirp );
     if ( dirp == NULL || ret != 0 ) return NULL;
-    while((dirent = readdir(dirp)) != NULL){
+    while((dirent = Util::Readdir(dirp)) != NULL){
         plfs_debug("%s checking %s\n", __FUNCTION__, dirent->d_name);
         if(strncmp(VERSIONPREFIX,dirent->d_name,strlen(VERSIONPREFIX))==0){
             plfs_debug("%s found %s\n", __FUNCTION__, dirent->d_name);
@@ -539,7 +539,7 @@ char *Container::version(const string &path) {
                 versiondir += dirent->d_name;
                 ret = Util::Opendir(versiondir.c_str(), &dirp2);
                 if ( ret != 0 ) return NULL;
-                while((dirent2 = readdir(dirp2))!=NULL){
+                while((dirent2 = Util::Readdir(dirp2))!=NULL){
                     if ((dirent2->d_name)[0] == '.') continue;
                     snprintf(&(version[strlen(version)]),
                         VERSION_LEN-strlen(version), "%s ", dirent2->d_name);
@@ -584,7 +584,7 @@ vector<IndexFileInfo> Container::hostdir_index_read(const char *path){
 
     index_droppings.push_back(path_holder);
      // Start reading the directory
-    while((dirent = readdir(dirp))!=NULL){
+    while((dirent = Util::Readdir(dirp))!=NULL){
         if(strncmp(INDEXPREFIX,dirent->d_name,strlen(INDEXPREFIX))==0){
             double time_stamp;
             string str_time_stamp;
@@ -887,7 +887,9 @@ string Container::getOpenHostsDir( const string &path ) {
 // now the open hosts file has a pid in it so we need to separate this out
 int Container::discoverOpenHosts( DIR *openhostsdir, set<string> *openhosts ) {
     struct dirent *dent = NULL;
-    while( (dent = readdir( openhostsdir )) != NULL ) {
+    // TODO: Check these returns.
+    Util::Readdir(openhostsdir, &dent);
+    while( dent != NULL ) {
         string host;
         if ( ! strncmp( dent->d_name, ".", 1 ) ) continue;  // skip . and ..
         // also skip anything that isn't an opendropping
@@ -897,6 +899,7 @@ int Container::discoverOpenHosts( DIR *openhostsdir, set<string> *openhosts ) {
         host.erase( host.rfind("."), host.size() );
         plfs_debug("Host %s (%s) has open handle\n", dent->d_name,host.c_str());
         openhosts->insert( host );
+        Util::Readdir(openhostsdir, &dent);
     }
     return 0;
 }
@@ -986,15 +989,17 @@ int Container::getattr( const string &path, struct stat *stbuf ) {
         // maybe even actually reading the index files!
     DIR *metadir;
     Util::Opendir( (getMetaDirPath(path)).c_str(), &metadir );
+    plfs_debug("MILO Open dir succeeded. Metadir is %p\n", metadir);
     time_t most_recent_mod = 0;
     set< string > openHosts;
     set< string > validMeta;
     if ( metadir != NULL ) {
+        plfs_debug("MILO Discovering hosts.\n");
         discoverOpenHosts( metadir, &openHosts );
-
-        rewinddir(metadir);
+        plfs_debug("MILO rewinding dir.\n");
+        Util::Rewinddir(metadir);
         struct dirent *dent = NULL;
-        while( (dent = readdir( metadir )) != NULL ) {
+        while( (dent = Util::Readdir( metadir )) != NULL ) {
             if ( ! strncmp( dent->d_name, ".", 1 ) ) continue;  // . and ..
             if ( ! strncmp( dent->d_name, OPENPREFIX, strlen(OPENPREFIX)))
                 continue; // now we place openhosts in same dir as meta
@@ -1436,7 +1441,7 @@ struct dirent *Container::getnextent( DIR *dir, const char *prefix ) {
     if ( dir == NULL ) return NULL; // this line not necessary, but doesn't hurt
     struct dirent *next = NULL;
     do {
-        next = readdir( dir );
+        next = Util::Readdir( dir );
     } while( next && prefix && 
             strncmp( next->d_name, prefix, strlen(prefix) ) != 0 );
     return next;
@@ -1598,7 +1603,7 @@ Container::truncateMeta(const string &path, off_t offset){
 		return 0; 
    	}
 
-   	while( ret == 0 && (dent = readdir( dir )) != NULL ) {
+   	while( ret == 0 && (dent = Util::Readdir( dir )) != NULL ) {
 		if ( !strcmp( ".", dent->d_name ) || !strcmp( "..", dent->d_name ) ) {
 			continue;
 		}

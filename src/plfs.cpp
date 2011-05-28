@@ -568,8 +568,11 @@ plfs_collect_from_containers(const char *logical, vector<string> &files,
 
 int
 single_file_op(const char *physical, FileOp &op, bool isfile) {
-    int ret = op.op(physical,isfile);
-    plfs_debug("%s: %s on %s: %d\n", __FUNCTION__,op.name(),physical,ret);
+    int ret=0;
+    // MILO: Change this back
+    plfs_debug("%s: *** %s on %s: %d\n", __FUNCTION__,op.name(),physical,ret);
+    ret = op.op(physical,isfile);
+    plfs_debug("LIVED\n");
     return ret;
 }
 
@@ -705,6 +708,7 @@ plfs_directory_operation(const char *logical, FileOp &op) {
     int ret = 0;
     vector<string> exps;
     vector<string>::iterator itr;
+    std::cout << "Doing a directory option on " << logical << "\n";
     if ( (ret = find_all_expansions(logical,exps)) != 0 ) PLFS_EXIT(ret);
     for(itr = exps.begin(); itr != exps.end() && ret == 0; itr++ ){
         ret = single_file_op(itr->c_str(),op,false);
@@ -1232,9 +1236,10 @@ plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
 bool
 plfs_init(PlfsConf *pconf) { 
     // Set up our ioStore. This should eventually be based upon the configuration
-	// file's parameters.
-	plfs_posix_init();
-	plfs_debug("posix IO Store inited.\n");
+    // file's parameters.
+    //plfs_posix_init();
+    plfs_hdfs_init("default", 0);
+    plfs_debug("IO Store inited.\n");
 	map<string,PlfsMount*>::iterator itr = pconf->mnt_pts.begin();
     if (itr==pconf->mnt_pts.end()) return false;
     ExpansionInfo exp_info;
@@ -1907,12 +1912,14 @@ plfs_getattr(Plfs_fd *of, const char *logical, struct stat *stbuf,int sz_only){
         WriteFile *wf=(of && of->getWritefile() ? of->getWritefile() :NULL);
         bool descent_needed = ( !sz_only || !wf );
         if (descent_needed) {  // do we need to descend and do the full?
+            plfs_debug("MILO: Doing a Container::getattr....\n");
             ret = Container::getattr( path, stbuf );
         }
 
         if (ret == 0 && wf) {                                               
             off_t  last_offset;
             size_t total_bytes;
+            plfs_debug("MILO: Gettng meta...\n");
             wf->getMeta( &last_offset, &total_bytes );
             plfs_debug("Got meta from openfile: %ld last offset, "
                        "%ld total bytes\n", last_offset, total_bytes);
