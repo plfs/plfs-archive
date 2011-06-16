@@ -677,7 +677,16 @@ int HDFSIOStore::Unlink(const char* path)
  */
 int HDFSIOStore::Utime(const char* filename, const struct utimbuf *times)
 {
+    struct utimbuf now;
+
     Util::Debug("Running utime\n");
+
+    if (times == NULL) {          /* this is allowed, means use current time */
+        now.modtime = time(NULL);
+        now.actime = time(NULL);
+        times = &now;
+    }
+
     return hdfsUtime(fs, filename, times->modtime, times->actime);
 }
 
