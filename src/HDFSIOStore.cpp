@@ -9,6 +9,35 @@
 
 
 /**
+ * hdfsOpenFile_retry: wrapper for hdfsOpenFile() that retries on failure.
+ * XXX: this is temporary until we can figure out the failures i'm getting.
+ *
+ * @param fs the HDFS filesystem we are using
+ * @param path the path to the file to open
+ * @param flags open flags
+ * @param bufferSize buffer size to use (0==default)
+ * @param replication replication to use (0==default)
+ * @param blocksize blocksize to use (0==default)
+ * @return handle to the open file
+ */
+static hdfsFile hdfsOpenFile_retry(hdfsFS fs, const char* path, int flags,
+                                   int bufferSize, short replication, 
+                                   tSize blocksize) {
+    hdfsFile file;
+    int tries;
+ 
+    for (tries = 0, file = NULL ; !file && tries < 5 ; tries++) {
+        file = hdfsOpenFile(fs, path, flags, bufferSize, 
+                            replication, blocksize);
+        if (!file) {
+            fprintf(stderr, "hdfsOpenFile_retry(%s) failed try %d\n", 
+                    path, tries);
+        }
+    }
+    return(file);
+}
+
+/**
  * Constructor. Initializes some objects and attempts to connect to the
  * HDFS Filesystem.
  * We start the fd count at a value which is without special meaning.
@@ -142,7 +171,7 @@ int HDFSIOStore::Close(int fd)
     /*    // DEBUGGING: Try to re-open the file to debug close error.
     open_path = GetPathFromMap(fd);
     std::cout << "Re-opening " << open_path << "\n";
-    openFile = hdfsOpenFile(fs, open_path->c_str(), O_RDONLY,0,0,0);
+    openFile = hdfsOpenFile_retry(fs, open_path->c_str(), O_RDONLY,0,0,0);
     if (!openFile) {
         std::cout << "Error re-opening the file!" << errno << "\n";
     } else {
@@ -177,7 +206,7 @@ int HDFSIOStore::Creat(const char*path, mode_t mode)
 {
     int fd;
     string path_string(path);
-    hdfsFile file = hdfsOpenFile(fs, path, O_WRONLY, 0, 0, 0);
+    hdfsFile file = hdfsOpenFile_retry(fs, path, O_WRONLY, 0, 0, 0);
     if (!file)
         return -1;
     //hdfsChmod(fs, path, mode);
@@ -352,7 +381,7 @@ int HDFSIOStore::Open(const char* path, int flags)
         std::cout << "Exists and has " << info->mSize << " bytes\n";
         hdfsFreeFileInfo(info, 1);
     }*/
-    openFile = hdfsOpenFile(fs, path, new_flags, 0, 0, 0);
+    openFile = hdfsOpenFile_retry(fs, path, new_flags, 0, 0, 0);
     
     if (!openFile) {
         //std::cout << "Disaster trying to open " << path << "\n";
@@ -655,7 +684,7 @@ int HDFSIOStore::Truncate(const char* path, off_t length)
         return -1;
     }
     // Attempt to open the file to truncate it.
-    truncFile = hdfsOpenFile(fs, path, O_WRONLY, 0, 0, 0);
+    truncFile = hdfsOpenFile_retry(fs, path, O_WRONLY, 0, 0, 0);
     if (!truncFile) {
         return -1;
     }
