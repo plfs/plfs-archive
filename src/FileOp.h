@@ -6,6 +6,8 @@
 #include <sys/stat.h>
 #include <utime.h>
 
+#include <string>
+#include <map>
 #include <set>
 #include <vector>
 #include <string>
@@ -19,10 +21,11 @@ using namespace std;
 class
 FileOp {
     public:
-        virtual int op(const char *, bool isfile) = 0; // returns 0 or -errno
+        int op(const char *, unsigned char type); // ret 0 or -errno
         virtual const char *name() = 0;
         bool onlyAccessFile() {return false;}
         void ignoreErrno(int Errno); // can register errno's to be ignored
+        virtual int do_op(const char*, unsigned char type) = 0;
     protected:
         int retValue(int ret);
     private:
@@ -33,7 +36,7 @@ class
 ChownOp : public FileOp {
     public:
         ChownOp(uid_t, gid_t);
-        int op(const char *, bool);
+        int do_op(const char *, unsigned char);
         const char *name() { return "ChownOp"; }
     private:
         uid_t u;
@@ -44,7 +47,7 @@ class
 UtimeOp : public FileOp {
     public:
         UtimeOp(struct utimbuf *);
-        int op(const char *, bool);
+        int do_op(const char *, unsigned char);
         const char *name() { return "UtimeOp"; }
         bool onlyAccessFile() {return true;}
     private:
@@ -57,8 +60,8 @@ UtimeOp : public FileOp {
 class
 TruncateOp : public FileOp {
     public:
-        TruncateOp() {};
-        int op(const char *, bool);
+        TruncateOp();
+        int do_op(const char *, unsigned char);
         const char *name() { return "TruncateOp"; }
         void ignore(string);
     private:
@@ -69,26 +72,40 @@ class
 RmdirOp : public FileOp {
     public:
         RmdirOp() {};
-        int op(const char *, bool);
+        int do_op(const char *, unsigned char);
         const char *name() { return "RmdirOp"; }
 };
 
+// this class does a read dir
+// you can pass it a pointer to a map in which case it returns the names
+// and what their type is (e.g. DT_REG)
+// you can pass it a pointer to a set in which it returns just the names
+// you can pass it a pointer to a different FileOp instance in which case it
+// calls that for each file
+// the first bool controls whether it creates full paths or just returns the
+// file name
+// the second bool controls whether it ignores "." and ".."
 class
 ReaddirOp : public FileOp {
     public:
-        ReaddirOp(set<string> *);
-        int op(const char *, bool);
+        ReaddirOp(map<string,unsigned char>*,set<string>*, bool, bool);
+        int do_op(const char *, unsigned char);
         const char *name() { return "ReaddirOp"; }
+        int filter(string);
     private:
-        set<string> *entries;
+        map<string,unsigned char> *entries;
+        set<string> *names;
+        set<string> filters;
+        bool expand;
+        bool skip_dots;
 };
 
 class
-MkdirOp : public FileOp {
+CreateOp : public FileOp {
     public:
-        MkdirOp(mode_t);
-        int op(const char *, bool);
-        const char *name() { return "MkdirOp"; }
+        CreateOp(mode_t);
+        int do_op(const char *, unsigned char);
+        const char *name() { return "CreateOp"; }
     private:
         mode_t m;
 };
@@ -97,7 +114,7 @@ class
 ChmodOp : public FileOp {
     public:
         ChmodOp(mode_t);
-        int op(const char *, bool);
+        int do_op(const char *, unsigned char);
         const char *name() { return "ChmodOp"; }
     private:
         mode_t m;
@@ -107,7 +124,7 @@ class
 UnlinkOp : public FileOp {
     public:
         UnlinkOp() { }
-        int op(const char *, bool);
+        int do_op(const char *, unsigned char);
         const char *name() { return "UnlinkOp"; }
 };
 

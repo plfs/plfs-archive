@@ -30,7 +30,10 @@
 #include <iostream>
 #include <sstream>
 #include <map>
+#include <vector>
+
 #include "IOStore.h"
+
 using namespace std;
 
 #ifndef MAP_NOCACHE
@@ -58,6 +61,7 @@ class Util {
         static int Close( int ); 
         static int Closedir( DIR * );
         static int Creat( const char*, mode_t );
+        static int Filesize(const char*);
         static int Fsync( int );
         static uid_t Getuid();
         static gid_t Getgid();
@@ -108,8 +112,12 @@ class Util {
         static void addTime( string, double, bool );
         static char *hostname();
         static int retValue( int res );
+        static int traverseDirectoryTree(const char *physical, 
+                vector<string> &files, vector<string> &dirs, bool follow_links);
+
 		// Used to access underlying filesystems
 		static IOStore* ioStore;
+
     private:
         static void addBytes( string, size_t );
         static string timeToString(      HASH_MAP<string,double>::iterator,

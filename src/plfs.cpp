@@ -395,49 +395,6 @@ plfs_wtime() {
     return Util::getTime();
 }
 
-// just reads through a directory and returns all descendants
-// useful for gathering the contents of a container
-// this function should probably be in util
-// returns 0 or -errno
-int
-traverseDirectoryTree(const char *physical, vector<string> &files, 
-        vector<string> &dirs) 
-{
-    DIR *dir;
-    struct dirent *ent;
-    int ret = 0;
-    plfs_debug("%s on %s\n", __FUNCTION__, physical);
-
-    ret = Util::Opendir(physical, &dir);
-    if(ret!=0) {
-        if(ret==-ENOENT) return 0; // nothing to aggregate.  No problem.
-        else return ret;
-    }
-    dirs.push_back(physical);   // save the top dir
-
-    plfs_debug("opendir %s\n", physical);
-    while( (ret = Util::Readdir(dir,&ent)) == 0 ) {
-        plfs_debug("ret %d ent %s\n", ret, ent->d_name);
-        if (!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, "..")) continue; 
-        string child(physical);
-        child += "/";
-        child += ent->d_name;
-        plfs_debug("made child %s from path %s\n",child.c_str(),physical);
-        if ( Util::isDirectory( child.c_str() ) ) {
-            ret = traverseDirectoryTree(child.c_str(), files, dirs);
-        } else {
-            files.push_back(child);
-        }
-    }
-    if (ret == 1) ret = 0; // just means it hit the end of the directory
-
-    // now close the directory
-    if ( Util::Closedir( dir ) != 0 ) {
-        ret = -errno;
-    }
-    return ret;
-}
-
 int 
 plfs_create( const char *logical, mode_t mode, int flags, pid_t pid ) {
     PLFS_ENTER;
@@ -548,6 +505,9 @@ int isReader( int flags ) {
 
 // takes a logical path for a logical file and returns every physical component
 // comprising that file (canonical/shadow containers, subdirs, data files, etc)
+// may not be efficient since it checks every backend and probably some backends
+// won't exist.  Will be better to make this just go through canonical and find
+// everything that way.
 // returns 0 or -errno
 int
 plfs_collect_from_containers(const char *logical, vector<string> &files, 
@@ -558,22 +518,13 @@ plfs_collect_from_containers(const char *logical, vector<string> &files,
     ret = find_all_expansions(logical,possible_containers);
     if (ret!=0) PLFS_EXIT(ret);
 
+    bool follow_links = false;
     vector<string>::iterator itr;
     for(itr=possible_containers.begin();itr!=possible_containers.end();itr++) {
-        ret = traverseDirectoryTree(itr->c_str(),files,dirs);
-        if (ret!=0) break;
+        ret = Util::traverseDirectoryTree(itr->c_str(),files,dirs,follow_links);
+        if (ret!=0) { ret = -errno; break; }
     }
     PLFS_EXIT(ret);
-}
-
-int
-single_file_op(const char *physical, FileOp &op, bool isfile) {
-    int ret=0;
-    // MILO: Change this back
-    plfs_debug("%s: *** %s on %s: %d\n", __FUNCTION__,op.name(),physical,ret);
-    ret = op.op(physical,isfile);
-    plfs_debug("LIVED\n");
-    return ret;
 }
 
 // this function is shared by chmod/utime/chown maybe others
@@ -608,17 +559,16 @@ plfs_file_operation(const char *logical, FileOp &op) {
         files.push_back(path);
     }
 
-    // now apply the operation to each operand so long as ret==0
-    // do all files first.  Then do all dirs but do them in reverse
-    // order.  This is necessary for plfs_unlink which will rmdir 
-    // all the directories and it needs to do the children first
-    vector<string>::iterator itr;
+    // now apply the operation to each operand so long as ret==0.  dirs must be
+    // done in reverse order and files must be done first.  This is necessary
+    // for when op is unlink since children must be unlinked first.  for the
+    // other ops, order doesn't matter.
     vector<string>::reverse_iterator ritr;
-    for(itr = files.begin(); itr != files.end() && ret == 0; itr++) {
-        ret = single_file_op(itr->c_str(),op,true);
+    for(ritr = files.rbegin(); ritr != files.rend() && ret == 0; ++ritr) {
+        ret = op.op(ritr->c_str(),DT_REG);
     }
     for(ritr = dirs.rbegin(); ritr != dirs.rend() && ret == 0; ++ritr) {
-        ret = single_file_op(ritr->c_str(),op,false);
+        ret = op.op(ritr->c_str(),DT_DIR);
     }
     plfs_debug("%s: ret %d\n", __FUNCTION__,ret);
     PLFS_EXIT(ret);
@@ -704,14 +654,14 @@ plfs_stats( void *vptr ) {
 // this doesn't require the dirs to already exist
 // returns 0 or -errno
 int
-plfs_directory_operation(const char *logical, FileOp &op) {
+plfs_iterate_backends(const char *logical, FileOp &op) {
     int ret = 0;
     vector<string> exps;
     vector<string>::iterator itr;
     std::cout << "Doing a directory option on " << logical << "\n";
     if ( (ret = find_all_expansions(logical,exps)) != 0 ) PLFS_EXIT(ret);
     for(itr = exps.begin(); itr != exps.end() && ret == 0; itr++ ){
-        ret = single_file_op(itr->c_str(),op,false);
+        ret = op.op(itr->c_str(),DT_DIR);
     }
     PLFS_EXIT(ret);
 }
@@ -721,8 +671,8 @@ plfs_directory_operation(const char *logical, FileOp &op) {
 int 
 plfs_readdir( const char *logical, void *vptr ) {
     PLFS_ENTER;
-    ReaddirOp op((set<string> *)vptr);
-    ret = plfs_directory_operation(logical,op);
+    ReaddirOp op(NULL,(set<string> *)vptr,false,false);
+    ret = plfs_iterate_backends(logical,op);
     PLFS_EXIT(ret);
 }
 
@@ -733,8 +683,8 @@ plfs_readdir( const char *logical, void *vptr ) {
 int
 plfs_mkdir( const char *logical, mode_t mode ) {
     PLFS_ENTER;
-    MkdirOp op(mode);
-    ret = plfs_directory_operation(logical,op);
+    CreateOp op(mode);
+    ret = plfs_iterate_backends(logical,op);
     PLFS_EXIT(ret);
 }
 
@@ -749,15 +699,15 @@ plfs_rmdir( const char *logical ) {
     PLFS_ENTER;
     mode_t mode = Container::getmode(path); // save in case we need to restore
     RmdirOp op;
-    ret = plfs_directory_operation(logical,op);
+    ret = plfs_iterate_backends(logical,op);
 
     // check if we started deleting non-empty dirs, if so, restore
     if (ret==-ENOTEMPTY) {
         plfs_debug("Started removing a non-empty directory %s. Will restore.\n",
                         logical);
-        MkdirOp op(mode);
+        CreateOp op(mode);
         op.ignoreErrno(EEXIST);
-        plfs_directory_operation(logical,op); // don't overwrite ret 
+        plfs_iterate_backends(logical,op); // don't overwrite ret 
     }
     PLFS_EXIT(ret);
 }
@@ -861,17 +811,18 @@ plfs_recover( const char *logical ) {
 
     // ok, it's not at the canonical location
     // check all the other backends to see if they have it 
+    // also check canonical bec it's possible it's a dir that only exists there
     isdir = false;  // possible we find it and it's a directory
     isfile = false; // possible we find it and it's a container
     found = false;  // possible it doesn't exist (ENOENT)
     vector<string> exps;
     if ( (ret = find_all_expansions(logical,exps)) != 0 ) PLFS_EXIT(ret);
     for(vector<string>::iterator itr = exps.begin(); itr != exps.end(); itr++ ){
-        if (itr==exps.begin()) continue; // we already know not at canonical
         ret  = (int) Container::isContainer(*itr,&former_mode);
         if (ret) {
             isfile = found = true;
             former = *itr;
+            break;  // no need to keep looking
         } else if (S_ISDIR(former_mode)) {
             isdir = found = true;
         }
@@ -903,40 +854,32 @@ plfs_recover( const char *logical ) {
     //    else assert(0): there should be nothing else
     plfs_debug("%s need to transfer %s from %s into %s\n",
             __FUNCTION__, logical, former.c_str(), canonical.c_str());
-    DIR *dir;
-    struct dirent *ent;
-    ret = Util::Opendir( former.c_str(), &dir );
-    vector<string> unlinks;
-    if ( dir == NULL ) PLFS_EXIT(-errno); 
+    map<string,unsigned char> entries;
+    map<string,unsigned char>::iterator itr;
+    string old_path, new_path;
+    ReaddirOp rop(&entries,NULL,false,true);
+    UnlinkOp uop;
+    CreateOp cop(former_mode);
+    ret = rop.op(former.c_str(),DT_DIR);
+    if ( ret != 0) PLFS_EXIT(ret); 
 
-    // is it safe to do an unlink() in the middle of a readdir() ??
-    // assume no so save the things to unlink and then unlink them at end
-    while((ret=Util::Readdir(dir,&ent))==0) {
-        if (!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, "..")) continue;
-        string new_path, old_path;
-        struct stat stbuf;
-        old_path = former;    old_path += "/"; old_path += ent->d_name;
-        new_path = canonical; new_path += "/"; new_path += ent->d_name;
-        switch(ent->d_type){
+    for(itr=entries.begin();itr!=entries.end() && ret==0;itr++) {
+        old_path = former;    old_path += "/"; old_path += itr->first;
+        new_path = canonical; new_path += "/"; new_path += itr->first;;
+        switch(itr->second){
             case DT_REG:
-                // first check to make sure it's zero length
-                // currently all files at top-level are zero length
-                // but if we ever change this and forget to change this
-                // code, let's at least detect this here and error out
-                ret = retValue(Util::Stat(old_path.c_str(),&stbuf));
-                if (ret != 0) PLFS_EXIT(ret);
-                if (stbuf.st_size != 0) {
-                    fprintf(stderr,"%s needs to deal with non-empty files.\n",
-                            __FUNCTION__);
-                    ret = -ENOSYS;
-                } else {
-                    ret = retValue(Util::Creat(new_path.c_str(),stbuf.st_mode));
-                    if (ret==0) unlinks.push_back(old_path.c_str());
-                }
+                // when this function was written, all top-level files within
+                // the canonical container were zero-length.  This function
+                // assumes that they still are so continue to check in case
+                // in the future someone adds a non-zero-length top level file
+                // in which case this function will need to be modified
+                assert(Util::Filesize(old_path.c_str())==0);
+                ret = cop.op(new_path.c_str(),DT_REG);
+                if (ret==0) ret = uop.op(old_path.c_str(),DT_REG);
                 break;
             case DT_LNK:
                 ret = recover_link(old_path,new_path);
-                if (ret==0) unlinks.push_back(old_path.c_str());
+                if (ret==0) ret = uop.op(old_path.c_str(),DT_LNK);
                 break;
             case DT_DIR:
                 ret =retValue(Util::Symlink(old_path.c_str(),new_path.c_str()));
@@ -947,14 +890,9 @@ plfs_recover( const char *logical ) {
                 ret = -ENOSYS;
                 break;
         }
-        if (ret != 0) break;
     }
-    if (ret==1) ret = 0; // 1 means read to end of directory
-    int close_ret = retValue(Util::Closedir(dir));
-    if (ret==0) ret = close_ret;    // only if no prior error
 
-    ret = remove_all(unlinks);  // remove everything we were supposed to
-
+    // we did everything we could.  Hopefully that's enough.
     if ( ret != 0 ) {
         printf("Unable to recover %s.\nYou may be able to recover the file"
                 " by manually moving contents of %s to %s\n", 
@@ -1783,12 +1721,13 @@ plfs_readlink(const char *logical, char *buf, size_t bufsize) {
 int
 plfs_rename( const char *logical, const char *to ) {
     PLFS_ENTER;
+    ret = -ENOSYS;
     // this code needs to be fixed badly
     // one way to do it is to go through and fix all symlinks with
     // canonical containers to reflect new path
     // better way is to make the symlinks not contain absolute paths
     // in the meantime:
-    PLFS_EXIT(-ENOSYS);
+    PLFS_EXIT(ret);
 
     /*
     ExpansionInfo exp_info;
@@ -1858,6 +1797,8 @@ plfs_sync( Plfs_fd *pfd, pid_t pid ) {
 // be nice to use the new FileOp class for this.  Bit tricky though maybe.
 // by the way, this should only be called now with truncate_only==true
 // we changed the unlink functionality to use the new FileOp stuff
+//
+// the TruncateOp internally does unlinks 
 int 
 truncateFile(const char *logical) {
     TruncateOp op;
@@ -1986,7 +1927,7 @@ extendFile( Plfs_fd *of, string strPath, off_t offset ) {
     PLFS_EXIT(ret);
 }
 
-int plfs_file_version(const char *logical, char **version) {
+int plfs_file_version(const char *logical, const char **version) {
     PLFS_ENTER; (void)ret; // suppress compiler warning
     mode_t mode;
     if (!is_plfs_file(logical, &mode)) {
