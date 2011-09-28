@@ -107,10 +107,14 @@ class ReadIndex {
     int insertGlobal(ReadTraceElement readInfo);
     int flush(string , int );
     int readIndex( string hostindex );
+    int getCount(void ){return count;}
+    int close();
     friend ostream& operator <<(ostream &,const ReadIndex &);
     private:
     vector<ReadTraceElement> readTrace;
     map<off_t,ReadTraceElement> globalReadIndex;
+    int fd;
+    int count;
 };
 
 class Index : public Metadata {
@@ -143,7 +147,7 @@ class Index : public Metadata {
 
         size_t totalBytes( );
 
-        int getChunkFd( pid_t chunk_id );
+        int getChunkFd( pid_t chunk_mid );
 
         int setChunkFd( pid_t chunk_id, int fd );
 

@@ -848,6 +848,7 @@ plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
     bool new_index_created = false;
     Index *index = pfd->getIndex(); 
     ReadIndex *readIndex = pfd->getReadIndex();
+    int read_count = readIndex->getCount();
     ssize_t ret = 0;
     ReadTraceElement curReadInfo; 
 
@@ -893,6 +894,9 @@ plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
     if( PLFS_READ_TRACE ) {
         curReadInfo.end_timestamp = Util::getTime();
         readIndex->insertLocal(curReadInfo);
+        if((read_count%5000) == 0){
+            readIndex->flush(pfd->getPath(), (int)pfd->getPid());
+        }
     }
     PLFS_EXIT(ret);
 }
@@ -1983,6 +1987,7 @@ plfs_close( Plfs_fd *pfd, pid_t pid, uid_t uid, int open_flags,
         if( PLFS_READ_TRACE ) {
             plfs_debug("About to flush the read trace\n");
             readIndex->flush(pfd->getPath(), (int)pfd->getPid());
+            readIndex->close();
         }
     }
 

@@ -663,8 +663,7 @@ string Container::getReadIndexPath( const string &path, const string &host,
         int pid)
 {
     ostringstream oss;
-    string ext_path;
-    ext_path = getHostDirPath(path,host);
+    string ext_path = path;
     oss << "/" << READINDEXPREFIX << pid;
     ext_path += oss.str();
     return ext_path;

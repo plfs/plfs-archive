@@ -240,7 +240,7 @@ ostream& operator <<(ostream &os,const ReadTraceElement &entry) {
     begin_timestamp = entry.begin_timestamp;
     end_timestamp  = entry.end_timestamp;
     os  << setw(5) 
-        << entry.pid             << " w " 
+        << entry.pid             << " r " 
         << setw(16)
         << entry.offset << " " 
         << setw(8) << entry.size << " "
@@ -266,6 +266,7 @@ ostream& operator <<(ostream &os,const ReadIndex &ndx ) {
 
 
 ReadIndex::ReadIndex (){
+    fd=-1;
 }
 
 // Used on a read operation
@@ -277,6 +278,8 @@ void ReadIndex::insertLocal( ReadTraceElement readInfo){
 int ReadIndex::insertGlobal( ReadTraceElement readInfo){
     int ret = 0;
     pair<map<off_t,ReadTraceElement>::iterator,bool> result;
+    plfs_debug("Inserting read Trace offset %ld, proc %ld, size %ld\n",
+                readInfo.offset,readInfo.pid,readInfo.size);
     result = globalReadIndex.insert(
             pair<off_t,ReadTraceElement>( readInfo.offset, readInfo ) );
     if( result.second == false ) ret = 1;
@@ -287,7 +290,6 @@ int ReadIndex::insertGlobal( ReadTraceElement readInfo){
 int ReadIndex::readIndex( string hostindex ) {
     
     off_t length = (off_t)-1;
-    int   fd = -1;
     void  *maddr = NULL;
 
     ostringstream os;
@@ -310,12 +312,23 @@ int ReadIndex::readIndex( string hostindex ) {
         ReadTraceElement h_entry = h_index[i];
         
         int ret = insertGlobal( h_entry );
-        if ( ret != 0 ) {
-            return Index::cleanupReadIndex( fd, maddr, length, ret, "insertGlobal",
-                hostindex.c_str() );
-        }
+        //if ( ret != 0 ) {
+        //    plfs_debug("A global insert failed while aggregating the read trace\n");
+        //    return Index::cleanupReadIndex( fd, maddr, length, ret, "insertGlobal",
+        //        hostindex.c_str() );
+        //}
     }
     return Index::cleanupReadIndex(fd, maddr, length, 0, "DONE",hostindex.c_str());
+}
+
+int ReadIndex::close(){
+
+    int ret = 0;
+    if( fd > 0 ){
+        ret = Util::Close(fd);
+    }
+    
+    return ret;
 }
 
 int ReadIndex::flush(string path,int pid){
@@ -325,10 +338,11 @@ int ReadIndex::flush(string path,int pid){
     plfs_debug("Going to open %s for the readIndex flush\n",readIndexPath.c_str());
     mode_t mode = S_IRWXU | S_IRGRP | S_IROTH;
     int flags = O_WRONLY | O_APPEND | O_CREAT;
-    int fd = Util::Open( readIndexPath.c_str(), flags, mode );
-        
-    ret = fd;
-    if( ret > 0 ){
+    if(fd<0){
+        fd = Util::Open( readIndexPath.c_str(), flags, mode );
+    }
+    
+    if( fd > 0 ){
         size_t  len = readTrace.size() * sizeof(ReadTraceElement);
         if ( len == 0 ) return 0;   // could be 0 if we weren't buffering
         // valgrind complains about writing uninitialized bytes here....
@@ -340,14 +354,10 @@ int ReadIndex::flush(string path,int pid){
                 __FUNCTION__, fd, strerror(errno));
         }
     }
-    
+   
+    readTrace.clear();
     return ret;
 }
-
-int agReadIndex(){
-
-}
-
 
 Index::Index( string logical, int fd ) : Metadata::Metadata() {
     init( logical );
