@@ -66,7 +66,7 @@ will ALWAYS be created in shadow backends.  This can be used in instances
 where the canonical is desired to be on slow global and the data pieces are
 desired to be on fast local.  In scenarios with lots of different fast local
 mounts, different nodes will have different sets of shadow_backends defined
-so that each nodes always write to the fastest possible backend.  For reading,
+so that each node always writes to the fastest possible backend.  For reading,
 this will require however that all locations are visible everywhere.
 .RE
 
