@@ -50,6 +50,27 @@ The location where you want the physcial containers to reside.  You can have a c
 .RE
 
 .B
+canonical_backends
+.RS
+This is an advanced directive and will not be used in typical installations.  See shadow_backends for a more detailed description.
+.RE
+
+.B
+shadow_backends
+.RS
+This is an advanced directive and will not be used in typical installations.  This, along with canonical_backends, 
+allows the user to specify that some set of backends are where canonical
+containers should be placed and some different set of backends are where
+shadows should be placed.  If these directives are used, then shadow subdirs
+will ALWAYS be created in shadow backends.  This can be used in instances
+where the canonical is desired to be on slow global and the data pieces are
+desired to be on fast local.  In scenarios with lots of different fast local
+mounts, different nodes will have different sets of shadow_backends defined
+so that each nodes always write to the fastest possible backend.  For reading,
+this will require however that all locations are visible everywhere.
+.RE
+
+.B
 global_summary_dir
 .RS
 The path into which to drop summary information.  Useful to determine how
