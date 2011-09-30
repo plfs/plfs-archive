@@ -1131,7 +1131,7 @@ int Container::getattr( const string &path, struct stat *stbuf ) {
 // returns -errno or 0
 int Container::makeTopLevel( const string &expanded_path,  
         const string &hostname, mode_t mode, pid_t pid, 
-        unsigned mnt_pt_checksum )
+        unsigned mnt_pt_checksum, bool lazy_subdir )
 {
     /*
         // ok, instead of mkdir tmp ; chmod tmp ; rename tmp top
@@ -1245,6 +1245,12 @@ int Container::makeTopLevel( const string &expanded_path,
             }
 
             // go ahead and make our subdir here now (good for both N-1 & N-N):
+            // unless we are in lazy_subdir mode which probably means that
+            // user has explicitly set canonical_backends and shadow_backends
+            // bec they want to control a split btwn large local data and small
+            // global metadata
+            //
+            // if that is not the case, then do it eagerly 
             // N-N: this is good since this means there will never be
             // shadow containers since every process in N-N wins their race
             // since in N-N there is no-one to race!
@@ -1257,12 +1263,15 @@ int Container::makeTopLevel( const string &expanded_path,
             // don't create the hostdir now.  later when it's created it
             // will be created by hashing on node and is therefore likely to 
             // be created in a shadow container
-            bool test_metalink = false;
+            bool test_metalink = false; 
+            bool create_subdir = !lazy_subdir && !test_metalink;
+
             if (test_metalink) {
                 fprintf(stderr,"Warning.  This PLFS code is experimental.  "
                     "You should not see this message.  Pls fix %s %d\n",
                     __FILE__, __LINE__);
-            } else {
+            }
+            if (create_subdir) {
                 if (makeHostDir(expanded_path,hostname,mode,PARENT_CREATED)<0) {
                     return -errno;
                 }
@@ -1273,6 +1282,9 @@ int Container::makeTopLevel( const string &expanded_path,
                 // version stuff in it.  In that case, just assume
                 // compatible?  we could move this up into the temporary so
                 // it's made before the rename.
+                // only reason it to do it after the rename is that so only
+                // the winner does it.  If we do it before the rename, all the
+                // losers will do it too and that's a bit more overhead
             ostringstream oss2;
             oss2 << expanded_path << "/" << VERSIONPREFIX
                  << "-tag." << STR(TAG_VERSION)
@@ -1401,7 +1413,7 @@ mode_t Container::containerMode( mode_t mode ) {
 // want to error out we need to explicitly set errno
 int Container::createHelper(const string &expanded_path, const string &hostname,
         mode_t mode, int flags, int *extra_attempts, pid_t pid, 
-        unsigned mnt_pt_cksum ) 
+        unsigned mnt_pt_cksum, bool lazy_subdir ) 
 {
     // this below comment is specific to FUSE
     // TODO we're in a mutex here so only one thread will
@@ -1425,7 +1437,8 @@ int Container::createHelper(const string &expanded_path, const string &hostname,
         plfs_debug("Making top level container %s %x\n", 
                 expanded_path.c_str(),mode);
         begin_time = time(NULL);
-        res = makeTopLevel( expanded_path, hostname, mode, pid, mnt_pt_cksum );
+        res = makeTopLevel( expanded_path, hostname, mode, pid, 
+                mnt_pt_cksum, lazy_subdir );
         end_time = time(NULL);
         if ( end_time - begin_time > 2 ) {
             plfs_debug("WTF: TopLevel create of %s took %.2f\n", 
@@ -1446,12 +1459,12 @@ int Container::createHelper(const string &expanded_path, const string &hostname,
 // it at the same time
 int Container::create( const string &expanded_path, const string &hostname,
         mode_t mode, int flags, int *extra_attempts, pid_t pid,
-        unsigned mnt_pt_cksum ) 
+        unsigned mnt_pt_cksum, bool lazy_subdir ) 
 {
     int res = 0;
     do {
         res = createHelper(expanded_path, hostname, mode,flags,extra_attempts,
-                pid, mnt_pt_cksum);
+                pid, mnt_pt_cksum, lazy_subdir);
         if ( res != 0 ) {
             if ( errno != EEXIST && errno != ENOENT && errno != EISDIR
                     && errno != ENOTEMPTY ) 

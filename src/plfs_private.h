@@ -21,6 +21,8 @@ typedef struct {
     string mnt_pt;  // the logical mount point
     string *statfs; // where to resolve statfs calls
     vector<string> backends;    // a list of physical locations 
+    vector<string> canonical_backends;
+    vector<string> shadow_backends;
     vector<string> mnt_tokens;
     unsigned checksum;
 } PlfsMount;

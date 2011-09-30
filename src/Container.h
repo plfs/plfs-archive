@@ -40,7 +40,8 @@ class Container {
     public:
             // static stuff
         static int create( const string &, const string &, 
-                mode_t mode, int flags, int *extra_attempts,pid_t, unsigned );
+                mode_t mode, int flags, int *extra_attempts,pid_t, 
+                unsigned, bool lazy_subdir );
 
         static bool isContainer(const string &physical_path,mode_t*); 
         static string getIndexPath( const string &, const string &, 
@@ -115,9 +116,10 @@ class Container {
     private:
             // static stuff
         static int createHelper( const string &, const string &, 
-                mode_t mode, int flags, int *extra_attempts, pid_t,unsigned );
+                mode_t mode, int flags, int *extra_attempts, pid_t,unsigned,
+                bool lazy_subdir);
         static int makeTopLevel(const string &, const string &, mode_t, pid_t,
-                unsigned);
+                unsigned, bool lazy_subdir);
         static string getChunkPath( const string &, const string &, 
                 int pid, const char *, double );
         static string chunkPath( const string &hostdir, const char *type, 

@@ -1081,17 +1081,24 @@ int Plfs::writeDebug( char *buf, size_t size, off_t offset, const char *path ) {
     return validsize; 
 }
 
-string Plfs::confToString( PlfsConf *p, PlfsMount *pmnt ) {
+void
+printBackends(const char *type, vector<string> &backends, ostringstream &oss) {
+    oss << type << " Backends: ";
+    for(vector<string>::iterator i = backends.begin();i!=backends.end();i++) {
+        oss << *i << ",";
+    }
+    oss << endl;
+}
+    
+string Plfs::confToString(PlfsConf *p, PlfsMount *pmnt) {
     ostringstream oss;
     oss << "Mount point: "      << pmnt->mnt_pt << endl  
         << "Direct IO: "        << p->direct_io << endl
         << "Executable bit: "   << ! p->direct_io << endl
-        << "Backends: "
         ;
-    vector<string>::iterator itr;
-    for ( itr = pmnt->backends.begin(); itr != pmnt->backends.end(); itr++ ) {
-        oss << *itr << ",";
-    }
+    printBackends("", pmnt->backends, oss);
+    printBackends("Canonical", pmnt->canonical_backends,oss);
+    printBackends("Shadow", pmnt->shadow_backends, oss);
     oss << endl
         << "Backend checksum: " << pmnt->checksum << endl
         << "Threadpool size: " << p->threadpool_size << endl

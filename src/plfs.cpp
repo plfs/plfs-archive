@@ -40,10 +40,10 @@ requirePlfsPath {
 };
 
 enum
-hashMethod {
-    HASH_BY_FILENAME,
-    HASH_BY_NODE,
-    NO_HASH,
+expansionMethod {
+    EXPAND_CANONICAL,
+    EXPAND_SHADOW,
+    EXPAND_TO_I,
 };
 
 typedef struct {
@@ -51,15 +51,26 @@ typedef struct {
     bool expand_error;
     PlfsMount *mnt_pt;
     int Errno;  // can't use just errno, it's a weird macro
-    int which_backend;
+    string expanded;
 } ExpansionInfo;
+
+// a struct containing all the various containers paths for a logical file
+typedef struct {
+    string shadow;            // full path to shadow container
+    string canonical;         // full path to canonical
+    string hostdir;           // the name of the hostdir itself
+    string shadow_hostdir;    // full path to shadow hostdir
+    string canonical_hostdir; // full path to the canonical hostdir
+    string shadow_backend;    // full path of shadow backend 
+    string canonical_backend; // full path of canonical backend 
+} ContainerPaths;
 
 #define PLFS_ENTER PLFS_ENTER2(PLFS_PATH_REQUIRED)
 
 #define PLFS_ENTER2(X) \
  int ret = 0;\
  ExpansionInfo expansion_info; \
- string path = expandPath(logical,&expansion_info,HASH_BY_FILENAME,-1,0); \
+ string path = expandPath(logical,&expansion_info,EXPAND_CANONICAL,-1,0); \
  plfs_debug("EXPAND in %s: %s->%s\n",__FUNCTION__,logical,path.c_str()); \
  if (expansion_info.expand_error && X==PLFS_PATH_REQUIRED) { \
      PLFS_EXIT(-ENOENT); \
@@ -99,7 +110,7 @@ get_backend(const ExpansionInfo &exp, size_t which) {
 }
 const string &
 get_backend(const ExpansionInfo &exp) {
-    return get_backend(exp,exp.which_backend);
+    return exp.expanded; 
 }
 
 char *plfs_gethostname() {
@@ -146,17 +157,26 @@ find_mount_point_using_tokens(PlfsConf *pconf,
 }
 
 // takes a logical path and returns a physical one
-// which_backend is only meaningful when hash_method==NO_HASH
+// the expansionMethod controls whether it returns the canonical path or a
+// shadow path or a simple expansion to the i'th backend which is used for
+// iterating across the backends
+//  
+// this version of plfs which allows shadow_backends and canonical_backends
+// directives in the plfsrc is an easy way to put canonical containers on
+// slow globally visible devices and shadow containers on faster local devices
+// but it currently does pretty much require that in order to read that all
+// backends are mounted (this is for scr-plfs-ssdn-emc project).  will need
+// to be relaxed.
 string
 expandPath(string logical, ExpansionInfo *exp_info, 
-        hashMethod hash_method, int which_backend, int depth) 
+        expansionMethod hash_method, int which_backend, int depth) 
 {
     // set default return values in exp_info
     exp_info->is_mnt_pt = false;
     exp_info->expand_error = false;
     exp_info->mnt_pt = NULL;
     exp_info->Errno = 0;
-    exp_info->which_backend = -1; 
+    exp_info->expanded = "UNINITIALIZED";
 
     // get our initial conf
     static PlfsConf *pconf = NULL;
@@ -244,27 +264,39 @@ expandPath(string logical, ExpansionInfo *exp_info,
             remaining.c_str(),filename.c_str());
 
     // choose a backend unless the caller explicitly requested one
+    // also set the set of backends to use.  If the plfsrc has separate sets
+    // for shadows and for canonical, then use them appropriately
+    int hash_val;
+    vector<string> *backends = &pm->backends;
     switch(hash_method) {
-    case HASH_BY_FILENAME:
-        exp_info->which_backend = Container::hashValue(filename.c_str());
+    case EXPAND_CANONICAL:
+        hash_val = Container::hashValue(filename.c_str());
+        backends = pm->canonical_backends.size()>0 ?
+                   &pm->canonical_backends :
+                   &pm->backends;
         break;
-    case HASH_BY_NODE:
-        exp_info->which_backend = Container::hashValue(Util::hostname());
+    case EXPAND_SHADOW:
+        hash_val = Container::hashValue(Util::hostname());
+        backends = pm->shadow_backends.size()>0 ?
+                   &pm->shadow_backends :
+                   &pm->backends;
         break;
-    case NO_HASH:
-        exp_info->which_backend = which_backend; // user specified
+    case EXPAND_TO_I:
+        hash_val = which_backend; // user specified
+        backends = &pm->backends;
         break;
     default:
-        exp_info->which_backend = -1;
+        hash_val = -1;
         assert(0);
         break;
     }
-    exp_info->which_backend %= pm->backends.size();
-    string expanded = get_backend(*exp_info) + "/" + remaining;
+    
+    hash_val %= backends->size();   // don't index out of vector
+    exp_info->expanded = (*backends)[hash_val] + "/" + remaining;
     plfs_debug("%s: %s -> %s (%d.%d)\n", __FUNCTION__, 
-            logical.c_str(), expanded.c_str(),
-            hash_method,exp_info->which_backend);
-    return expanded;
+            logical.c_str(), exp_info->expanded.c_str(),
+            hash_method,hash_val);
+    return exp_info->expanded;
 }
 
 // a helper routine that returns a list of all possible expansions
@@ -279,7 +311,7 @@ find_all_expansions(const char *logical, vector<string> &containers) {
     PLFS_ENTER;
     ExpansionInfo exp_info;
     for(unsigned i = 0; i < expansion_info.mnt_pt->backends.size();i++){
-        path = expandPath(logical,&exp_info,NO_HASH,i,0);
+        path = expandPath(logical,&exp_info,EXPAND_TO_I,i,0);
         if(exp_info.Errno) PLFS_EXIT(exp_info.Errno);
         containers.push_back(path);
     }
@@ -306,6 +338,17 @@ plfs_dump_index_size() {
     return (int)sizeof(e);
 }
 
+int
+print_backends( vector<string> &backends, const char *which, bool check_dirs ) {
+    int ret = 0;
+    vector<string>::iterator bitr;
+    for(bitr = backends.begin(); bitr != backends.end();bitr++){
+        cout << "\t" << which << " Backend: " << *bitr << endl;
+        if(check_dirs) ret = plfs_check_dir("backend",*bitr,ret); 
+    }
+    return ret;
+}
+
 // returns 0 or -EINVAL or -ENOENT
 int
 plfs_dump_config(int check_dirs) {
@@ -320,6 +363,7 @@ plfs_dump_config(int check_dirs) {
     }
 
     // if we make it here, we've parsed correctly
+    vector<int> rets;
     int ret = 0;
     cout << "Config file correctly parsed:" << endl
         << "Num Hostdirs: " << pconf->num_hostdirs << endl
@@ -332,15 +376,13 @@ plfs_dump_config(int check_dirs) {
                 pconf->global_summary_dir->c_str(),ret);
     }
     map<string,PlfsMount*>::iterator itr; 
-    vector<string>::iterator bitr;
     for(itr=pconf->mnt_pts.begin();itr!=pconf->mnt_pts.end();itr++) {
         PlfsMount *pmnt = itr->second; 
         cout << "Mount Point " << itr->first << ":" << endl;
         if(check_dirs) ret = plfs_check_dir("mount_point",itr->first,ret);
-        for(bitr = pmnt->backends.begin(); bitr != pmnt->backends.end();bitr++){
-            cout << "\tBackend: " << *bitr << endl;
-            if(check_dirs) ret = plfs_check_dir("backend",*bitr,ret); 
-        }
+        ret = print_backends(pmnt->backends,"",check_dirs);
+        ret = print_backends(pmnt->canonical_backends,"Canonical",check_dirs);
+        ret = print_backends(pmnt->shadow_backends,"Shadow",check_dirs);
         if(pmnt->statfs) {
             cout << "\tStatfs: " << pmnt->statfs->c_str() << endl;
             if(check_dirs) {
@@ -404,6 +446,30 @@ plfs_wtime() {
     return Util::getTime();
 }
 
+// this is a helper routine that takes a logical path and figures out a 
+// bunch of derived paths from it
+int
+findContainerPaths(const string &logical, ContainerPaths &paths) {
+    ExpansionInfo exp_info;
+    char *hostname = Util::hostname();
+
+    // set up our paths.  expansion errors shouldn't happen but check anyway
+    // set up shadow first
+    paths.shadow = expandPath(logical,&exp_info,EXPAND_SHADOW,-1,0); 
+    if (exp_info.Errno) return (exp_info.Errno);
+    paths.shadow_hostdir = Container::getHostDirPath(paths.shadow,hostname);
+    paths.hostdir=paths.shadow_hostdir.substr(paths.shadow.size(),string::npos);
+    paths.shadow_backend = get_backend(exp_info);
+
+    // now set up canonical
+    paths.canonical = expandPath(logical,&exp_info,EXPAND_CANONICAL,-1,0);
+    if (exp_info.Errno) return (exp_info.Errno);
+    paths.canonical_backend = get_backend(exp_info);
+    paths.canonical_hostdir=Container::getHostDirPath(paths.canonical,hostname);
+
+    return 0;  // no expansion errors.  All paths derived and returned
+}
+
 int 
 plfs_create( const char *logical, mode_t mode, int flags, pid_t pid ) {
     PLFS_ENTER;
@@ -413,13 +479,36 @@ plfs_create( const char *logical, mode_t mode, int flags, pid_t pid ) {
     //if (!S_ISREG(mode)) {  // e.g. mkfifo might need to be handled differently
     if (S_ISFIFO(mode)) {
         plfs_debug("%s on non-regular file %s?\n",__FUNCTION__, logical);
-        return -ENOSYS;
+        PLFS_EXIT(-ENOSYS);
+    }
+
+    // ok.  For instances in which we ALWAYS want shadow containers such
+    // as we have a canonical location which is remote and slow and we want
+    // ALWAYS to store subdirs in faster shadows, then we want to create
+    // the subdir's lazily.  This means that the subdir will not be created
+    // now and later when procs try to write to the file, they will discover
+    // that the subdir doesn't exist and they'll set up the shadow and the
+    // metalink at that time
+    bool lazy_subdir = false; 
+
+    if (expansion_info.mnt_pt->shadow_backends.size()>0) {
+        // ok, user has explicitly set a set of shadow_backends
+        // this suggests that the user wants the subdir somewhere else
+        // beside the canonical location.  Let's double check though.
+        ContainerPaths paths;
+        ret = findContainerPaths(logical,paths);
+        if (ret!=0) PLFS_EXIT(ret); 
+
+        lazy_subdir = !(paths.shadow==paths.canonical);
+        plfs_debug("Due to explicit shadow_backends directive, setting "
+                "subdir %s to be created %s\n",
+                paths.shadow.c_str(), 
+                (lazy_subdir?"lazily":"eagerly"));
     }
 
     int attempt = 0;
-    ret = 0; // suppress compiler warning
     ret =  Container::create(path,Util::hostname(),mode,flags,
-            &attempt,pid,expansion_info.mnt_pt->checksum);
+            &attempt,pid,expansion_info.mnt_pt->checksum,lazy_subdir);
     PLFS_EXIT(ret);
 }
 
@@ -438,6 +527,13 @@ addWriter(WriteFile *wf, pid_t pid, const char *path, mode_t mode,
 
     // just loop a second time in order to deal with ENOENT
     for( int attempts = 0; attempts < 2; attempts++ ) {
+        // ok, the WriteFile *wf has a physical path in it which is 
+        // path to canonical.  It attempts to open a file in a subdir
+        // at that path.  If it fails, it should be bec there is no
+        // subdir in the canonical. [If it fails for any other reason, something
+        // is badly broken somewhere.]
+        // When it fails, create the hostdir.  It might be a metalink in
+        // which case change the physical path in the WriteFile to shadow path
         writers = ret = wf->addWriter( pid, false ); 
         if ( ret != -ENOENT ) break;    // everything except ENOENT leaves
         
@@ -449,35 +545,18 @@ addWriter(WriteFile *wf, pid_t pid, const char *path, mode_t mode,
         // 4) change the WriteFile path to point to shadow
         // 4) loop and try one more time 
         char *hostname = Util::hostname();
-        string shadow;            // full path to shadow container
-        string canonical;         // full path to canonical
-        string hostdir;           // the name of the hostdir itself
-        string shadow_hostdir;    // full path to shadow hostdir
-        string canonical_hostdir; // full path to the canonical hostdir
-        string shadow_backend;    // full path of shadow backend 
-        string canonical_backend; // full path of canonical backend 
 
-        // set up our paths.  expansion errors shouldn't happen but check anyway
-        // set up shadow first
-        ExpansionInfo exp_info;
-        shadow = expandPath(logical,&exp_info,HASH_BY_NODE,-1,0); 
-        if (exp_info.Errno) PLFS_EXIT(exp_info.Errno);
-        shadow_hostdir = Container::getHostDirPath(shadow,hostname);
-        hostdir = shadow_hostdir.substr(shadow.size(),string::npos);
-        shadow_backend = get_backend(exp_info);
-
-        // now set up canonical
-        canonical = expandPath(logical,&exp_info,HASH_BY_FILENAME,-1,0);
-        if (exp_info.Errno) PLFS_EXIT(exp_info.Errno);
-        canonical_backend = get_backend(exp_info);
-        canonical_hostdir = Container::getHostDirPath(canonical,hostname);
+        // discover all physical paths from logical one
+        ContainerPaths paths;
+        ret = findContainerPaths(logical,paths);
+        if (ret!=0) PLFS_EXIT(ret); 
 
         // make the shadow container and hostdir (it might be canonical)
         plfs_debug("Making %s hostdir for %s at %s\n",
-                shadow==canonical?"canonical":"shadow",
+                paths.shadow==paths.canonical?"canonical":"shadow",
                 logical.c_str(),
-                shadow.c_str());
-        ret =Container::makeHostDir(shadow,hostname,mode,PARENT_ABSENT);
+                paths.shadow.c_str());
+        ret =Container::makeHostDir(paths.shadow,hostname,mode,PARENT_ABSENT);
         if (ret==-EISDIR||ret==-EEXIST) {
             // a sibling beat us. No big deal. shouldn't happen in ADIO though
             ret = 0;
@@ -485,25 +564,26 @@ addWriter(WriteFile *wf, pid_t pid, const char *path, mode_t mode,
 
         if (ret!=0) {
             plfs_debug("Something weird in %s for %s.  Retrying.\n",
-                    __FUNCTION__, shadow.c_str());
+                    __FUNCTION__, paths.shadow.c_str());
             continue; 
         }
 
         // once we are here, we have the hostdir created
         // if it's in a shadow container, then link it in 
-        if (shadow!=canonical) {
+        if (paths.shadow!=paths.canonical) {
             // link the shadow hostdir into its canonical location
             // some errors are OK: indicate merely that we lost race to sibling
             plfs_debug("Need to link %s into %s (hostdir ret %d)\n", 
-                    shadow_hostdir.c_str(), canonical.c_str(),ret);
-            ret = Container::createMetalink(canonical_backend,shadow_backend,
-                    canonical_hostdir);
+                    paths.shadow_hostdir.c_str(), paths.canonical.c_str(),ret);
+            ret = Container::createMetalink(paths.canonical_backend,
+                    paths.shadow_backend,
+                    paths.canonical_hostdir);
             if (ret==-EISDIR) {
                 ret = 0; // a sibling raced us and made the directory for us
-                wf->setPath(canonical);
+                wf->setPath(paths.canonical);
             } else if (ret==-EEXIST||ret==0) {
                 ret = 0; // either a sibling raced us and made link or we did
-                wf->setPath(shadow);    // change WriteFile to point at shadow
+                wf->setPath(paths.shadow);    
             } 
         }
     }
@@ -770,7 +850,7 @@ plfs_rename( const char *logical, const char *to ) {
 
     // first check if there is a file already at dst.  If so, remove it
     ExpansionInfo exp_info;
-    new_canonical = expandPath(to,&exp_info,HASH_BY_FILENAME,-1,0);
+    new_canonical = expandPath(to,&exp_info,EXPAND_CANONICAL,-1,0);
     new_canonical_backend = get_backend(exp_info);
     if (exp_info.Errno) PLFS_EXIT(-ENOENT); // should never happen; check anyway
     if (is_plfs_file(to, NULL)) {
@@ -1265,18 +1345,56 @@ plfs_init(PlfsConf *pconf) {
     map<string,PlfsMount*>::iterator itr = pconf->mnt_pts.begin();
     if (itr==pconf->mnt_pts.end()) return false;
     ExpansionInfo exp_info;
-    expandPath(itr->first,&exp_info,HASH_BY_FILENAME,-1,0);
+    expandPath(itr->first,&exp_info,EXPAND_CANONICAL,-1,0);
     return(exp_info.expand_error ? false : true);
+}
+
+int
+insert_backends(vector<string> &incoming, vector<string> &outgoing) {
+    set<string> existing;   // copy vector to a set to make query easy
+    vector<string>::iterator itr;
+    set<string>::iterator sitr;
+    pair<set<string>::iterator,bool> insert_ret;
+    vector<string>::const_iterator citr;
+
+    // put all the existing in so we don't put any in more than once
+    for(itr=outgoing.begin();itr!=outgoing.end();itr++) {
+        insert_ret = existing.insert(*itr);
+        if(!insert_ret.second) return -1;   // multiply defined???
+    }
+
+    // now put all the incoming in if they don't already exist
+    for(citr=incoming.begin();citr!=incoming.end();citr++) {
+        sitr = existing.find(*citr);
+        if (sitr == existing.end()) {
+            outgoing.push_back(*citr);
+        }
+    }
+    return 0;
 }
 
 // inserts a mount point into a plfs conf structure
 // also tokenizes the mount point to set up find_mount_point 
+// TODO: check to make sure that if canonical_backends or shadow_backends are
+// defined that they are then also in the set of backends.  Also there shouldn't
+// be any in backends that are in neither canonical_backends or shadow_backends
+// (bec if there were, they would never have data stored on them) 
 // returns an error string if there's any problems
 string *
 insert_mount_point(PlfsConf *pconf, PlfsMount *pmnt, string file) {
     static set<string> backends;
     string *error = NULL;
     pair<map<string,PlfsMount*>::iterator, bool> insert_ret; 
+    vector<string>::iterator itr;
+
+    // put all canonical and all shadows in backends
+    if (0 != insert_backends(pmnt->canonical_backends,pmnt->backends)) {
+        error = new string("Something wrong with inserting canonical backends");
+    }
+    if (0 != insert_backends(pmnt->shadow_backends,pmnt->backends)) {
+        error = new string("Something wrong with inserting shadow backends");
+    }
+
     if( pmnt->backends.size() == 0 ) {
         error = new string("No backends specified for mount point");
     } else {
@@ -1287,9 +1405,8 @@ insert_mount_point(PlfsConf *pconf, PlfsMount *pmnt, string file) {
         if (!insert_ret.second) {
             error = new string("Mount point multiply defined\n");
         }
-        
+
         // check that no backend is used more than once
-        vector<string>::iterator itr;
         for(itr=pmnt->backends.begin();itr!=pmnt->backends.end();itr++) {
             pair<set<string>::iterator,bool> insert_ret2;
             insert_ret2 = backends.insert(*itr);
@@ -1299,6 +1416,7 @@ insert_mount_point(PlfsConf *pconf, PlfsMount *pmnt, string file) {
                 break;
             }
         }
+
 
         //pconf->mnt_pts[pmnt->mnt_pt] = pmnt;
     }
@@ -1397,6 +1515,20 @@ parse_conf(FILE *fp, string file, PlfsConf *pconf) {
             plfs_debug("Gonna tokenize %s\n", value);
             Util::tokenize(value,",",pmnt->backends); 
             pmnt->checksum = (unsigned)Container::hashValue(value);
+        } else if (strcmp(key,"canonical_backends")==0) {
+            if( !pmnt ) {
+                pconf->err_msg = new string("No mount point yet declared");
+                break;
+            }
+            plfs_debug("Gonna tokenize %s\n", value);
+            Util::tokenize(value,",",pmnt->canonical_backends); 
+        } else if (strcmp(key,"shadow_backends")==0) {
+            if( !pmnt ) {
+                pconf->err_msg = new string("No mount point yet declared");
+                break;
+            }
+            plfs_debug("Gonna tokenize %s\n", value);
+            Util::tokenize(value,",",pmnt->shadow_backends); 
         } else {
             ostringstream error_msg;
             error_msg << "Unknown key " << key;
@@ -1790,7 +1922,7 @@ plfs_symlink(const char *logical, const char *to) {
     PLFS_ENTER2(PLFS_PATH_NOTREQUIRED);
 
     ExpansionInfo exp_info;
-    string topath = expandPath(to, &exp_info, HASH_BY_FILENAME,-1,0);
+    string topath = expandPath(to, &exp_info, EXPAND_CANONICAL,-1,0);
     if (exp_info.expand_error) PLFS_EXIT(-ENOENT);
     
     ret = retValue(Util::Symlink(logical,topath.c_str()));
