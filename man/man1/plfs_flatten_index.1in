@@ -1,0 +1,27 @@
+#COPYRIGHT#
+.TH plfs_flatten_index 1 12/3/2010 "#PACKAGE_STRING#" 
+.SH NAME
+plfs_flatten_index
+.SH SYNOPSIS
+.B ./plfs_flatten_index <
+.I file
+.B >
+
+.SH DESCRIPTION
+Flatten the index for 
+.I file
+.B .
+This utility optimizes a PLFS file for subsequent reads.  For large files
+created by a large number of writers, the runtime of this utility can be
+quite large but it will be worth it for improved read performance.  Note
+that a better way to optimize PLFS files for subsequent reads is to
+write them using the PLFS-MPI-IO interface and set hint plfs_flatten_close to
+1.
+
+
+.SH AUTHORS
+#AUTHORS#
+
+.SH SEE ALSO
+#SEEALSO#
+

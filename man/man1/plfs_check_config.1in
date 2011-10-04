@@ -1,0 +1,34 @@
+#COPYRIGHT#
+.TH plfs_check_config 1 12/3/2010 "#PACKAGE_STRING#" 
+.SH NAME
+plfs_check_config
+.SH SYNOPSIS
+.B ./plfs_check_config
+
+.SH DESCRIPTION
+This command will check for a valid PLFS configuration file. If both the user
+and system file exist the user file will be the one parsed.  The output will 
+look something like this:
+.RS
+Config file correctly parsed:
+.br
+Num Hostdirs: 32
+.br
+Threadpool size: 16
+.br
+Num Mountpoints: 1
+.br
+Backend: /tmp/.plfs_store
+
+.SH FILES
+In order to use any of these interfaces, a configuration file must be
+present on the system. (see
+.I plfsrc(5)
+).
+
+.SH AUTHORS
+#AUTHORS#
+
+.SH SEE ALSO
+#SEEALSO#
+

@@ -1,0 +1,57 @@
+#COPYRIGHT#
+.TH PLFS 7 12/3/2010 "#PACKAGE_STRING#" 
+.SH NAME
+PLFS (Parallel Log Structured File System) \- General Information
+.SH SYNOPSIS
+PLFS is a parallel virtual file system that improves concurrent write 
+performance to a shared file.
+
+.SH DESCRIPTION
+In many parallel file systems such as Lustre, GPFS, and PanFS, concurrent
+writes from large numbers of processes to a shared file suffers poor 
+performance due to low-level serialization in the parallel file system.
+PLFS transparently rearranges concurrrent writes to avoid this serialization.
+
+.SH USING PLFS
+There are three ways to use PLFS.
+.PP
+PLFS-MNT 
+.I (see also plfs(1))
+.RS
+This interface provides the most transparency to the user.  PLFS is mounted
+as a file system and users simply perform normal file system operations.  
+This option requires FUSE.  Although this option gives improved performance,
+very large-scale parallel applications are encouraged to use the PLFS-MPI-IO
+interface which provides even larger improvements.
+.RE
+.PP
+PLFS-MPI-IO
+.RS
+This is the highest performing interface for PLFS for very large-scale
+parallel applications.  To use this option, applications must use the
+MPI-IO interface and prepend plfs: to their paths.  For example, the path 
+for restart could be 
+.I plfs:/scratch/user/restart_file
+This option requires use of an MPI that has been patched with PLFS.
+.RE
+.PP
+PLFS-API
+.I (see also plfs(3))
+.RS
+Finally, users can interface with PLFS directly by rewriting their applications
+to use the PLFS API.  Although this requires the most user effort,
+it is possible to use this interface by minimally
+using just plfs_open(), plfs_write(), plfs_read, and plfs_close().
+All PLFS functions are either approximations of POSIX file IO calls or
+utility functions.
+
+.SH FILES
+In order to use any of these interfaces, a configuration file must be
+present on the system. (see plfsrc(5)).
+
+.SH AUTHORS
+#AUTHORS#
+
+.SH SEE ALSO
+#SEEALSO# #SEEALSO3# #SEEALSO5#
+

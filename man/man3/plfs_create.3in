@@ -1,0 +1,40 @@
+#COPYRIGHT#
+.TH plfs_create 3 12/3/2010 "#PACKAGE_STRING#" 
+.SH NAME
+plfs_create 
+.SH SYNTAX
+#include <plfs.h>
+.PP
+int plfs_create( const char *path, mode_t mode, int flags, pid_t pid );
+
+.SH DESCRIPTION
+Create the file.  Note you don't need to call this, you can also pass O_CREAT to plfs_open.
+
+.SH INPUT PARAMETERS
+.TP 1i
+path
+File to create
+.TP 1i
+mode
+Permissions to give file
+.TP 1i
+flags
+open flags
+.TP 1i
+pid 
+A unique value to ensure that multiple writers will not
+interfere with each other.  If multiple processes from different nodes
+are sharing a file, the unique values must be unique only for each node
+(i.e. different nodes can use the same value safely).
+
+
+.SH RETURN VALUES
+Most PLFS functions return 0 or -errno, except write and read
+which return the number of bytes or -errno
+
+.SH AUTHORS
+#AUTHORS#
+
+.SH SEE ALSO
+#SEEALSO3#
+
