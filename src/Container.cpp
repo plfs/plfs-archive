@@ -630,7 +630,7 @@ int Container::collectIndices(const string &physical, vector<string> &indices,
     vector<string> filters;
     filters.push_back(INDEXPREFIX);
     filters.push_back(HOSTDIRPREFIX);
-    return collectContents(physical,indices,filters,full_path);
+    return collectContents(physical,indices,NULL,NULL,filters,full_path);
 }
 
 // this function collects all droppings from a container
@@ -641,13 +641,19 @@ int Container::collectIndices(const string &physical, vector<string> &indices,
 // was in this class.  but I don't think that's quite true.
 // That's our goal though!
 int Container::collectContents(const string &physical,
-        vector<string> &files, vector<string> &filters, bool full_path) 
+        vector<string> &files, 
+        vector<string> *dirs,
+        vector<string> *mlinks, 
+        vector<string> &filters, 
+        bool full_path) 
 {
     map<string,unsigned char> entries;
     map<string,unsigned char>::iterator e_itr;
     vector<string>::iterator f_itr;
     ReaddirOp rop(&entries,NULL,full_path,true);
     int ret = 0;
+
+    if (dirs) dirs->push_back(physical);
 
     // set up and use our ReaddirOp to get all entries out of top-level
     for(f_itr=filters.begin(); f_itr!=filters.end(); f_itr++) {
@@ -660,12 +666,13 @@ int Container::collectContents(const string &physical,
     // then descend, save files.
     for(e_itr = entries.begin(); ret==0 && e_itr != entries.end(); e_itr++) {
         if(e_itr->second==DT_DIR) { 
-            ret = Container::collectContents(e_itr->first,files,filters,true);
+            ret = collectContents(e_itr->first,files,dirs,mlinks,filters,true);
         } else if (e_itr->second==DT_LNK) { 
             string resolved;
             ret = Container::resolveMetalink(e_itr->first,resolved);
+            if (mlinks) mlinks->push_back(e_itr->first);
             if (ret==0) {
-                ret = Container::collectContents(resolved,files,filters,true);
+                ret = collectContents(resolved,files,dirs,mlinks,filters,true);
             }
         } else if (e_itr->second==DT_REG) {
             files.push_back(e_itr->first);

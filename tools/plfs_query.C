@@ -12,6 +12,14 @@ void show_usage(char* app_name) {
 	fprintf(stderr, "Usage: %s <filename>\n", app_name);
 }
 
+void
+print_entries(const vector<string> &entries, const char *type) {
+    vector<string>::const_iterator itr;
+    for(itr=entries.begin(); itr!=entries.end(); itr++) {
+        printf("%s%s\n",itr->c_str(),type);
+    }
+}
+
 int main (int argc, char **argv) {
 	int i;
 	bool force = force;
@@ -42,15 +50,16 @@ int main (int argc, char **argv) {
 
     string backend;
     vector<string> files;
-    int ret = plfs_locate(target,(void*)&files);
+    vector<string> dirs;
+    vector<string> metalinks;
+    int ret = plfs_locate(target,(void*)&files,(void*)&dirs,(void*)&metalinks);
     if ( ret != 0 ) {
         fprintf(stderr, "Couldn't query %s: %s\n",
                 target, strerror(-ret));
     } else {
-        vector<string>::iterator itr;
-        for(itr=files.begin(); itr!=files.end(); itr++) {
-            printf("%s\n",itr->c_str());
-        }
+        print_entries(dirs,"/");
+        print_entries(metalinks,"@");
+        print_entries(files,"");
     }
     exit( ret );
 }

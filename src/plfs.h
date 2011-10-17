@@ -117,8 +117,13 @@ int plfs_merge_indexes(Plfs_fd **pfd, char *index_streams,
 
 int plfs_link( const char *path, const char *to );
 
-/* the void * should be a string */
-int plfs_locate(const char *path, void *);
+/* the void *'s should be a vector<string> 
+ * the first is required to not be NULL and is filled with all files within
+ * the containers
+ * the second, if not NULL, is filled with all the dirs
+ * the third, if not NULL, is filled with all the metalinks
+ */
+int plfs_locate(const char *path, void *, void *, void *);
 
 /* 
    query the mode that was used to create the file
