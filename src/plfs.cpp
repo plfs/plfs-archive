@@ -1375,8 +1375,7 @@ insert_backends(vector<string> &incoming, vector<string> &outgoing) {
 // (bec if there were, they would never have data stored on them) 
 // returns an error string if there's any problems
 string *
-insert_mount_point(PlfsConf *pconf, PlfsMount *pmnt, string file) {
-    static set<string> backends;
+insert_mount_point(PlfsConf *pconf, PlfsMount *pmnt, string file, set<string> &backends) {
     string *error = NULL;
     pair<map<string,PlfsMount*>::iterator, bool> insert_ret; 
     vector<string>::iterator itr;
@@ -1430,6 +1429,7 @@ set_default_confs(PlfsConf *pconf) {
 // set defaults
 PlfsConf *
 parse_conf(FILE *fp, string file, PlfsConf *pconf) {
+    set<string> backends; // sanity checking to protect against bad plfsrc
     if (!pconf) pconf = new PlfsConf;
     set_default_confs(pconf);
     pair<set<string>::iterator, bool> insert_ret; 
@@ -1488,7 +1488,7 @@ parse_conf(FILE *fp, string file, PlfsConf *pconf) {
         } else if (strcmp(key,"mount_point")==0) {
             // clear and save the previous one
             if (pmnt) {
-                pconf->err_msg = insert_mount_point(pconf,pmnt,file);
+                pconf->err_msg = insert_mount_point(pconf,pmnt,file,backends);
                 if(pconf->err_msg) break;
             }
             pmnt = new PlfsMount;
@@ -1534,7 +1534,7 @@ parse_conf(FILE *fp, string file, PlfsConf *pconf) {
 
     // save the current mount point
     if (!pconf->err_msg && pmnt) {
-        pconf->err_msg = insert_mount_point(pconf,pmnt,file);
+        pconf->err_msg = insert_mount_point(pconf,pmnt,file,backends);
     }
 
     if (pconf->mnt_pts.size()<=0) {
