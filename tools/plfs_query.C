@@ -25,9 +25,14 @@ int main (int argc, char **argv) {
 	bool force = force;
 	char *target;
 	bool found_target = false;
+	char * dir_suffix = "";
+	char * metalink_suffix = "";
 	for (i = 1; i < argc; i++) {
 		if (strcmp(argv[i], "-force") == 0) {
 			force = true;
+		} else if (strcmp(argv[i], "-l") == 0) {
+			dir_suffix = "/";
+			metalink_suffix = "@";
 		} else if (!found_target) {
 			target = argv[i];
             found_target = true;
@@ -57,8 +62,8 @@ int main (int argc, char **argv) {
         fprintf(stderr, "Couldn't query %s: %s\n",
                 target, strerror(-ret));
     } else {
-        print_entries(dirs,"/");
-        print_entries(metalinks,"@");
+        print_entries(dirs,dir_suffix);
+        print_entries(metalinks,metalink_suffix);
         print_entries(files,"");
     }
     exit( ret );
