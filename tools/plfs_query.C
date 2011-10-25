@@ -25,8 +25,6 @@ int main (int argc, char **argv) {
 	bool force = force;
 	char *target;
 	bool found_target = false;
-	bool report_backend = false;
-	bool report_mount_point = false;
 	char * dir_suffix = "";
 	char * metalink_suffix = "";
 	for (i = 1; i < argc; i++) {
@@ -35,10 +33,6 @@ int main (int argc, char **argv) {
 		} else if (strcmp(argv[i], "-l") == 0) {
 			dir_suffix = "/";
 			metalink_suffix = "@";
-		} else if (strcmp(argv[i], "-backend") ==0) {
-			report_backend = true;
-		} else if (strcmp(argv[i], "-mount_point") ==0) {
-			report_mount_point = true;
 		} else if (!found_target) {
 			target = argv[i];
             found_target = true;
@@ -59,22 +53,14 @@ int main (int argc, char **argv) {
         exit(0);
     }
 
-
+    string backend;
     vector<string> files;
     vector<string> dirs;
     vector<string> metalinks;
-    vector<string> backends;
-    string mountPt;
     int ret = plfs_locate(target,(void*)&files,(void*)&dirs,(void*)&metalinks);
     if ( ret != 0 ) {
         fprintf(stderr, "Couldn't query %s: %s\n",
                 target, strerror(-ret));
-    } else if (report_backend) {
-	findBackends(target, (void *) &backends);
-	print_entries(backends,"");
-    } else if (report_mount_point) {
-	findMountPoint(target, (void *) &mountPt);
-	printf("%s\n", mountPt.c_str());
     } else {
         print_entries(dirs,dir_suffix);
         print_entries(metalinks,metalink_suffix);
