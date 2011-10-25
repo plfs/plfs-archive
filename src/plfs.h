@@ -206,6 +206,10 @@ int plfs_parindexread_merge(const char *path,char *index_streams,
     int *index_sizes, int procs, void **index_stream);
 int plfs_expand_path(char *logical,char **physical);
 
+int findBackends(const char * target, void * backends_ptr);
+
+int findMountPoint(const char * target, void * mountPt_ptr);
+
 #ifdef __cplusplus 
     }
 #endif

@@ -113,6 +113,11 @@ get_backend(const ExpansionInfo &exp) {
     return exp.expanded; 
 }
 
+vector<string>
+get_backends(const ExpansionInfo &exp) {
+	return exp.mnt_pt->backends;
+}
+
 char *plfs_gethostname() {
     return Util::hostname();
 }
@@ -468,6 +473,39 @@ findContainerPaths(const string &logical, ContainerPaths &paths) {
     paths.canonical_hostdir=Container::getHostDirPath(paths.canonical,hostname);
 
     return 0;  // no expansion errors.  All paths derived and returned
+}
+
+//This is probably not the most efficent way to do this
+int
+findBackends(const char * target, void * backends_ptr) {
+	struct stat st;
+	string logical = string(target);
+	ExpansionInfo exp_info;
+	vector <string> potential_backends;
+	vector <string> * backends = (vector <string> *) backends_ptr;
+	vector <string> expansions;
+	string path;
+
+	expandPath(logical, &exp_info, EXPAND_CANONICAL, -1, 0);
+	potential_backends = get_backends(exp_info);
+	for (int i = 0; i < potential_backends.size(); i++) {
+		path = expandPath(logical, &exp_info, EXPAND_TO_I, i, 0);
+		if (stat(path.c_str(), &st) == 0) {
+			(*backends).push_back(potential_backends[i]);
+		}
+	}
+	return 0;
+}
+
+int
+findMountPoint(const char * target, void * mountPoint_ptr) {
+	string * mountPoint = (string *) mountPoint_ptr;
+	string logical = string(target);
+	ExpansionInfo exp_info;
+	expandPath(logical, &exp_info, EXPAND_CANONICAL, -1, 0);
+
+	*mountPoint = (exp_info.mnt_pt)->mnt_pt;
+	return 0;
 }
 
 int 
