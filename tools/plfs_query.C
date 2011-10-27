@@ -9,7 +9,7 @@ using namespace std;
 #include "COPYRIGHT.h"
 
 void show_usage(char* app_name) {
-	fprintf(stderr, "Usage: %s <filename>\n", app_name);
+	fprintf(stderr, "Usage: %s <filename> [-l]\n", app_name);
 }
 
 void
