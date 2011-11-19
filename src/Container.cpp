@@ -673,7 +673,14 @@ int Container::collectContents(const string &physical,
             if (mlinks) mlinks->push_back(e_itr->first);
             if (ret==0) {
                 ret = collectContents(resolved,files,dirs,mlinks,filters,true);
-            }
+				if (ret==-ENOENT) {
+					// maybe this is some other node's shadow that we can't see
+					plfs_debug("%s Unable to access %s.  "
+						   "Asssuming remote shadow.\n",
+							__FUNCTION__, resolved.c_str());
+					ret = 0;
+				}
+			}
         } else if (e_itr->second==DT_REG) {
             files.push_back(e_itr->first);
         } else {
@@ -746,7 +753,8 @@ string Container::getChunkPath( const string &container, const string &host,
     ostringstream oss;
     oss.setf(ios::fixed,ios::floatfield);
     oss << timestamp;
-    return chunkPath(getHostDirPath(container,host),type,host,pid,oss.str());
+    return chunkPath(getHostDirPath(container,host,PERM_SUBDIR),type,host,
+				pid,oss.str());
 }
 
 string Container::makeUniquePath( const string &physical ) {
@@ -1332,7 +1340,7 @@ int Container::makeHostDir(const string &path,
         ret = makeSubdir(path.c_str(),mode);
     }
     if (ret == 0) {
-        ret = makeSubdir(getHostDirPath(path,host), mode);
+        ret = makeSubdir(getHostDirPath(path,host,PERM_SUBDIR), mode);
     }
     return ( ret == 0 ? ret : -errno );
 }
@@ -1343,7 +1351,7 @@ int Container::makeSubdir( const string &path, mode_t mode ) {
     //mode = mode | S_IXUSR | S_IXGRP | S_IXOTH;
     mode = DROPPING_MODE;
     ret = Util::Mkdir( path.c_str(), mode );
-    return ( ret == 0 || errno == EEXIST || errno == EISDIR ) ? 0 : -1;
+    return ( ret == 0 || errno == EEXIST || errno == EISDIR ) ? 0 : -ret;
 }
 // this just creates a dir/file but it ignores an EEXIST error
 int Container::makeMeta( const string &path, mode_t type, mode_t mode ) {
@@ -1379,14 +1387,26 @@ size_t Container::getHostDirId( const string &hostname ) {
     return (hashValue(hostname.c_str())%pconf->num_hostdirs);
 }
 
+// the container creates dropping of X.Y.Z where Z is a pid
+// parse it off and return it
+pid_t Container::getDroppingPid(const string &path) {
+	size_t lastdot = path.rfind('.');
+	string pidstr = path.substr(lastdot+1,path.npos);
+	plfs_debug("%s has lastdot %d pid %s\n",
+		path.c_str(),lastdot,pidstr.c_str());
+	return atoi(pidstr.c_str());
+}
+
 // this function is maybe one easy place where we can fix things
 // if the hostdir path includes a symlink....
 string Container::getHostDirPath( const string & expanded_path, 
-        const string & hostname )
+        const string & hostname, subdir_type type )
 {
     ostringstream oss;
     size_t host_value = getHostDirId(hostname); 
-    oss << expanded_path << "/" << HOSTDIRPREFIX << host_value; 
+    oss << expanded_path << "/";
+	if (type == TMP_SUBDIR) oss << TMPPREFIX;
+	oss << HOSTDIRPREFIX << host_value; 
     //plfs_debug("%s : %s %s -> %s\n", 
     //        __FUNCTION__, hostname, expanded_path, oss.str().c_str() );
     return oss.str();

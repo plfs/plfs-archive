@@ -20,6 +20,7 @@ using namespace std;
 typedef struct {
     string mnt_pt;  // the logical mount point
     string *statfs; // where to resolve statfs calls
+    string *syncer_ip; // where to send commands within plfs_protect
     vector<string> backends;    // a list of physical locations 
     vector<string> canonical_backends;
     vector<string> shadow_backends;
@@ -36,6 +37,7 @@ typedef struct {
     bool direct_io; // a flag FUSE needs.  Sorry ADIO and API for the wasted bit
     string *err_msg;
     string *global_summary_dir;
+    PlfsMount *tmp_mnt; // just used during parsing
 } PlfsConf;
 
 /* get_plfs_conf

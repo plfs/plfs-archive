@@ -20,7 +20,6 @@
 #include <stdlib.h>
 using namespace std;
 
-// TODO:
 // this global variable should be a plfs conf
 // do we try to cache a read index even in RDWR mode?
 // if we do, blow it away on writes
@@ -52,6 +51,7 @@ typedef struct {
     PlfsMount *mnt_pt;
     int Errno;  // can't use just errno, it's a weird macro
     string expanded;
+    string backend; // I tried to not put this in to save space . . .  
 } ExpansionInfo;
 
 // a struct containing all the various containers paths for a logical file
@@ -110,7 +110,7 @@ get_backend(const ExpansionInfo &exp, size_t which) {
 }
 const string &
 get_backend(const ExpansionInfo &exp) {
-    return exp.expanded; 
+    return exp.backend; 
 }
 
 char *plfs_gethostname() {
@@ -292,7 +292,8 @@ expandPath(string logical, ExpansionInfo *exp_info,
     }
     
     hash_val %= backends->size();   // don't index out of vector
-    exp_info->expanded = (*backends)[hash_val] + "/" + remaining;
+    exp_info->backend  = (*backends)[hash_val];
+    exp_info->expanded = exp_info->backend + "/" + remaining;
     plfs_debug("%s: %s -> %s (%d.%d)\n", __FUNCTION__, 
             logical.c_str(), exp_info->expanded.c_str(),
             hash_method,hash_val);
@@ -339,8 +340,9 @@ plfs_dump_index_size() {
 }
 
 int
-print_backends( vector<string> &backends, const char *which, bool check_dirs ) {
-    int ret = 0;
+print_backends(vector<string> &backends,const char *which,bool check_dirs,
+		int ret)
+{
     vector<string>::iterator bitr;
     for(bitr = backends.begin(); bitr != backends.end();bitr++){
         cout << "\t" << which << " Backend: " << *bitr << endl;
@@ -378,11 +380,14 @@ plfs_dump_config(int check_dirs) {
     map<string,PlfsMount*>::iterator itr; 
     for(itr=pconf->mnt_pts.begin();itr!=pconf->mnt_pts.end();itr++) {
         PlfsMount *pmnt = itr->second; 
-        cout << "Mount Point " << itr->first << ":" << endl;
+        cout << "Mount Point " << itr->first << " :" << endl;
         if(check_dirs) ret = plfs_check_dir("mount_point",itr->first,ret);
-        ret = print_backends(pmnt->backends,"",check_dirs);
-        ret = print_backends(pmnt->canonical_backends,"Canonical",check_dirs);
-        ret = print_backends(pmnt->shadow_backends,"Shadow",check_dirs);
+        ret = print_backends(pmnt->backends,"",check_dirs,ret);
+        ret = print_backends(pmnt->canonical_backends,"Canonical",check_dirs,ret);
+        ret = print_backends(pmnt->shadow_backends,"Shadow",check_dirs,ret);
+        if(pmnt->syncer_ip) {
+            cout << "\tSyncer IP: " << pmnt->syncer_ip->c_str() << endl;
+        }
         if(pmnt->statfs) {
             cout << "\tStatfs: " << pmnt->statfs->c_str() << endl;
             if(check_dirs) {
@@ -457,7 +462,8 @@ findContainerPaths(const string &logical, ContainerPaths &paths) {
     // set up shadow first
     paths.shadow = expandPath(logical,&exp_info,EXPAND_SHADOW,-1,0); 
     if (exp_info.Errno) return (exp_info.Errno);
-    paths.shadow_hostdir = Container::getHostDirPath(paths.shadow,hostname);
+    paths.shadow_hostdir = Container::getHostDirPath(paths.shadow,hostname,
+							PERM_SUBDIR);
     paths.hostdir=paths.shadow_hostdir.substr(paths.shadow.size(),string::npos);
     paths.shadow_backend = get_backend(exp_info);
 
@@ -465,7 +471,8 @@ findContainerPaths(const string &logical, ContainerPaths &paths) {
     paths.canonical = expandPath(logical,&exp_info,EXPAND_CANONICAL,-1,0);
     if (exp_info.Errno) return (exp_info.Errno);
     paths.canonical_backend = get_backend(exp_info);
-    paths.canonical_hostdir=Container::getHostDirPath(paths.canonical,hostname);
+    paths.canonical_hostdir=Container::getHostDirPath(paths.canonical,hostname,
+							PERM_SUBDIR);
 
     return 0;  // no expansion errors.  All paths derived and returned
 }
@@ -573,8 +580,10 @@ addWriter(WriteFile *wf, pid_t pid, const char *path, mode_t mode,
         if (paths.shadow!=paths.canonical) {
             // link the shadow hostdir into its canonical location
             // some errors are OK: indicate merely that we lost race to sibling
-            plfs_debug("Need to link %s into %s (hostdir ret %d)\n", 
-                    paths.shadow_hostdir.c_str(), paths.canonical.c_str(),ret);
+            plfs_debug("Need to link %s at %s into %s (hostdir ret %d)\n", 
+                    paths.shadow_hostdir.c_str(), 
+                    paths.shadow_backend.c_str(), 
+                    paths.canonical.c_str(),ret);
             ret = Container::createMetalink(paths.canonical_backend,
                     paths.shadow_backend,
                     paths.canonical_hostdir);
@@ -909,7 +918,7 @@ int
 plfs_rmdir( const char *logical ) {
     PLFS_ENTER;
     mode_t mode = Container::getmode(path); // save in case we need to restore
-    RmdirOp op;
+    UnlinkOp op;
     ret = plfs_iterate_backends(logical,op);
 
     // check if we started deleting non-empty dirs, if so, restore
@@ -1424,17 +1433,20 @@ set_default_confs(PlfsConf *pconf) {
     pconf->err_msg = NULL;
     pconf->buffer_mbs = 64;
     pconf->global_summary_dir = NULL;
+    pconf->tmp_mnt = NULL;
 }
 
 // set defaults
 PlfsConf *
 parse_conf(FILE *fp, string file, PlfsConf *pconf) {
+    bool top_of_stack = (pconf==NULL); // this recurses.  Remember who is top.
     set<string> backends; // sanity checking to protect against bad plfsrc
-    if (!pconf) pconf = new PlfsConf;
-    set_default_confs(pconf);
+    if (!pconf) {
+        pconf = new PlfsConf;
+        set_default_confs(pconf);
+    }
     pair<set<string>::iterator, bool> insert_ret; 
     insert_ret = pconf->files.insert(file);
-    PlfsMount *pmnt = NULL;
     plfs_debug("Parsing %s\n", file.c_str());
     if (insert_ret.second == false) {
         pconf->err_msg = new string("include file included more than once");
@@ -1447,9 +1459,9 @@ parse_conf(FILE *fp, string file, PlfsConf *pconf) {
     int line = 0;
     while(fgets(input,8192,fp)) {
         line++;
-        plfs_debug("Read %s %s (%d)\n", key, value,line);
         if (input[0]=='\n' || input[0] == '\r' || input[0]=='#') continue;
         sscanf(input, "%s %s\n", key, value);
+        plfs_debug("Read %s %s (%d)\n", key, value,line);
         if( strstr(value,"//") != NULL ) {
             pconf->err_msg = new string("Double slashes '//' are bad");
             break;
@@ -1487,42 +1499,54 @@ parse_conf(FILE *fp, string file, PlfsConf *pconf) {
                 pconf->num_hostdirs = MAX_HOSTDIRS;
         } else if (strcmp(key,"mount_point")==0) {
             // clear and save the previous one
-            if (pmnt) {
-                pconf->err_msg = insert_mount_point(pconf,pmnt,file,backends);
+            if (pconf->tmp_mnt) {
+                pconf->err_msg = insert_mount_point(pconf,pconf->tmp_mnt,
+				file,backends);
                 if(pconf->err_msg) break;
+		pconf->tmp_mnt = NULL;
             }
-            pmnt = new PlfsMount;
-            pmnt->mnt_pt = value;
-            pmnt->statfs = NULL;
-            Util::tokenize(pmnt->mnt_pt,"/",pmnt->mnt_tokens);
+            pconf->tmp_mnt = new PlfsMount;
+            // TODO: bzero the mount point 
+            pconf->tmp_mnt->mnt_pt = value;
+            pconf->tmp_mnt->statfs = NULL;
+            pconf->tmp_mnt->syncer_ip = NULL;
+            Util::tokenize(pconf->tmp_mnt->mnt_pt,"/",pconf->tmp_mnt->mnt_tokens);
         } else if (strcmp(key,"statfs")==0) {
-            if( !pmnt ) {
+            if( !pconf->tmp_mnt ) {
                 pconf->err_msg = new string("No mount point yet declared");
                 break;
             }
-            pmnt->statfs = new string(value);
+            pconf->tmp_mnt->statfs = new string(value);
         } else if (strcmp(key,"backends")==0) {
-            if( !pmnt ) {
+            if( !pconf->tmp_mnt ) {
                 pconf->err_msg = new string("No mount point yet declared");
                 break;
             }
             plfs_debug("Gonna tokenize %s\n", value);
-            Util::tokenize(value,",",pmnt->backends); 
-            pmnt->checksum = (unsigned)Container::hashValue(value);
+            Util::tokenize(value,",",pconf->tmp_mnt->backends); 
+            pconf->tmp_mnt->checksum = (unsigned)Container::hashValue(value);
         } else if (strcmp(key,"canonical_backends")==0) {
-            if( !pmnt ) {
+            if( !pconf->tmp_mnt ) {
                 pconf->err_msg = new string("No mount point yet declared");
                 break;
             }
             plfs_debug("Gonna tokenize %s\n", value);
-            Util::tokenize(value,",",pmnt->canonical_backends); 
+            Util::tokenize(value,",",pconf->tmp_mnt->canonical_backends); 
         } else if (strcmp(key,"shadow_backends")==0) {
-            if( !pmnt ) {
+            if( !pconf->tmp_mnt ) {
                 pconf->err_msg = new string("No mount point yet declared");
                 break;
             }
             plfs_debug("Gonna tokenize %s\n", value);
-            Util::tokenize(value,",",pmnt->shadow_backends); 
+            Util::tokenize(value,",",pconf->tmp_mnt->shadow_backends); 
+        } else if (strcmp(key, "syncer_ip")==0) {
+            if (!pconf->tmp_mnt) {
+                pconf->err_msg = new string("No mount point yet declared");
+                break;
+            }
+            pconf->tmp_mnt->syncer_ip = new string(value); 
+            plfs_debug("Discovered syncer_ip %s\n", 
+                    pconf->tmp_mnt->syncer_ip->c_str());
         } else {
             ostringstream error_msg;
             error_msg << "Unknown key " << key;
@@ -1532,13 +1556,16 @@ parse_conf(FILE *fp, string file, PlfsConf *pconf) {
     }
     plfs_debug("Got EOF from parsing conf\n");
 
-    // save the current mount point
-    if (!pconf->err_msg && pmnt) {
-        pconf->err_msg = insert_mount_point(pconf,pmnt,file,backends);
-    }
-
-    if (pconf->mnt_pts.size()<=0) {
-        pconf->err_msg = new string("No mount points defined.");
+    // save the final mount point.  Make sure there is at least one.
+    if (top_of_stack) {
+        if (!pconf->err_msg && pconf->tmp_mnt) {
+	    pconf->err_msg = insert_mount_point(pconf,pconf->tmp_mnt,
+		file,backends);
+	    pconf->tmp_mnt = NULL;
+	}
+	if (!pconf->err_msg && pconf->mnt_pts.size()<=0 && top_of_stack) {
+	    pconf->err_msg = new string("No mount points defined.");
+	}
     }
 
     if(pconf->err_msg) {
@@ -1549,8 +1576,6 @@ parse_conf(FILE *fp, string file, PlfsConf *pconf) {
         delete pconf->err_msg;
         pconf->err_msg = new string(error_msg.str());
     }
-
-    // be nice to check at make sure we have at least one mount point
 
     assert(pconf);
     plfs_debug("Successfully parsed conf file\n");
@@ -1755,6 +1780,191 @@ plfs_index_stream(Plfs_fd **pfd, char ** buffer){
     }
     plfs_debug("In plfs_index_stream global to stream has size %d\n", length);
     return length;
+}
+
+int 
+initiate_async_transfer(const char *src, const char *dest_dir, 
+	const char *syncer_IP) 
+{
+
+  int rc;
+  char space[2];
+  char programName[64];
+
+  char *command;
+  char commandList[2048] ;
+
+  plfs_debug("Enter %s  \n", __FUNCTION__);
+
+  memset(&commandList, '\0', 2048);
+  memset(&programName, '\0', 64);
+  memset(&space, ' ', 2);
+
+  strcpy(programName, "SYNcer  ");
+
+  plfs_debug("systemDataMove  0001\n");
+
+
+  command  = strcat(commandList, "ssh ");
+  command  = strcat(commandList, syncer_IP);
+  plfs_debug("0B command=%s\n", command);
+
+  command  = strncat(commandList, space, 1);
+  command  = strcat(commandList, programName);
+  command  = strncat(commandList, space, 1);
+
+  command  = strcat(commandList, src);
+  command  = strncat(commandList, space, 1);
+
+  command  = strcat(commandList, dest_dir);
+  command  = strncat(commandList, space, 1);
+
+
+  double start_time,end_time;
+  start_time=plfs_wtime();
+  rc = system(commandList);
+  end_time=plfs_wtime();
+  plfs_debug("commandList=%s took %.2ld secs\n", commandList,
+          end_time-start_time);
+
+  fflush(stdout);
+  return rc;
+}
+
+int
+plfs_find_my_droppings(const string &physical, pid_t pid, set<string> &drops) {
+	ReaddirOp rop(NULL,&drops,true,false);
+	rop.filter(INDEXPREFIX);
+	rop.filter(DATAPREFIX);
+	int ret = rop.op(physical.c_str(),DT_DIR);
+    if (ret!=0) PLFS_EXIT(ret);
+
+    // go through and delete all that don't belong to pid
+    // use while not for since erase invalidates the iterator
+	set<string>::iterator itr = drops.begin();
+    while(itr!=drops.end()) {
+        set<string>::iterator prev = itr++;
+		int dropping_pid = Container::getDroppingPid(*prev);
+		if (dropping_pid != getpid() && dropping_pid != pid) {
+            drops.erase(prev);
+        }
+    }
+    PLFS_EXIT(0);
+}
+
+// TODO: this code assumes that replication is done 
+// if replication is still active, removing these files
+// will break replication and corrupt the file
+int
+plfs_trim(const char *logical, pid_t pid) {
+    PLFS_ENTER;
+    plfs_debug("%s on %s with %d\n",__FUNCTION__,logical,pid);
+    // this should be called after the plfs_protect is done
+    // currently it doesn't check to make sure that the plfs_protect
+    // was successful
+
+    // find all the paths
+    // shadow is the current shadowed subdir
+    // replica is the tempory, currently inaccessible, subdir in canonical
+    // metalink is the path to the current metalink in canonical
+    // we assume all the droppings in the shadow have been replicated so
+    // 1) rename replica to metalink (it will now be a canonical subdir)
+    // 2) remove all droppings owned by this pid 
+    // 3) clean up the shadow container
+	ContainerPaths paths;
+	ret = findContainerPaths(logical,paths);
+	if (ret != 0) PLFS_EXIT(ret);
+	string replica = Container::getHostDirPath(paths.canonical,Util::hostname(),
+                    TMP_SUBDIR);
+	string metalink = paths.canonical_hostdir;
+
+    // rename replica over metalink currently at paths.canonical_hostdir
+    // this could fail if a sibling was faster than us
+    // unfortunately it appears that rename of a dir over a metalink not atomic 
+    plfs_debug("%s rename %s -> %s\n",__FUNCTION__,replica.c_str(),
+            paths.canonical_hostdir.c_str());
+
+    // remove the metalink
+    UnlinkOp op;
+    ret = op.op(paths.canonical_hostdir.c_str(),DT_LNK);
+    if (ret != 0 && errno==ENOENT) ret = 0;
+    if (ret != 0) PLFS_EXIT(ret);
+
+    // rename the replica at the right location
+    ret = Util::Rename(replica.c_str(),paths.canonical_hostdir.c_str());
+    if (ret != 0 && errno==ENOENT) ret = 0;
+    if (ret != 0) PLFS_EXIT(ret);
+
+    // remove all the droppings in paths.shadow_hostdir
+    set<string> droppings;
+    ret = plfs_find_my_droppings(paths.shadow_hostdir,pid,droppings);
+    if (ret != 0) PLFS_EXIT(ret);
+	set<string>::iterator itr;
+	for (itr=droppings.begin();itr!=droppings.end();itr++) {
+        ret = op.op(itr->c_str(),DT_REG);
+        if (ret!=0) PLFS_EXIT(ret);
+    }
+
+    // now remove paths.shadow_hostdir (which might fail due to slow siblings)
+    // then remove paths.shadow (which might fail due to slow siblings)
+    // the slowest sibling will succeed in removing the shadow container
+    op.ignoreErrno(ENOENT);    // sibling beat us
+    op.ignoreErrno(ENOTEMPTY); // we beat sibling
+    ret = op.op(paths.shadow_hostdir.c_str(),DT_DIR);
+    if (ret!=0) PLFS_EXIT(ret);
+    ret = op.op(paths.shadow.c_str(),DT_DIR);
+    if (ret!=0) PLFS_EXIT(ret);
+    PLFS_EXIT(ret);
+}
+
+// iterate through container.  Find all pieces owned by this pid that are in
+// shadowed subdirs.  Currently do this is a non-transaction unsafe method
+// that assumes no failure in the middle.
+// 1) blow away metalink in canonical
+// 2) create a subdir in canonical
+// 3) call SYNCER to move each piece owned by this pid in this subdir
+int 
+plfs_protect(const char *logical, pid_t pid) {
+	PLFS_ENTER;
+
+    // first make sure that syncer_ip is defined
+    // otherwise this doesn't work
+    string *syncer_ip = expansion_info.mnt_pt->syncer_ip;
+    if (!syncer_ip) {
+        plfs_debug("Cant use %s with syncer_ip defined in plfsrc\n",
+                __FUNCTION__);
+        PLFS_EXIT(-ENOSYS);
+    }
+
+	// find path to shadowed subdir and make a temporary hostdir
+    // in canonical
+	ContainerPaths paths;
+	ret = findContainerPaths(logical,paths);
+	if (ret != 0) PLFS_EXIT(ret);
+	string src = paths.shadow_hostdir;
+	string dst = Container::getHostDirPath(paths.canonical,Util::hostname(),
+					TMP_SUBDIR);
+	ret = retValue(Util::Mkdir(dst.c_str(),DEFAULT_MODE));
+	if (ret == -EEXIST || ret == -EISDIR ) ret = 0;
+	if (ret != 0) PLFS_EXIT(-ret);
+	plfs_debug("Need to protect contents of %s into %s\n", 
+				src.c_str(),dst.c_str());
+
+    // read the shadowed subdir and find all droppings
+	set<string> droppings;
+    ret = plfs_find_my_droppings(src,pid,droppings);
+	if (ret != 0) PLFS_EXIT(ret);
+
+    // for each dropping owned by this pid, initiate a replication to canonical
+	set<string>::iterator itr;
+	for (itr=droppings.begin();itr!=droppings.end();itr++) {
+        plfs_debug("SYNCER %s cp %s %s\n", syncer_ip->c_str(),
+            itr->c_str(), dst.c_str());
+        initiate_async_transfer(itr->c_str(), dst.c_str(),
+                syncer_ip->c_str()); 
+	}
+
+	PLFS_EXIT(ret);	
 }
 
 // pass in a NULL Plfs_fd to have one created for you
@@ -2040,6 +2250,7 @@ plfs_write(Plfs_fd *pfd, const char *buf, size_t size, off_t offset, pid_t pid){
     //plfs_reference_count(pfd);
 
     // possible that we cache index in RDWR.  If so, delete it on a write
+    /*
     Index *index = pfd->getIndex(); 
     if (index != NULL) {
         assert(cache_index_on_rdwr);
@@ -2050,6 +2261,7 @@ plfs_write(Plfs_fd *pfd, const char *buf, size_t size, off_t offset, pid_t pid){
         }
         pfd->unlockIndex();
     }
+    */
 
     int ret = 0; ssize_t written;
     WriteFile *wf = pfd->getWritefile();
@@ -2308,7 +2520,8 @@ plfs_trunc(Plfs_fd *of, const char *logical, off_t offset, int open_file) {
                 // if it exists and is a directory, then nothing to do.
                 // if it's a metalink, resolve it and pass resolved path
                 container = path;
-                hdir = Container::getHostDirPath(path,Util::hostname());
+                hdir = Container::getHostDirPath(path,Util::hostname(),
+									PERM_SUBDIR);
                 if (Util::exists(hdir.c_str())) {
                     if (! Util::isDirectory(hdir.c_str())) {
                         string resolved;

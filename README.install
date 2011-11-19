@@ -55,6 +55,10 @@ build the patch file needed for the next steps.]
     CCASFLAGS="-I/opt/panfs/include -m64 -I/users/johnbent/plfs/include " 
   Then your configure line is like this: ./configure --with-platform=./platform 
 
+  Another tricky bit is doing the autogen.sh in openmpi.  Make sure to install
+  all the appropriate build tools as defined here: 
+	http://www.open-mpi.org/svn/building.php
+
 3) To build the PLFS library and link apps against it.
 
   Build and install PLFS.  Then look at plfs.h and figure out how to use it.

@@ -34,6 +34,10 @@ typedef struct {
 } IndexerTask;
 
 
+typedef enum {
+	TMP_SUBDIR, PERM_SUBDIR
+} subdir_type;
+
 #include "Index.h"
 
 class Container {
@@ -58,7 +62,7 @@ class Container {
         static int removeOpenrecord( const string &, const string &, pid_t );
 
         static size_t getHostDirId( const string & );
-        static string getHostDirPath( const string &, const string & );
+        static string getHostDirPath( const string &, const string &, subdir_type );
         static string getMetaDirPath( const string& );
         static string getVersionDir( const string& path );
         static string getAccessFilePath( const string& path );
@@ -68,6 +72,8 @@ class Container {
         static string getGlobalChunkPath(const string&);
         static string getGlobalIndexPath(const string&);
         static string makeUniquePath(const string&);
+
+		static pid_t getDroppingPid(const string&);
 
         static mode_t fileMode( mode_t );
         static mode_t dirMode(  mode_t );
@@ -119,6 +125,7 @@ class Container {
         static const char *version(const string &path);
     private:
             // static stuff
+        static bool istype(const string &dropping, const char *type);
         static int createHelper( const string &, const string &, 
                 mode_t mode, int flags, int *extra_attempts, pid_t,unsigned,
                 bool lazy_subdir);
@@ -138,7 +145,6 @@ class Container {
         static struct dirent *getnextent( DIR *dir, const char *prefix );
         static int makeMeta( const string &path, mode_t type, mode_t mode );
         static int ignoreNoEnt( int ret );
-        static bool istype(const string &dropping, const char *type);
 };
 
 #endif

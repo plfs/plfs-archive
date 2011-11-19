@@ -138,6 +138,9 @@ int plfs_mkdir( const char *path, mode_t );
 int plfs_open( Plfs_fd **, const char *path, 
         int flags, pid_t pid, mode_t , Plfs_open_opt *open_opt);
 
+/* this is to move shadowed files into canonical backends */
+int plfs_protect(const char *path, pid_t pid);
+
 /* query a plfs_fd about how many writers and readers are using it */
 int plfs_query( Plfs_fd *, size_t *writers, size_t *readers );
 

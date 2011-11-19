@@ -49,6 +49,12 @@ int ad_plfs_amode( int access_mode ) {
    return amode;
 }
 
+int
+plfs_protect_all(const char *file, MPI_Comm comm) {
+	int rank;
+	MPI_Comm_rank(comm,&rank);
+	return plfs_protect(file,rank);
+}
 
 
 int ad_plfs_hints(ADIO_File fd, int rank, char * hint){
