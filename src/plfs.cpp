@@ -367,7 +367,7 @@ plfs_dump_config(int check_dirs) {
     // if we make it here, we've parsed correctly
     vector<int> rets;
     int ret = 0;
-    cout << "Config file correctly parsed:" << endl
+    cout << "Config file " << pconf->file << " correctly parsed:" << endl
         << "Num Hostdirs: " << pconf->num_hostdirs << endl
         << "Threadpool size: " << pconf->threadpool_size << endl
         << "Write index buffer size (mbs): " << pconf->buffer_mbs << endl
@@ -381,9 +381,15 @@ plfs_dump_config(int check_dirs) {
     for(itr=pconf->mnt_pts.begin();itr!=pconf->mnt_pts.end();itr++) {
         PlfsMount *pmnt = itr->second; 
         cout << "Mount Point " << itr->first << " :" << endl;
+        cout << "\tExpected Workload " 
+             << (pmnt->file_type == CONTAINER ? "shared_file (N-1)"
+                     : pmnt->file_type == FLAT_FILE ? "file_per_proc (N-N)"
+                     : "UNKNOWN.  WTF.  email plfs-devel@lists.sourceforge.net")
+             << endl;
         if(check_dirs) ret = plfs_check_dir("mount_point",itr->first,ret);
         ret = print_backends(pmnt->backends,"",check_dirs,ret);
-        ret = print_backends(pmnt->canonical_backends,"Canonical",check_dirs,ret);
+        ret = print_backends(pmnt->canonical_backends,"Canonical",
+                check_dirs,ret);
         ret = print_backends(pmnt->shadow_backends,"Shadow",check_dirs,ret);
         if(pmnt->syncer_ip) {
             cout << "\tSyncer IP: " << pmnt->syncer_ip->c_str() << endl;
@@ -1426,6 +1432,13 @@ insert_mount_point(PlfsConf *pconf, PlfsMount *pmnt, string file, set<string> &b
 }
 
 void
+set_default_mount(PlfsMount *pmnt) {
+    pmnt->statfs = pmnt->syncer_ip = NULL;
+    pmnt->file_type = CONTAINER;
+    pmnt->checksum = (unsigned)-1;
+}
+
+void
 set_default_confs(PlfsConf *pconf) {
     pconf->num_hostdirs = 32;
     pconf->threadpool_size = 8;
@@ -1444,6 +1457,7 @@ parse_conf(FILE *fp, string file, PlfsConf *pconf) {
     if (!pconf) {
         pconf = new PlfsConf;
         set_default_confs(pconf);
+        pconf->file = file;
     }
     pair<set<string>::iterator, bool> insert_ret; 
     insert_ret = pconf->files.insert(file);
@@ -1470,6 +1484,19 @@ parse_conf(FILE *fp, string file, PlfsConf *pconf) {
             pconf->buffer_mbs = atoi(value);
             if (pconf->buffer_mbs <0) {
                 pconf->err_msg = new string("illegal negative value");
+                break;
+            }
+        } else if(strcmp(key,"workload")==0) {
+            if( !pconf->tmp_mnt ) {
+                pconf->err_msg = new string("No mount point yet declared");
+                break;
+            }
+            if (strcmp(value,"file_per_proc")==0||strcmp(value,"n-n")==0) {
+                pconf->tmp_mnt->file_type = FLAT_FILE;
+            } else if (strcmp(value,"shared_file")==0||strcmp(value,"n-1")==0) {
+                pconf->tmp_mnt->file_type = CONTAINER;
+            } else {
+                pconf->err_msg = new string("unknown workload type");
                 break;
             }
         } else if(strcmp(key,"include")==0) {
@@ -1501,16 +1528,16 @@ parse_conf(FILE *fp, string file, PlfsConf *pconf) {
             // clear and save the previous one
             if (pconf->tmp_mnt) {
                 pconf->err_msg = insert_mount_point(pconf,pconf->tmp_mnt,
-				file,backends);
+                        file,backends);
                 if(pconf->err_msg) break;
-		pconf->tmp_mnt = NULL;
+                pconf->tmp_mnt = NULL;
             }
+            // now set up the beginnings of the first one
             pconf->tmp_mnt = new PlfsMount;
-            // TODO: bzero the mount point 
+            set_default_mount(pconf->tmp_mnt);
             pconf->tmp_mnt->mnt_pt = value;
-            pconf->tmp_mnt->statfs = NULL;
-            pconf->tmp_mnt->syncer_ip = NULL;
-            Util::tokenize(pconf->tmp_mnt->mnt_pt,"/",pconf->tmp_mnt->mnt_tokens);
+            Util::tokenize(pconf->tmp_mnt->mnt_pt,"/",
+                    pconf->tmp_mnt->mnt_tokens);
         } else if (strcmp(key,"statfs")==0) {
             if( !pconf->tmp_mnt ) {
                 pconf->err_msg = new string("No mount point yet declared");
@@ -1559,13 +1586,13 @@ parse_conf(FILE *fp, string file, PlfsConf *pconf) {
     // save the final mount point.  Make sure there is at least one.
     if (top_of_stack) {
         if (!pconf->err_msg && pconf->tmp_mnt) {
-	    pconf->err_msg = insert_mount_point(pconf,pconf->tmp_mnt,
-		file,backends);
-	    pconf->tmp_mnt = NULL;
-	}
-	if (!pconf->err_msg && pconf->mnt_pts.size()<=0 && top_of_stack) {
-	    pconf->err_msg = new string("No mount points defined.");
-	}
+            pconf->err_msg = insert_mount_point(pconf,pconf->tmp_mnt,
+            file,backends);
+            pconf->tmp_mnt = NULL;
+        }
+        if (!pconf->err_msg && pconf->mnt_pts.size()<=0 && top_of_stack) {
+            pconf->err_msg = new string("No mount points defined.");
+        }
     }
 
     if(pconf->err_msg) {
@@ -1782,6 +1809,8 @@ plfs_index_stream(Plfs_fd **pfd, char ** buffer){
     return length;
 }
 
+// I don't like this function right now
+// why does it have hard-coded numbers in it like programName[64] ?
 int 
 initiate_async_transfer(const char *src, const char *dest_dir, 
 	const char *syncer_IP) 
@@ -1818,7 +1847,6 @@ initiate_async_transfer(const char *src, const char *dest_dir,
 
   command  = strcat(commandList, dest_dir);
   command  = strncat(commandList, space, 1);
-
 
   double start_time,end_time;
   start_time=plfs_wtime();

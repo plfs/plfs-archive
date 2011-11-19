@@ -17,6 +17,11 @@ using namespace std;
         Util::OpenError(__FILE__,__FUNCTION__,__LINE__,pid,errno);\
     }
 
+typedef enum {
+    CONTAINER,
+    FLAT_FILE
+} plfs_filetype;
+
 typedef struct {
     string mnt_pt;  // the logical mount point
     string *statfs; // where to resolve statfs calls
@@ -25,10 +30,12 @@ typedef struct {
     vector<string> canonical_backends;
     vector<string> shadow_backends;
     vector<string> mnt_tokens;
+    plfs_filetype file_type;
     unsigned checksum;
 } PlfsMount;
 
 typedef struct {
+    string file; // which top-level plfsrc was used 
     set<string> files;
     size_t num_hostdirs;
     size_t threadpool_size;
