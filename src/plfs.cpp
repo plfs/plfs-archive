@@ -887,7 +887,15 @@ int
 plfs_rename( const char *logical, const char *to ) {
     PLFS_ENTER;
     plfs_debug("%s: %s -> %s\n", __FUNCTION__, logical, to);
-    ret = container_rename(logical,to);
+
+    // this is a bit of a challenge with both flatfile and container mode
+    // container_rename will work just fine already on logical directories
+    // so first discover if 
+    if (Util::isDirectory(path.c_str())) {
+        ret = container_rename(logical,to);
+    } else {
+        ret = container_rename(logical,to);
+    }
     PLFS_EXIT(ret);
 }
 
