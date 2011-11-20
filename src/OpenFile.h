@@ -9,6 +9,20 @@
 #include "Metadata.h"
 using namespace std;
 
+/*
+   This class is now shared by both container mode and flatfile mode
+*/
+
+class FlatFile {
+    public:
+        FlatFile() { fd = -1; refs = 0; }
+        int open(const char *);
+        int close();
+    private:
+        int fd;
+        int refs;
+};
+
 class Plfs_fd : public Metadata {
     public:
         Plfs_fd( WriteFile *, Index *, pid_t, mode_t, const char * );
@@ -34,6 +48,7 @@ class Plfs_fd : public Metadata {
         mode_t    mode;
         string    path;
         time_t    ctime;
+        FlatFile  flatfile;
 };
 
 #endif

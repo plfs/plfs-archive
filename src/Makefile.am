@@ -64,6 +64,7 @@ OpenFile.h \
 plfs_private.h \
 ThreadPool.h \
 WriteFile.h \
+FlatFile.h \
 $(include_HEADERS) \
 $(dist_pkginclude_HEADERS)
 
@@ -75,6 +76,7 @@ Index.cpp \
 LogMessage.cpp \
 OpenFile.cpp \
 ThreadPool.cpp \
+FlatFile.cpp \
 WriteFile.cpp \
 plfs.cpp
 

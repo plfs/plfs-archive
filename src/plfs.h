@@ -166,6 +166,7 @@ int plfs_rename( const char *from, const char *to );
 int plfs_rmdir( const char *path );
 
 void plfs_serious_error(const char *msg,pid_t pid );
+
 /*
    a funtion to get stats back from plfs operations
    the void * needs to be a pointer to an STL string but void * is used here
@@ -197,7 +198,11 @@ ssize_t plfs_write( Plfs_fd *, const char *, size_t, off_t, pid_t );
 
 double plfs_wtime();
 
+int plfs_expand_path(char *logical,char **physical);
+
 // parindex read functions
+// these shouldn't be in here.  They should be in plfs_private.h or somewhere.
+// the only functions in here should be ones for the user API
 int plfs_partition_hostdir(void * entries, int rank,
                                     int group_size,char **buffer);
 int plfs_hostdir_zero_rddir(void **entries,const char* path,int rank);
@@ -207,7 +212,7 @@ int plfs_parindex_read(int rank, int ranks_per_comm,void *index_files,
         void **index_stream,char *top_level);
 int plfs_parindexread_merge(const char *path,char *index_streams,
     int *index_sizes, int procs, void **index_stream);
-int plfs_expand_path(char *logical,char **physical);
+
 
 #ifdef __cplusplus 
     }
