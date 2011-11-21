@@ -2,6 +2,10 @@
 #define __PLFS_PRIVATE__
 
 #include "plfs_internal.h"
+#include "FileOp.h"
+#include "LogicalFile.h"
+#include "ContainerFile.h"
+#include "FlatFile.h"
 
 #include <map>
 #include <set>
@@ -63,9 +67,21 @@ typedef struct {
     string canonical_backend; // full path of canonical backend 
 } ContainerPaths;
 
-string
-expandPath(string logical, ExpansionInfo *exp_info, 
+
+// some utility functions
+int find_all_expansions(const char *logical, vector<string> &containers);
+
+const string & get_backend(const ExpansionInfo &exp);
+
+const string & get_backend(const ExpansionInfo &exp, size_t which);
+
+int findContainerPaths(const string &logical, ContainerPaths &paths);
+
+string expandPath(string logical, ExpansionInfo *exp_info, 
         expansionMethod hash_method, int which_backend, int depth);
+
+int plfs_file_operation(const char *logical, FileOp &op);
+
 
 #define PLFS_ENTER PLFS_ENTER2(PLFS_PATH_REQUIRED)
 

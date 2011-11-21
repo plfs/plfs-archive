@@ -3,6 +3,8 @@
 #include "COPYRIGHT.h"
 #include <stdlib.h>
 
+
+
 Plfs_fd::Plfs_fd( WriteFile *wf, Index *i, pid_t pi, mode_t m, const char *p ) :
         Metadata::Metadata() 
 {
@@ -30,6 +32,11 @@ void Plfs_fd::setPath( string p ) {
     this->path = p;
     if ( writefile ) writefile->setPath( p );
     if ( index     )     index->setPath( p );
+}
+
+int
+Plfs_fd::referenceCount() {
+    return logicalfile->referenceCount();
 }
 
 WriteFile *Plfs_fd::getWritefile( ) {

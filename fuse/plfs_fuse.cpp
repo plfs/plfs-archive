@@ -383,7 +383,7 @@ int Plfs::f_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
 }
 
 // returns 0 or -errno
-// nothing to do for a read file
+// nothing to do for a read file or a file that isn't open
 int Plfs::f_fsync(const char *path, int datasync, struct fuse_file_info *fi) {
     PFUS_ENTER; GET_OPEN_FILE;
     if (of) plfs_sync(of, fuse_get_context()->pid);
