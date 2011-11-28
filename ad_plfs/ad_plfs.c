@@ -15,8 +15,8 @@ struct ADIOI_Fns_struct ADIO_PLFS_operations = {
     ADIOI_PLFS_Open, /* Open */
     ADIOI_PLFS_ReadContig, /* ReadContig */
     ADIOI_PLFS_WriteContig, /* WriteContig */
-    ADIOI_GEN_ReadStridedColl, /* ReadStridedColl */
-    ADIOI_GEN_WriteStridedColl, /* WriteStridedColl */
+    ADIOI_PLFS_ReadStridedColl, /* ReadStridedColl */
+    ADIOI_PLFS_WriteStridedColl, /* WriteStridedColl */
     ADIOI_GEN_SeekIndividual, /* SeekIndividual */
     ADIOI_PLFS_Fcntl, /* Fcntl */
     ADIOI_PLFS_SetInfo, /* SetInfo */

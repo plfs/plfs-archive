@@ -10,6 +10,53 @@
 #include "adio_extern.h"
 
 
+void ADIOI_PLFS_WriteStridedColl(ADIO_File fd, void *buf, int count,
+                                MPI_Datatype datatype, int file_ptr_type,
+                                ADIO_Offset offset, ADIO_Status *status, int
+                                *error_code)
+{
+    ADIOI_Access *my_req; 
+    /* array of nprocs access structures, one for each other process in
+       whose file domain this process's request lies */
+    
+    ADIOI_Access *others_req;
+    /* array of nprocs access structures, one for each other process
+       whose request lies in this process's file domain. */
+
+    int i, filetype_is_contig, nprocs, nprocs_for_coll, myrank;
+    int contig_access_count=0, interleave_count = 0, buftype_is_contig;
+    int *count_my_req_per_proc, count_my_req_procs, count_others_req_procs;
+    ADIO_Offset orig_fp, start_offset, end_offset, fd_size, min_st_offset, off;
+    ADIO_Offset *offset_list = NULL, *st_offsets = NULL, *fd_start = NULL,
+	*fd_end = NULL, *end_offsets = NULL;
+    int *buf_idx = NULL, *len_list = NULL;
+    int old_error, tmp_error;
+
+    MPI_Comm_size(fd->comm, &nprocs);
+    MPI_Comm_rank(fd->comm, &myrank);
+
+/* the number of processes that actually perform I/O, nprocs_for_coll,
+ * is stored in the hints off the ADIO_File structure
+ */
+    nprocs_for_coll = fd->hints->cb_nodes;
+    orig_fp = fd->fp_ind;
+
+    if(myrank==0){
+        printf("N procs for coll =%d\n",nprocs_for_coll);
+    }
+
+    ADIOI_Calc_my_off_len(fd, count, datatype, file_ptr_type, offset,
+			      &offset_list, &len_list, &start_offset,
+			      &end_offset, &contig_access_count); 
+
+    int looper;
+    for(looper=0;looper<count;looper++){
+        printf("Rank[%d],count[%d],offset_list[%d],len_list[%d]\n",
+                myrank,looper,offset_list[looper],len_list[looper]);
+    }
+
+}
+
 void ADIOI_PLFS_WriteContig(ADIO_File fd, void *buf, int count, 
 			    MPI_Datatype datatype, int file_ptr_type,
 			    ADIO_Offset offset, ADIO_Status *status,

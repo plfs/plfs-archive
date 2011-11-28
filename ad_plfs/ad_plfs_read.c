@@ -10,6 +10,17 @@
 #include "adio_extern.h"
 #include "ad_plfs.h"
 
+
+void ADIOI_PLFS_ReadStridedColl(ADIO_File fd, void *buf, int count,
+                            MPI_Datatype datatype, int file_ptr_type,
+                            ADIO_Offset offset, ADIO_Status *status, int
+                            *error_code)
+{
+    printf("Collective read encountered\n");
+
+}
+
+
 void ADIOI_PLFS_ReadContig(ADIO_File fd, void *buf, int count, 
                      MPI_Datatype datatype, int file_ptr_type,
 		     ADIO_Offset offset, ADIO_Status *status, int *error_code)
