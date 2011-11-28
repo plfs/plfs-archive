@@ -45,6 +45,7 @@ void ADIOI_PLFS_WriteStridedColl(ADIO_File fd, void *buf, int count,
         printf("N procs for coll =%d\n",nprocs_for_coll);
     }
 
+    // Discover the formula for my write
     ADIOI_Calc_my_off_len(fd, count, datatype, file_ptr_type, offset,
 			      &offset_list, &len_list, &start_offset,
 			      &end_offset, &contig_access_count); 
@@ -55,6 +56,16 @@ void ADIOI_PLFS_WriteStridedColl(ADIO_File fd, void *buf, int count,
                 myrank,looper,offset_list[looper],len_list[looper]);
     }
 
+    /* each process communicates its start and end offsets to other 
+       processes. The result is an array each of start and end offsets stored
+       in order of process rank. */
+    st_offsets = (ADIO_Offset *) ADIOI_Malloc(nprocs*sizeof(ADIO_Offset));
+    end_offsets = (ADIO_Offset *) ADIOI_Malloc(nprocs*sizeof(ADIO_Offset));
+
+    MPI_Allgather(&start_offset, 1, ADIO_OFFSET, st_offsets, 1,
+                                      ADIO_OFFSET, fd->comm);
+    MPI_Allgather(&end_offset, 1, ADIO_OFFSET, end_offsets, 1,
+                                          ADIO_OFFSET, fd->comm);
 }
 
 void ADIOI_PLFS_WriteContig(ADIO_File fd, void *buf, int count, 

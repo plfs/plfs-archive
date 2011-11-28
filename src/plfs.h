@@ -194,6 +194,10 @@ const char * plfs_version();
 
 int plfs_file_version(const char *, const char **);
 
+// Lets try to get a formulaic description of the writes
+ssize_t
+plfs_col_write(Plfs_fd *pfd, const char *buf, pid_t pid,Plfs_func_desc *desc);
+
 ssize_t plfs_write( Plfs_fd *, const char *, size_t, off_t, pid_t );
 
 double plfs_wtime();
