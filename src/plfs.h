@@ -37,6 +37,15 @@ typedef struct{
     size_t num_procs;
 } Plfs_close_opt;
 
+// We need a structure to describe the writes
+// passed in from a collective write
+typedef struct{
+    int num_procs;
+    off_t start_off;
+    off_t end_off;
+    int data_size;
+}Plfs_func_desc;
+
 /*
    All PLFS function declarations in this file are in alphabetical order.
    Please retain this as edits are made.
@@ -118,9 +127,7 @@ int plfs_merge_indexes(Plfs_fd **pfd, char *index_streams,
 int plfs_link( const char *path, const char *to );
 
 /* the void * should be a string */
-int
-plfs_locate(const char *logical, void *files_ptr, 
-        void *dirs_ptr, void *metalinks_ptr);
+int plfs_locate(const char *path, void *);
 
 /* 
    query the mode that was used to create the file

@@ -26,27 +26,6 @@
 
 using namespace std;
 
-// TODO:  Want to set *logicalfile to point at either ContainerFile or FlatFile
-#define SET_LOGICALFILES \
-    FlatFile flatfile; \
-    ContainerFile containerfile; \
-    LogicalFile *logicalfile; \
-    switch(expansion_info.mnt_pt->file_type) { \
-        case CONTAINER: \
-            logicalfile = &containerfile; \
-            (void)flatfile; \
-            break; \
-        case FLAT_FILE: \
-            logicalfile = &flatfile; \
-            (void)containerfile; \
-            break; \
-        default: assert(0); \
-    }
-
-#define PLFS_OP_ENTER2(X) PLFS_ENTER2(X); SET_LOGICALFILES;
-
-#define PLFS_OP_ENTER PLFS_ENTER; SET_LOGICALFILES; 
-
 // TODO:
 // this global variable should be a plfs conf
 // do we try to cache a read index even in RDWR mode?
@@ -2031,7 +2010,8 @@ plfs_open(Plfs_fd **pfd,const char *logical,int flags,pid_t pid,mode_t mode,
         mlog(INT_DCOMMON, "%s added writer: %d", __FUNCTION__, ret );
         if ( ret > 0 ) ret = 0; // add writer returns # of current writers
         EISDIR_DEBUG;
-        if ( ret == 0 && new_writefile ) ret = wf->openIndex( pid ); 
+        // Lets delay this until we actually see a write, see Writefile::write
+        //if ( ret == 0 && new_writefile ) ret = wf->openIndex( pid ); 
         EISDIR_DEBUG;
         if ( ret != 0 && wf ) {
             delete wf;
@@ -2133,52 +2113,13 @@ plfs_symlink(const char *logical, const char *to) {
 
 // void * should be a vector
 int
-plfs_locate(const char *logical, void *files_ptr, 
-        void *dirs_ptr, void *metalinks_ptr) 
-{
-    PLFS_ENTER
+plfs_locate(const char *logical, void *vptr) {
+    PLFS_ENTER;
+    vector<string> *files = (vector<string> *)vptr;
+    vector<string> filters;
+    ret = Container::collectContents(path,*files,filters,true);
 
-    // first, are we locating a PLFS file or a directory or a symlink?
-    mode_t mode;
-    ret = is_plfs_file(logical,&mode);
-
-    // do plfs_locate on a plfs_file
-    if (S_ISREG(mode)) { // it's a PLFS file
-        vector<string> *files = (vector<string> *)files_ptr;
-        vector<string> filters;
-        ret = Container::collectContents(path,*files,(vector<string>*)dirs_ptr,
-            (vector<string>*)metalinks_ptr,
-            filters,true);
-
-    // do plfs_locate on a plfs directory
-    } else if (S_ISDIR(mode)) { 
-        if (!dirs_ptr) {
-            fprintf(stderr,"Asked to %s on %s which is a directory but not "
-                    "given a vector<string> to store directory paths into...\n",
-                    __FUNCTION__,logical);
-            ret = -EINVAL;
-        } else {
-            vector<string> *dirs = (vector<string> *)dirs_ptr;
-            ret = find_all_expansions(logical,*dirs);
-        }
-
-    // do plfs_locate on a symlink
-    } else if (S_ISLNK(mode)) {
-        if (!metalinks_ptr) {
-            fprintf(stderr,"Asked to %s on %s which is a symlink but not "
-                    "given a vector<string> to store link paths into...\n",
-                    __FUNCTION__,logical);
-            ret = -EINVAL;
-        } else {
-            ((vector<string> *)metalinks_ptr)->push_back(path);
-            ret = 0;
-        }
-
-    // something strange here....
-    } else {
-        // Weird.  What else could it be? 
-        ret = -ENOENT;
-    }
+    //string *target = (string *)vptr;
     //*target = path;
     PLFS_EXIT(ret);
 }
@@ -2232,6 +2173,16 @@ plfs_utime( const char *logical, struct utimbuf *ut ) {
     op.ignoreErrno(ENOENT);
     ret = plfs_file_operation(logical,op);
     PLFS_EXIT(ret);
+}
+
+ssize_t 
+plfs_col_write(Plfs_fd *pfd, const char *buf, pid_t pid,Plfs_func_desc *desc){
+    if(pid == 0){
+        printf("PLFS has encountered a collective write\n");
+        printf("This is the description: num_procs[%d],starting_offset[%ld],\
+                end_offset[%ld],data_size[%d]",desc->num_of_procs,
+                desc->start_off,desc->end_off,desc->data_size);
+    }
 }
 
 ssize_t 

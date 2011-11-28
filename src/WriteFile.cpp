@@ -245,6 +245,9 @@ ssize_t WriteFile::write(const char *buf, size_t size, off_t offset, pid_t pid){
         // then the index
         if ( ret >= 0 ) {
             Util::MutexLock(   &index_mux , __FUNCTION__);
+            // Delay index creation until our first write
+            // moved out of the open
+            if(!index) this->openIndex( pid ); 
             index->addWrite( offset, ret, pid, begin, end );
             // TODO: why is 1024 a magic number?
             if (write_count%1024==0 && write_count>0) {
