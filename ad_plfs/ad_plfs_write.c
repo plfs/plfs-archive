@@ -23,7 +23,7 @@ void ADIOI_PLFS_WriteStridedColl(ADIO_File fd, void *buf, int count,
     /* array of nprocs access structures, one for each other process
        whose request lies in this process's file domain. */
 
-    int i, filetype_is_contig, nprocs, nprocs_for_coll, myrank;
+    int i, filetype_is_contig, nprocs, nprocs_for_coll, myrank,datatype_size;
     int contig_access_count=0, interleave_count = 0, buftype_is_contig;
     int *count_my_req_per_proc, count_my_req_procs, count_others_req_procs;
     ADIO_Offset orig_fp, start_offset, end_offset, fd_size, min_st_offset, off;
@@ -31,6 +31,10 @@ void ADIOI_PLFS_WriteStridedColl(ADIO_File fd, void *buf, int count,
 	*fd_end = NULL, *end_offsets = NULL;
     int *buf_idx = NULL, *len_list = NULL;
     int old_error, tmp_error;
+    
+    // Lets describe this function
+    Plfs_func_desc function; 
+    int use_formula = 1; // Boolean
 
     MPI_Comm_size(fd->comm, &nprocs);
     MPI_Comm_rank(fd->comm, &myrank);
@@ -66,6 +70,42 @@ void ADIOI_PLFS_WriteStridedColl(ADIO_File fd, void *buf, int count,
                                       ADIO_OFFSET, fd->comm);
     MPI_Allgather(&end_offset, 1, ADIO_OFFSET, end_offsets, 1,
                                           ADIO_OFFSET, fd->comm);
+
+    // First weak test, improve me as we go, need to start work
+    // on adding flexibility to the PLFS index. If our start address
+    // is equal to our rank * datatype size and end_offset is equal 
+    // to count * datatype size + rank * datatype size then we write
+    // out a function. For now I am not going to check if this is 
+    // true for all ranks, need to check this is true for all ranks
+    // if we want to continue, skipping this test for now.
+    MPI_Type_size(datatype, &datatype_size);
+    int start_check = myrank * datatype_size;
+    int end_check = ((count-1) * datatype_size * nprocs) + 
+                        start_check + (datatype_size-1);
+
+    // Might want to combine into one compoud if statement
+    if( start_check != start_offset ){
+        printf("Rank[%d] start offset is not formulaic\n", myrank);
+        use_formula=0;
+    }
+    if( end_check != end_offset ){
+        printf("Rank[%d] end offset is not formulaic\n", myrank);
+        printf("End check[%d] end_offset[%d]\n",end_check,end_offset);
+        use_formula=0;
+    }
+
+    if(use_formula){
+        // Fill out the initial info we will need for a formula
+        if(myrank == 0){
+            function.num_procs = nprocs;
+            function.start_off = st_offsets[0];
+            function.end_off = end_offsets[nprocs-1];
+            function.data_size = datatype_size;
+            plfs_col_write(fd->fs_ptr, buf, myrank,&function);
+        }else{
+            plfs_col_write(fd->fs_ptr, buf, myrank,NULL);
+        }
+    }
 }
 
 void ADIOI_PLFS_WriteContig(ADIO_File fd, void *buf, int count, 

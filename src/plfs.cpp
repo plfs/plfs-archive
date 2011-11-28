@@ -2179,8 +2179,8 @@ ssize_t
 plfs_col_write(Plfs_fd *pfd, const char *buf, pid_t pid,Plfs_func_desc *desc){
     if(pid == 0){
         printf("PLFS has encountered a collective write\n");
-        printf("This is the description: num_procs[%d],starting_offset[%ld],\
-                end_offset[%ld],data_size[%d]",desc->num_procs,
+        printf("This is the description: num_procs[%d],starting_offset[%ld],"
+               "end_offset[%ld],data_size[%d]",desc->num_procs,
                 desc->start_off,desc->end_off,desc->data_size);
     }
 }
