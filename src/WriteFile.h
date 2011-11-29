@@ -7,6 +7,7 @@ using namespace std;
 #include "Util.h"
 #include "Index.h"
 #include "Metadata.h"
+#include "plfs.h"
 
 // THREAD SAFETY
 // we use a mutex when writers are added or removed
@@ -41,7 +42,7 @@ class WriteFile : public Metadata {
         int extend( off_t offset );
 
         ssize_t write( const char*, size_t, off_t, pid_t );
-
+        ssize_t write_coll( const char *, size_t, pid_t, Plfs_func_desc *);
         int sync( pid_t pid );
 
         void       setPath( string path ); 

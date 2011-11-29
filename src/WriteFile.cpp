@@ -211,6 +211,79 @@ int WriteFile::extend( off_t offset ) {
     return 0;
 }
 
+// Our write collective, we only want rank 0 to add any index 
+// information. I don't really like adding a new index entry 
+// type because I will have to rework all of the old index 
+// code. I would prefer a seperate index file for the collectives
+// but this would imply new files for any index type you could 
+// dream up. Rank 0 is the only entity that needs to add index 
+// information the rest of the procs just dump the data that 
+// is passed from the ADIO layer. For this simple example the
+// datatype is contiguous in memory but non-contiguous in the 
+// file. The file layour isn't much of a concern as long as we 
+// can describe the formula. Non-contiguous in memory we can 
+// leverage the ADIO additions for plfs_writev. 
+ssize_t WriteFile::write_coll( const char *buf, size_t size, pid_t pid, 
+                                Plfs_func_desc *func){
+    int ret = 0;
+    ssize_t written;
+    OpenFd *ofd = getFd( pid );
+
+    if ( ofd == NULL ) {
+        // we used to return -ENOENT here but we can get here legitimately 
+        // when a parent opens a file and a child writes to it.
+        // so when we get here, we need to add a child datafile
+        ret = addWriter( pid, true );
+        if ( ret > 0 ) {
+            // however, this screws up the reference count
+            // it looks like a new writer but it's multiple writers
+            // sharing an fd ...
+            ofd = getFd( pid );
+        }
+    }
+    if ( ofd && ret >= 0 ) {
+        int fd = ofd->fd;
+        // write the data file
+        double begin, end;
+        begin = Util::getTime();
+        ret = written = ( size ? Util::Write( fd, buf, size ) : 0 );
+        end = Util::getTime();
+
+        // Need to add index types, also need to only write the index
+        // if pid == 0
+        /*
+        // then the index
+        if ( ret >= 0 ) {
+            Util::MutexLock(   &index_mux , __FUNCTION__);
+            // Delay index creation until our first write
+            // moved out of the open
+            if(!index) this->openIndex( pid ); 
+            index->addWrite( offset, ret, pid, begin, end );
+            // TODO: why is 1024 a magic number?
+            if (write_count%1024==0 && write_count>0) {
+                ret = index->flush();
+                // Check if the index has grown too large stop buffering
+                if(index->memoryFootprintMBs() > index_buffer_mbs) {
+                    index->stopBuffering();
+                    mlog(WF_DCOMMON, "The index grew too large, "
+                         "no longer buffering");
+                }
+            }
+            if (ret >= 0) addWrite(offset, size); // track our own metadata
+            Util::MutexUnlock( &index_mux, __FUNCTION__ );
+        }
+    
+        */
+    }
+    write_count++;
+    // return bytes written or error
+    return ( ret >= 0 ? written : -errno );
+
+
+}
+
+
+
 // we are currently doing synchronous index writing.
 // this is where to change it to buffer if you'd like
 // We were thinking about keeping the buffer around the

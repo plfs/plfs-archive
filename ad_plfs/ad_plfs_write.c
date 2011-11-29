@@ -94,6 +94,7 @@ void ADIOI_PLFS_WriteStridedColl(ADIO_File fd, void *buf, int count,
         use_formula=0;
     }
 
+    int buf_size = count * datatype_size;
     if(use_formula){
         // Fill out the initial info we will need for a formula
         if(myrank == 0){
@@ -101,9 +102,10 @@ void ADIOI_PLFS_WriteStridedColl(ADIO_File fd, void *buf, int count,
             function.start_off = st_offsets[0];
             function.end_off = end_offsets[nprocs-1];
             function.data_size = datatype_size;
-            plfs_col_write(fd->fs_ptr, buf, myrank,&function);
+            function.count = count; 
+            plfs_col_write(fd->fs_ptr, buf, buf_size, myrank, &function);
         }else{
-            plfs_col_write(fd->fs_ptr, buf, myrank,NULL);
+            plfs_col_write(fd->fs_ptr, buf, buf_size, myrank, NULL);
         }
     }
 }

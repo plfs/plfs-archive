@@ -44,6 +44,7 @@ typedef struct{
     off_t start_off;
     off_t end_off;
     int data_size;
+    int count;
 }Plfs_func_desc;
 
 /*
@@ -196,7 +197,7 @@ int plfs_file_version(const char *, const char **);
 
 // Lets try to get a formulaic description of the writes
 ssize_t
-plfs_col_write(Plfs_fd *pfd, const char *buf, pid_t pid,Plfs_func_desc *desc);
+plfs_col_write(Plfs_fd *, const char *, size_t, pid_t, Plfs_func_desc *);
 
 ssize_t plfs_write( Plfs_fd *, const char *, size_t, off_t, pid_t );
 

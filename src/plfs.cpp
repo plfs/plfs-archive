@@ -2176,13 +2176,26 @@ plfs_utime( const char *logical, struct utimbuf *ut ) {
 }
 
 ssize_t 
-plfs_col_write(Plfs_fd *pfd, const char *buf, pid_t pid,Plfs_func_desc *desc){
+plfs_col_write(Plfs_fd *pfd, const char *buf, size_t size, 
+                pid_t pid,Plfs_func_desc *desc){
+    // Baby steps just printing out the information that
+    // was passed from the ADIO layer 
+    // Get rid of the printf ASAP
     if(pid == 0){
         printf("PLFS has encountered a collective write\n");
         printf("This is the description: num_procs[%d],starting_offset[%ld],"
                "end_offset[%ld],data_size[%d]",desc->num_procs,
                 desc->start_off,desc->end_off,desc->data_size);
     }
+    // RDWR Mode check for the Index, please add me in the future
+    int ret = 0; ssize_t written;
+    WriteFile *wf = pfd->getWritefile();
+    mlog(PLFS_DAPI, "%s: size[%d], pid[%d]\n",__FUNCTION__,(long)size,pid);
+    ret = written = wf->write_coll(buf, size, pid , desc);
+    // This is probably not necessary written == ret
+    // Same thing for plfs_write
+    PLFS_EXIT ( ret >= 0 ? written : ret );
+
 }
 
 ssize_t 
