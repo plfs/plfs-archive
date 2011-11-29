@@ -16,6 +16,7 @@ using namespace std;
 // on a write, every host has a host index
 // on a read, all the host index files get aggregated into one container index
 
+
 class IndexFileInfo{
     public:
         IndexFileInfo();
@@ -40,8 +41,12 @@ class HostEntry {
         bool splittable ( off_t ) const;
         bool abut   ( const HostEntry & );
         off_t logical_tail( ) const;
-
+    
     protected:
+        // Adding the type for the new index types
+        // I believe a char should be large enough, 
+        // 256 potential types
+        char   type;             // This will end up impacting a lot of code
         off_t  logical_offset;
         off_t  physical_offset;  // I tried so hard to not put this in here
                                  // to save some bytes in the index entries
@@ -103,7 +108,7 @@ class Index : public Metadata {
 
         bool ispopulated( );
 
-        void addWrite( off_t offset, size_t bytes, pid_t, double, double );
+        void addWrite( off_t offset, size_t bytes, pid_t, double, double, int);
 
         size_t memoryFootprintMBs();    // how much area the index is occupying
 

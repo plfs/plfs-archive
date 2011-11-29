@@ -1130,7 +1130,7 @@ size_t Index::memoryFootprintMBs() {
 }
 
 void Index::addWrite( off_t offset, size_t length, pid_t pid, 
-        double begin_timestamp, double end_timestamp ) 
+        double begin_timestamp, double end_timestamp,int type ) 
 {
     Metadata::addWrite( offset, length );
     int quant = hostIndex.size();
@@ -1171,6 +1171,7 @@ void Index::addWrite( off_t offset, size_t length, pid_t pid,
         // that the code that finds an index path from a data path and
         // vice versa (if that code exists) still works: DONE
         HostEntry entry;
+        entry.type = (char)type; // Location one
         entry.logical_offset = offset;
         entry.length         = length; 
         entry.id             = pid; 
@@ -1190,7 +1191,8 @@ void Index::addWrite( off_t offset, size_t length, pid_t pid,
         // Needed for our index stream function
         // It seems that we can store this pid for the global entry
         ContainerEntry c_entry;
-        c_entry.logical_offset = entry.logical_offset;
+        c_entry.type              = entry.type;
+        c_entry.logical_offset    = entry.logical_offset;
         c_entry.length            = entry.length;
         c_entry.id                = entry.id;
         c_entry.original_chunk    = entry.id;
@@ -1268,6 +1270,10 @@ void Index::truncateHostIndex( off_t offset ) {
 // created a partial global index, and truncated that global
 // index, so now we need to dump the modified global index into
 // a new local index
+
+// Blagh what do we do with mixed index types
+// I'm punting today
+
 int Index::rewriteIndex( int fd ) {
     this->fd = fd;
     map<off_t,ContainerEntry>::iterator itr;
@@ -1302,7 +1308,8 @@ int Index::rewriteIndex( int fd ) {
         begin_timestamp = itrd->second.begin_timestamp;
         end_timestamp   = itrd->second.end_timestamp;
         addWrite( itrd->second.logical_offset,itrd->second.length, 
-                itrd->second.original_chunk, begin_timestamp, end_timestamp );
+                itrd->second.original_chunk, begin_timestamp, 
+                end_timestamp, INDEX_TYPE_ORIGINAL );
         /*
         ostringstream os;
         os << __FUNCTION__ << " added : " << itr->second;

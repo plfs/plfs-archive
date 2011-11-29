@@ -19,6 +19,11 @@
     typedef void * Plfs_fd;
 #endif
 
+// Not sure if this is the best place for me
+// please revisit
+#define INDEX_TYPE_ORIGINAL 0
+#define INDEX_TYPE_FUNCTION 1
+
 typedef enum {
     PLFS_API, PLFS_POSIX, PLFS_MPIIO
 } plfs_interface;
@@ -128,8 +133,7 @@ int plfs_merge_indexes(Plfs_fd **pfd, char *index_streams,
 int plfs_link( const char *path, const char *to );
 
 /* the void * should be a string */
-int plfs_locate(const char *path, void *);
-
+int plfs_locate(const char *logical, void *); 
 /* 
    query the mode that was used to create the file
    this should only be called on a plfs file

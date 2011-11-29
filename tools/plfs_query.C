@@ -62,7 +62,10 @@ int main (int argc, char **argv) {
     vector<string> files;
     vector<string> dirs;
     vector<string> metalinks;
-    int ret = plfs_locate(target,(void*)&files,(void*)&dirs,(void*)&metalinks);
+    // Should be plfs locate but I got a slightly older version of PLFS
+    // I hope this doesnt cause to many headaches down the line
+    int ret = 0;
+    // plfs_locate(target,(void*)&files,(void*)&dirs,(void*)&metalinks);
     if ( ret != 0 ) {
         fprintf(stderr, "Couldn't query %s: %s\n",
                 target, strerror(-ret));

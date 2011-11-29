@@ -206,7 +206,7 @@ int WriteFile::extend( off_t offset ) {
     // make a fake write
     if ( fds.begin() == fds.end() ) return -ENOENT;
     pid_t p = fds.begin()->first;
-    index->addWrite( offset, 0, p, createtime, createtime );
+    index->addWrite( offset, 0, p, createtime, createtime, INDEX_TYPE_ORIGINAL);
     addWrite( offset, 0 );   // maintain metadata
     return 0;
 }
@@ -321,7 +321,7 @@ ssize_t WriteFile::write(const char *buf, size_t size, off_t offset, pid_t pid){
             // Delay index creation until our first write
             // moved out of the open
             if(!index) this->openIndex( pid ); 
-            index->addWrite( offset, ret, pid, begin, end );
+            index->addWrite( offset, ret, pid, begin, end, INDEX_TYPE_ORIGINAL);
             // TODO: why is 1024 a magic number?
             if (write_count%1024==0 && write_count>0) {
                 ret = index->flush();
