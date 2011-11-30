@@ -190,7 +190,9 @@ ostream& operator <<(ostream &os,const ContainerEntry &entry) {
     double begin_timestamp = 0, end_timestamp = 0;
     begin_timestamp = entry.begin_timestamp;
     end_timestamp  = entry.end_timestamp;
-    os  << setw(5) 
+    os  << setw(5)
+        << (int)entry.type
+        << setw(5) 
         << entry.id             << " w " 
         << setw(16)
         << entry.logical_offset << " " 
@@ -213,7 +215,7 @@ ostream& operator <<(ostream &os,const Index &ndx ) {
     }
     map<off_t,ContainerEntry>::const_iterator itr;
     os << "# Entry Count: " << ndx.global_index.size() << endl;
-    os << "# ID Logical_offset Length Begin_timestamp End_timestamp "
+    os << "# Index_Type ID Logical_offset Length Begin_timestamp End_timestamp "
        << " Logical_tail ID.Chunk_offset " << endl;
     for(itr = ndx.global_index.begin();itr != ndx.global_index.end();itr++){
         os << itr->second << endl;
@@ -506,6 +508,7 @@ int Index::readIndex( string hostindex ) {
             // we need to remember the original chunk so we can reverse
             // this process and rewrite an index dropping from an index
             // in-memory data structure
+        c_entry.type              = h_entry.type;
         c_entry.logical_offset    = h_entry.logical_offset;
         c_entry.length            = h_entry.length;
         c_entry.id                = known_chunks[h_entry.id];
