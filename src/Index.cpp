@@ -191,8 +191,6 @@ ostream& operator <<(ostream &os,const ContainerEntry &entry) {
     begin_timestamp = entry.begin_timestamp;
     end_timestamp  = entry.end_timestamp;
     os  << setw(5)
-        << (int)entry.type
-        << setw(5) 
         << entry.id             << " w " 
         << setw(16)
         << entry.logical_offset << " " 
@@ -508,7 +506,6 @@ int Index::readIndex( string hostindex ) {
             // we need to remember the original chunk so we can reverse
             // this process and rewrite an index dropping from an index
             // in-memory data structure
-        c_entry.type              = h_entry.type;
         c_entry.logical_offset    = h_entry.logical_offset;
         c_entry.length            = h_entry.length;
         c_entry.id                = known_chunks[h_entry.id];
@@ -1133,7 +1130,7 @@ size_t Index::memoryFootprintMBs() {
 }
 
 void Index::addWrite( off_t offset, size_t length, pid_t pid, 
-        double begin_timestamp, double end_timestamp,int type ) 
+        double begin_timestamp, double end_timestamp) 
 {
     Metadata::addWrite( offset, length );
     int quant = hostIndex.size();
@@ -1174,7 +1171,6 @@ void Index::addWrite( off_t offset, size_t length, pid_t pid,
         // that the code that finds an index path from a data path and
         // vice versa (if that code exists) still works: DONE
         HostEntry entry;
-        entry.type = (char)type; // Location one
         entry.logical_offset = offset;
         entry.length         = length; 
         entry.id             = pid; 
@@ -1194,7 +1190,6 @@ void Index::addWrite( off_t offset, size_t length, pid_t pid,
         // Needed for our index stream function
         // It seems that we can store this pid for the global entry
         ContainerEntry c_entry;
-        c_entry.type              = entry.type;
         c_entry.logical_offset    = entry.logical_offset;
         c_entry.length            = entry.length;
         c_entry.id                = entry.id;
@@ -1274,8 +1269,6 @@ void Index::truncateHostIndex( off_t offset ) {
 // index, so now we need to dump the modified global index into
 // a new local index
 
-// Blagh what do we do with mixed index types
-// I'm punting today
 
 int Index::rewriteIndex( int fd ) {
     this->fd = fd;
@@ -1312,7 +1305,7 @@ int Index::rewriteIndex( int fd ) {
         end_timestamp   = itrd->second.end_timestamp;
         addWrite( itrd->second.logical_offset,itrd->second.length, 
                 itrd->second.original_chunk, begin_timestamp, 
-                end_timestamp, INDEX_TYPE_ORIGINAL );
+                end_timestamp );
         /*
         ostringstream os;
         os << __FUNCTION__ << " added : " << itr->second;
