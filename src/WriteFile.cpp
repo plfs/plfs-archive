@@ -227,6 +227,7 @@ ssize_t WriteFile::write_coll( const char *buf, size_t size, pid_t pid,
                                 Plfs_func_desc *func){
     int ret = 0;
     ssize_t written;
+    char index_type = INDEX_TYPE_FUNCTION;
     OpenFd *ofd = getFd( pid );
 
     if ( ofd == NULL ) {
@@ -250,7 +251,23 @@ ssize_t WriteFile::write_coll( const char *buf, size_t size, pid_t pid,
         end = Util::getTime();
 
         // Need to add index types, also need to only write the index
-        // if pid == 0
+        // if you are rank0
+        if (!pid) {
+            SubIndex *subindex;
+            char index_type = INDEX_TYPE_FUNCTION;
+            // Added this for safety
+            Util::MutexLock( &index_mux, __FUNCTION__);
+            // Don't open the file for the Index in the 
+            // regular write. Be sure to update the regular
+            // write to make sure the fd for the Index is 
+            // set if not we need to open the fd for the 
+            // Index tracking regular writes
+            if(!index) index = new Index( physical_path);
+            // 
+            subindex = index->getSubIndex(&index_type);
+
+            Util::MutexUnlock (&index_mux, __FUNCTION__);
+        }
         /*
         // then the index
         if ( ret >= 0 ) {
@@ -294,7 +311,6 @@ ssize_t WriteFile::write_coll( const char *buf, size_t size, pid_t pid,
 ssize_t WriteFile::write(const char *buf, size_t size, off_t offset, pid_t pid){
     int ret = 0; 
     ssize_t written;
-    char type = INDEX_TYPE_ORIGINAL;
     OpenFd *ofd = getFd( pid );
     if ( ofd == NULL ) {
         // we used to return -ENOENT here but we can get here legitimately 
@@ -320,7 +336,7 @@ ssize_t WriteFile::write(const char *buf, size_t size, off_t offset, pid_t pid){
         if ( ret >= 0 ) {
             // Delay index creation until our first write
             // moved out of the open
-            if(!index) this->openIndex( pid , &type); 
+            if(!index) this->openIndex( pid ); 
             Util::MutexLock(   &index_mux , __FUNCTION__);
             index->addWrite( offset, ret, pid, begin, end);
             // TODO: why is 1024 a magic number?
@@ -344,9 +360,10 @@ ssize_t WriteFile::write(const char *buf, size_t size, off_t offset, pid_t pid){
 
 // this assumes that the hostdir exists and is full valid path
 // returns 0 or -errno
-int WriteFile::openIndex( pid_t pid , char *type) {
+int WriteFile::openIndex( pid_t pid ) {
     int ret = 0;
     string index_path;
+    char type = INDEX_TYPE_ORIGINAL;
     int fd = openIndexFile(physical_path, hostname, pid, DROPPING_MODE,
             &index_path);
     if ( fd < 0 ) {
@@ -359,7 +376,7 @@ int WriteFile::openIndex( pid_t pid , char *type) {
         index->index_path=index_path;
         if(index_buffer_mbs) index->startBuffering();
         // Write out the type
-        ret = Util::Write( fd, type, 1); 
+        ret = Util::Write( fd, &type, 1); 
     }
     return ret;
 }

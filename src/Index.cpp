@@ -1328,3 +1328,22 @@ int Index::rewriteIndex( int fd ) {
     }
     return flush(); 
 }
+// Try to get the subindex for a particular type
+// if  the subindex for the type can't be found 
+// return NULL
+SubIndex* Index::getSubIndex(char *type){
+    
+    vector<SubIndex>::iterator it;
+    SubIndex *req_type; // If we find a match return me
+    // The subindices have not been filled out
+    // This line may not be necessary if the following code 
+    // works
+    if(sub_indices.size()==0){
+        return NULL;
+    }
+    // I am assuming I don't have to iterate over this list
+    // and that the element I am accesing will return NULL
+    // if it hasn't been filled out
+    return sub_indices[(int) *type];
+        
+}

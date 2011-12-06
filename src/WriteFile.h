@@ -30,7 +30,7 @@ class WriteFile : public Metadata {
         WriteFile( string, string, mode_t, size_t index_buffer_mbs ); 
         ~WriteFile();
 
-        int openIndex( pid_t ,char *);
+        int openIndex( pid_t );
         int closeIndex();
 
         int addWriter( pid_t, bool child );

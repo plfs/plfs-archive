@@ -2184,7 +2184,7 @@ plfs_col_write(Plfs_fd *pfd, const char *buf, size_t size,
     if(pid == 0){
         printf("PLFS has encountered a collective write\n");
         printf("This is the description: num_procs[%d],starting_offset[%ld],"
-               "end_offset[%ld],data_size[%d]",desc->num_procs,
+               "end_offset[%ld],data_size[%d]\n",desc->num_procs,
                 desc->start_off,desc->end_off,desc->data_size);
     }
     // RDWR Mode check for the Index, please add me in the future
@@ -2377,13 +2377,12 @@ int
 extendFile(Plfs_fd *of, string strPath, off_t offset) {
     int ret = 0;
     bool newly_opened = false;
-    char type = INDEX_TYPE_ORIGINAL; // Index type
     WriteFile *wf = ( of && of->getWritefile() ? of->getWritefile() : NULL );
     pid_t pid = ( of ? of->getPid() : 0 );
     if ( wf == NULL ) {
         mode_t mode = Container::getmode( strPath ); 
         wf = new WriteFile(strPath.c_str(), Util::hostname(), mode, 0);
-        ret = wf->openIndex( pid , &type); // Adding the type
+        ret = wf->openIndex( pid ); // Adding the type
         newly_opened = true;
     }
     if ( ret == 0 ) ret = wf->extend( offset );

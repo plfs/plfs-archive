@@ -102,22 +102,20 @@ typedef struct {
 class SubIndex: public Metadata {
 
     public:
-        // I can think of two virtual functions at this point
-        // flushing and reading the index will be dependent
-        // on the object type.
+        // Virtual functions to be implemented by
+        // each derived subIndex
         virtual int flush()=0;
         virtual int readIndex()=0;
-        // The writes are going to depend on each specific subIndex
-        // class going to pass args, and return values as a void *
         virtual int addWrite()=0;
-        // I may not need all of this, off to lookat Global lookup
-        virtual int lookup()=0; 
-
-        int getFd(){ return fd;}  // Everyone can inherit this
-    
+        virtual int lookup()=0;
+        // The functions that are shared by all types
+        void setFd(int fd)              { this->fd = fd;} 
+        int getFd()                     { return fd;}  
+        void setType(char type)         { this->type = type;}
+        char getType()                  {return type;}
     private:
-        int fd; // The fd for the file we open for this subindex 
-        
+        int fd; // The fd for this subindex 
+        char type;   
 };
 
 // This name seems rather long
@@ -186,8 +184,9 @@ class Index : public Metadata {
         void startBuffering(); 
         void stopBuffering();  
         bool isBuffering();
-        // Added to support multiple index type
-        void addSubIndex(SubIndex *);
+        // Added to support multiple index types
+        int addSubIndex(SubIndex *);
+        SubIndex* getSubIndex(char *);
         
     private:
         void init( string );
