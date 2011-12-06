@@ -92,6 +92,39 @@ typedef struct {
     int fd;
 } ChunkFile;
 
+
+// Going to have the Index class support 
+// multiple types. Decided to add 
+// a subIndex Virtual class to support 
+// the addition of multiple index types
+
+class SubIndex: public Metadata {
+
+    public:
+        // I can think of two virtual functions at this point
+        // flushing and reading the index will be dependent
+        // on the object type.
+        virtual int flush();
+        virtual int readIndex( void *buffer);
+        // I may not need all of this, off to lookat Global lookup
+        virtual int Lookup( int *fd, off_t *chunk_off, size_t *length, 
+                string &path, bool *hole, pid_t *chunk_id, off_t logical ); 
+
+
+        int getFd( return fd);  // Everyone can inherit this
+    
+    private:
+        int fd; // The fd for the file we open for this subindex 
+        
+}
+
+// This name seems rather long
+class FormulaicIndex : public SubIndex{
+    
+    int addWrite(Plfs_func_dec);
+
+}
+
 class Index : public Metadata {
     public:
         Index( string ); 
@@ -144,6 +177,8 @@ class Index : public Metadata {
         void startBuffering(); 
         void stopBuffering();  
         bool isBuffering();
+        // Added to support multiple index type
+        void addSubIndex(SubIndex *);
         
     private:
         void init( string );
@@ -184,6 +219,9 @@ class Index : public Metadata {
         bool buffering;    // are we buffering the index on write?
         bool buffer_filled; // were we buffering but ran out of space? 
         pthread_mutex_t    fd_mux;   // to allow thread safety
+        // Additions for suppporting multiple subindices
+        int num_sub_indices;            // Let's keep the number around
+       vector< SubIndex> sub_indices;   // Push any discovered subindices here 
 
 };
 
