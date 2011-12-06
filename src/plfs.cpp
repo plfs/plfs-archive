@@ -2377,12 +2377,13 @@ int
 extendFile(Plfs_fd *of, string strPath, off_t offset) {
     int ret = 0;
     bool newly_opened = false;
+    char type = INDEX_TYPE_ORIGINAL; // Index type
     WriteFile *wf = ( of && of->getWritefile() ? of->getWritefile() : NULL );
     pid_t pid = ( of ? of->getPid() : 0 );
     if ( wf == NULL ) {
         mode_t mode = Container::getmode( strPath ); 
         wf = new WriteFile(strPath.c_str(), Util::hostname(), mode, 0);
-        ret = wf->openIndex( pid );
+        ret = wf->openIndex( pid , &type); // Adding the type
         newly_opened = true;
     }
     if ( ret == 0 ) ret = wf->extend( offset );

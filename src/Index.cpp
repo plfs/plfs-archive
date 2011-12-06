@@ -418,6 +418,8 @@ void *Index::mapIndex( string hostindex, int *fd, off_t *length ) {
         mlog(IDX_DRARE, "%s WTF lseek: %s", __FUNCTION__, strerror(errno));
         return (void*)-1; 
     }
+    // I've added the index type so adjust the length
+    length-=1;
 
     Util::Mmap(*length,*fd,&addr);
     return addr;
@@ -431,6 +433,7 @@ int Index::readIndex( string hostindex ) {
     int   fd = -1;
     void  *maddr = NULL;
     populated = true;
+    char type,*typ_ptr;
 
     ostringstream os;
     os << __FUNCTION__ << ": " << this << " reading index on " <<
@@ -438,6 +441,13 @@ int Index::readIndex( string hostindex ) {
     mlog(IDX_DAPI, "%s", os.str().c_str() );
 
     maddr = mapIndex( hostindex, &fd, &length );
+    // Pull off the type
+    typ_ptr=(char *)maddr;
+    type = typ_ptr[0];
+    // Advance the pointer
+    typ_ptr++;
+    maddr=(void *)typ_ptr;
+    mlog(IDX_DAPI, "The Index type is %d",(int)type);
     if( maddr == (void*)-1 ) {
         return cleanupReadIndex( fd, maddr, length, 0, "mapIndex",
             hostindex.c_str() );
@@ -521,6 +531,10 @@ int Index::readIndex( string hostindex ) {
     }
     mlog(IDX_DAPI, "After %s in %p, now are %lu chunks",
         __FUNCTION__,this,(unsigned long)chunk_map.size());
+    // Actual length, adjusted for the extra byte we use for the type
+    typ_ptr--;
+    maddr = (void *)typ_ptr;
+    length+=1;
     return cleanupReadIndex(fd, maddr, length, 0, "DONE",hostindex.c_str());
 }
 

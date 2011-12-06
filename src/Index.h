@@ -11,6 +11,7 @@ using namespace std;
 #include "Util.h"
 #include "Metadata.h"
 
+
 // the LocalEntry (HostEntry) and the ContainerEntry should maybe be derived from one another.
 // there are two types of index files
 // on a write, every host has a host index
@@ -104,26 +105,34 @@ class SubIndex: public Metadata {
         // I can think of two virtual functions at this point
         // flushing and reading the index will be dependent
         // on the object type.
-        virtual int flush();
-        virtual int readIndex( void *buffer);
+        virtual int flush()=0;
+        virtual int readIndex()=0;
+        // The writes are going to depend on each specific subIndex
+        // class going to pass args, and return values as a void *
+        virtual int addWrite()=0;
         // I may not need all of this, off to lookat Global lookup
-        virtual int Lookup( int *fd, off_t *chunk_off, size_t *length, 
-                string &path, bool *hole, pid_t *chunk_id, off_t logical ); 
+        virtual int lookup()=0; 
 
-
-        int getFd( return fd);  // Everyone can inherit this
+        int getFd(){ return fd;}  // Everyone can inherit this
     
     private:
         int fd; // The fd for the file we open for this subindex 
         
-}
+};
 
 // This name seems rather long
 class FormulaicIndex : public SubIndex{
     
-    int addWrite(Plfs_func_dec);
+    public:
+        int addWrite(void *args, void *ret_vals);
+        int flush();
+        int readIndex(void *buffer);
+        int lookup( int *fd, off_t *chunk_off, size_t *length,string &path, 
+                bool *hole, pid_t *chunk_id, off_t logical);
+    private:
+        int blah;
 
-}
+};
 
 class Index : public Metadata {
     public:
@@ -221,7 +230,7 @@ class Index : public Metadata {
         pthread_mutex_t    fd_mux;   // to allow thread safety
         // Additions for suppporting multiple subindices
         int num_sub_indices;            // Let's keep the number around
-       vector< SubIndex> sub_indices;   // Push any discovered subindices here 
+       vector< SubIndex *> sub_indices;   // Push any discovered subindices here 
 
 };
 

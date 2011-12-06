@@ -294,6 +294,7 @@ ssize_t WriteFile::write_coll( const char *buf, size_t size, pid_t pid,
 ssize_t WriteFile::write(const char *buf, size_t size, off_t offset, pid_t pid){
     int ret = 0; 
     ssize_t written;
+    char type = INDEX_TYPE_ORIGINAL;
     OpenFd *ofd = getFd( pid );
     if ( ofd == NULL ) {
         // we used to return -ENOENT here but we can get here legitimately 
@@ -319,7 +320,7 @@ ssize_t WriteFile::write(const char *buf, size_t size, off_t offset, pid_t pid){
         if ( ret >= 0 ) {
             // Delay index creation until our first write
             // moved out of the open
-            if(!index) this->openIndex( pid ); 
+            if(!index) this->openIndex( pid , &type); 
             Util::MutexLock(   &index_mux , __FUNCTION__);
             index->addWrite( offset, ret, pid, begin, end);
             // TODO: why is 1024 a magic number?
@@ -343,7 +344,7 @@ ssize_t WriteFile::write(const char *buf, size_t size, off_t offset, pid_t pid){
 
 // this assumes that the hostdir exists and is full valid path
 // returns 0 or -errno
-int WriteFile::openIndex( pid_t pid ) {
+int WriteFile::openIndex( pid_t pid , char *type) {
     int ret = 0;
     string index_path;
     int fd = openIndexFile(physical_path, hostname, pid, DROPPING_MODE,
@@ -357,6 +358,8 @@ int WriteFile::openIndex( pid_t pid ) {
         mlog(WF_DAPI, "In open Index path is %s",index_path.c_str());
         index->index_path=index_path;
         if(index_buffer_mbs) index->startBuffering();
+        // Write out the type
+        ret = Util::Write( fd, type, 1); 
     }
     return ret;
 }
