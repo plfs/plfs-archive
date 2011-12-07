@@ -16,6 +16,7 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <stdlib.h>
 
 #include <time.h>
@@ -1365,28 +1366,35 @@ int Index::rewriteIndex( int fd ) {
 // return NULL
 SubIndex* Index::getSubIndex(char *type){
     
+    SubIndex *subindex;
     // The subindices have not been filled out
     // This line may not be necessary if the following code 
     // works
-    if(sub_indices.size()==0){
-        return NULL;
+    try{
+        subindex = sub_indices.at((int) *type);
     }
+    catch (out_of_range& oor){
+        printf("Out of range\n");
+        subindex = NULL;
+    }
+    
     // I am assuming I don't have to iterate over this list
     // and that the element I am accesing will return NULL
     // if it hasn't been filled out double check these 
     // assumptions
-    return sub_indices[(int) *type];
+    return subindex;
 }
 
 // Add a new element, return -1 if there is already an element
 // in the slot you are looking for. This will be a wtf, because
 // we attempt to getSubIndexFirst
 int Index::addSubIndex(SubIndex *addition, char *type){
-
-    if(sub_indices[(int) *type] != NULL){
-        return -1;
+    // Resize if we have to
+    if(sub_indices.size() < (int)*type+1 ){
+        sub_indices.resize((int)*type +1);
     }
-    
-    sub_indices[(int) *type] = addition;
+    printf("About to add to the sub_index\n");
+    sub_indices.at((int) *type) = addition;
+    printf("Returned from sub index addition\n");
     return 1;
 }
