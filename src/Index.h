@@ -105,15 +105,15 @@ class SubIndex: public Metadata {
         // Virtual functions to be implemented by
         // each derived subIndex
         virtual int flush()=0;
-        virtual int readIndex()=0;
-        virtual int addWrite()=0;
-        virtual int lookup()=0;
+        virtual int readIndex(void *)=0;
+        virtual void addWrite(void *,void *)=0;
+        virtual int lookup(void *, void *)=0;
         // The functions that are shared by all types
         void setFd(int fd)              { this->fd = fd;} 
         int getFd()                     { return fd;}  
         void setType(char type)         { this->type = type;}
         char getType()                  {return type;}
-    private:
+    protected:
         int fd; // The fd for this subindex 
         char type;   
 };
@@ -122,11 +122,11 @@ class SubIndex: public Metadata {
 class FormulaicIndex : public SubIndex{
     
     public:
-        int addWrite(void *args, void *ret_vals);
+        FormulaicIndex( int );
+        void addWrite(void *, void *);
         int flush();
-        int readIndex(void *buffer);
-        int lookup( int *fd, off_t *chunk_off, size_t *length,string &path, 
-                bool *hole, pid_t *chunk_id, off_t logical);
+        int readIndex(void *);
+        int lookup( void *, void *);
     private:
         int blah;
 
@@ -185,7 +185,7 @@ class Index : public Metadata {
         void stopBuffering();  
         bool isBuffering();
         // Added to support multiple index types
-        int addSubIndex(SubIndex *);
+        int addSubIndex(SubIndex *, char *);
         SubIndex* getSubIndex(char *);
         
     private:

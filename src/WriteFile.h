@@ -31,6 +31,7 @@ class WriteFile : public Metadata {
         ~WriteFile();
 
         int openIndex( pid_t );
+        int openSubIndex( pid_t, char *);
         int closeIndex();
 
         int addWriter( pid_t, bool child );

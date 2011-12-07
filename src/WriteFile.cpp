@@ -250,52 +250,51 @@ ssize_t WriteFile::write_coll( const char *buf, size_t size, pid_t pid,
         ret = written = ( size ? Util::Write( fd, buf, size ) : 0 );
         end = Util::getTime();
 
+        // TODO:Update the physical offsets and the metadata from all 
+        // ranks
+
         // Need to add index types, also need to only write the index
         // if you are rank0
         if (!pid) {
             SubIndex *subindex;
             char index_type = INDEX_TYPE_FUNCTION;
             // Added this for safety
-            Util::MutexLock( &index_mux, __FUNCTION__);
             // Don't open the file for the Index in the 
             // regular write. Be sure to update the regular
             // write to make sure the fd for the Index is 
             // set if not we need to open the fd for the 
             // Index tracking regular writes
             if(!index) index = new Index( physical_path);
-            // 
+            Util::MutexLock( &index_mux, __FUNCTION__);
+            
             subindex = index->getSubIndex(&index_type);
+            if(subindex){
+                // Add the write, we found a formulaic subindex
+                // attached to this index
+                FormulaicIndex *formIndex = (FormulaicIndex *)subindex;
+                formIndex->addWrite((void *)func, NULL);
+            } else{
+                int fd; // fd for the new formulaic index
+                // Remember to remove me on the close
+                fd = openSubIndex( pid, &index_type);
+                if(fd < 0 ){
+                    ret = fd;
+                    mlog(WF_DCOMMON, "WTF open Sub Index has failed");
 
+                }else{
+                    subindex = new FormulaicIndex(fd);
+                    subindex->addWrite((void *)func, NULL);
+                    // Add this new subindex to the index
+                    index->addSubIndex(subindex, &index_type);
+                }
+
+            }
             Util::MutexUnlock (&index_mux, __FUNCTION__);
         }
-        /*
-        // then the index
-        if ( ret >= 0 ) {
-            Util::MutexLock(   &index_mux , __FUNCTION__);
-            // Delay index creation until our first write
-            // moved out of the open
-            if(!index) this->openIndex( pid ); 
-            index->addWrite( offset, ret, pid, begin, end );
-            // TODO: why is 1024 a magic number?
-            if (write_count%1024==0 && write_count>0) {
-                ret = index->flush();
-                // Check if the index has grown too large stop buffering
-                if(index->memoryFootprintMBs() > index_buffer_mbs) {
-                    index->stopBuffering();
-                    mlog(WF_DCOMMON, "The index grew too large, "
-                         "no longer buffering");
-                }
-            }
-            if (ret >= 0) addWrite(offset, size); // track our own metadata
-            Util::MutexUnlock( &index_mux, __FUNCTION__ );
-        }
-    
-        */
-    }
+    } 
     write_count++;
     // return bytes written or error
     return ( ret >= 0 ? written : -errno );
-
 
 }
 
@@ -358,6 +357,28 @@ ssize_t WriteFile::write(const char *buf, size_t size, off_t offset, pid_t pid){
     return ( ret >= 0 ? written : -errno );
 }
 
+// Open up a subindex, shares code eh, pull the common 
+// code out of me and openIndex eventually
+int WriteFile::openSubIndex( pid_t pid, char *type){
+    int ret =0;
+    string index_path;
+    // Increment the time stamp
+    createtime = Util::getTime();
+    int fd = openIndexFile(physical_path, hostname, pid, DROPPING_MODE,
+                            &index_path);
+    if ( fd <0 ) {
+        ret = -errno;
+    } else{
+        ret = Util::Write( fd, type, sizeof(char));
+    }
+    if( ret == sizeof(char)){
+        ret = fd;
+    }else{
+        ret = -errno;
+    }
+    // Warning error could be from the open or the Write 
+    return ret;
+}
 // this assumes that the hostdir exists and is full valid path
 // returns 0 or -errno
 int WriteFile::openIndex( pid_t pid ) {
@@ -376,7 +397,7 @@ int WriteFile::openIndex( pid_t pid ) {
         index->index_path=index_path;
         if(index_buffer_mbs) index->startBuffering();
         // Write out the type
-        ret = Util::Write( fd, &type, 1); 
+        ret = Util::Write( fd, &type, sizeof(char)); 
     }
     return ret;
 }

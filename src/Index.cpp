@@ -242,6 +242,13 @@ Index::Index( string logical, int fd ) : Metadata::Metadata() {
          physical_path.c_str(), fd);
 }
 
+
+FormulaicIndex::FormulaicIndex( int fd) {
+    this->fd = fd;
+    mlog(IDX_DAPI,"%s: created formulaic index, with fd%d",
+            __FUNCTION__, fd);
+}
+
 void
 Index::lock( const char *function ) {
     Util::MutexLock( &fd_mux, function );
@@ -376,6 +383,14 @@ bool Index::ispopulated( ) {
 }
 
 // returns 0 or -errno
+// then dumps the formulaic
+// index
+
+// Not yet implemented
+int FormulaicIndex::flush() {
+    return 0;
+}
+// returns 0 or -errno
 // this dumps the local index
 // and then clears it
 int Index::flush() {
@@ -425,7 +440,9 @@ void *Index::mapIndex( string hostindex, int *fd, off_t *length ) {
     return addr;
 }
 
-
+int FormulaicIndex::readIndex(void *args){
+    return 0;
+}
 // this builds a global in-memory index from a physical host index dropping
 // return 0 for sucess, -errno for failure
 int Index::readIndex( string hostindex ) {
@@ -1037,6 +1054,10 @@ int Index::chunkFound( int *fd, off_t *chunk_off, size_t *chunk_len,
     return 0;
 }
 
+int FormulaicIndex::lookup(void *args, void *ret_vals){
+    return 0;
+}
+
 // returns the fd for the chunk and the offset within the chunk
 // and the size of the chunk beyond the offset 
 // if the chunk does not currently have an fd, it is created here
@@ -1136,11 +1157,22 @@ int Index::globalLookup( int *fd, off_t *chunk_off, size_t *chunk_len,
 // we're just estimating the area of these stl containers which ignores overhead
 size_t Index::memoryFootprintMBs() {
     double KBs = 0;
-    KBs += (hostIndex.size() * sizeof(HostEntry))/1024.0;
+    KBs += (hostIndex.size() * sizeof(HostEntry))/1024.0; // Constant !!
     KBs += (global_index.size()*(sizeof(off_t)+sizeof(ContainerEntry)))/1024.0;
     KBs += (chunk_map.size() * sizeof(ChunkFile))/1024.0;
     KBs += (physical_offsets.size() * (sizeof(pid_t)+sizeof(off_t)))/1024.0;
     return size_t(KBs/1024);
+}
+
+void FormulaicIndex::addWrite(void *args, void *ret_vals){
+    // May not be enough information, but we will add it 
+    // to the struct as needed
+    Plfs_func_desc * func = (Plfs_func_desc *)args;
+    printf("Formulaic Index has encountered a collective write\n");
+    printf("This is the description: num_procs[%d],starting_offset[%ld],"
+            "end_offset[%ld],data_size[%d]\n",func->num_procs,
+            func->start_off,func->end_off,func->data_size);
+
 }
 
 void Index::addWrite( off_t offset, size_t length, pid_t pid, 
@@ -1333,8 +1365,6 @@ int Index::rewriteIndex( int fd ) {
 // return NULL
 SubIndex* Index::getSubIndex(char *type){
     
-    vector<SubIndex>::iterator it;
-    SubIndex *req_type; // If we find a match return me
     // The subindices have not been filled out
     // This line may not be necessary if the following code 
     // works
@@ -1343,7 +1373,20 @@ SubIndex* Index::getSubIndex(char *type){
     }
     // I am assuming I don't have to iterate over this list
     // and that the element I am accesing will return NULL
-    // if it hasn't been filled out
+    // if it hasn't been filled out double check these 
+    // assumptions
     return sub_indices[(int) *type];
-        
+}
+
+// Add a new element, return -1 if there is already an element
+// in the slot you are looking for. This will be a wtf, because
+// we attempt to getSubIndexFirst
+int Index::addSubIndex(SubIndex *addition, char *type){
+
+    if(sub_indices[(int) *type] != NULL){
+        return -1;
+    }
+    
+    sub_indices[(int) *type] = addition;
+    return 1;
 }
