@@ -7,6 +7,7 @@ using namespace std;
 #include "Util.h"
 #include "Index.h"
 #include "Metadata.h"
+#include "PhysicalLogfile.h"
 
 // THREAD SAFETY
 // we use a mutex when writers are added or removed
@@ -20,7 +21,7 @@ using namespace std;
 
 struct
 OpenFd {
-    int fd;
+    PhysicalLogfile *plf;
     int writers;
 };
 
@@ -52,18 +53,18 @@ class WriteFile : public Metadata {
         double createTime() {return createtime;}
 
     private:
-        int openIndexFile( string path, string host, pid_t, mode_t 
+        PhysicalLogfile *openIndexFile( string path, string host, pid_t, mode_t 
                             , string* index_path);
-        int openDataFile(string path, string host, pid_t, mode_t );
-        int openFile( string, mode_t mode );
+        PhysicalLogfile *openDataFile(string path, string host, pid_t, mode_t);
+        PhysicalLogfile *openFile( string, mode_t mode );
         int Close( );
-        int closeFd( int fd );
+        int closeFd(PhysicalLogfile *);
         struct OpenFd * getFd( pid_t pid );
 
         string physical_path;
         string hostname;
         map< pid_t, OpenFd  > fds;
-        map< int, string > paths;      // need to remember fd paths to restore
+        map< PhysicalLogfile *, string > paths;  // needed for restore
         pthread_mutex_t    index_mux;  // to use the shared index 
         pthread_mutex_t    data_mux;   // to access our map of fds 
         bool has_been_renamed; // use this to guard against a truncate following

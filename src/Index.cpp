@@ -235,23 +235,20 @@ void Index::init( string physical ) {
     pthread_mutex_init( &fd_mux, NULL );
 }
 
-Index::Index( string logical, int fd ) : Metadata::Metadata() {
+Index::Index( string logical, PhysicalLogfile *plf) : Metadata::Metadata() {
     init( logical );
-    this->fd = fd;
-    mlog(IDX_DAPI, "%s: created index on %s, fd=%d", __FUNCTION__,
-         physical_path.c_str(), fd);
+    this->plf = plf;
+    mlog(IDX_DAPI,"%s: created index on %s",__FUNCTION__,physical_path.c_str());
 }
 
 void
 Index::lock( const char *function ) {
     Util::MutexLock( &fd_mux, function );
-
 }
 
 void
 Index::unlock( const char *function ) {
     Util::MutexUnlock( &fd_mux, function );
-
 }
 
 Index::Index( string logical ) : Metadata::Metadata() {
@@ -387,13 +384,18 @@ int Index::flush() {
     // valgrind complains about writing uninitialized bytes here....
     // but it's fine as far as I can tell.
     void *start = &(hostIndex.front());
-    int ret     = Util::Writen( fd, start, len );
+    int ret     = plf->append(start,len);
     if ( (size_t)ret != (size_t)len ) {
-        mlog(IDX_DRARE, "%s failed write to fd %d: %s", 
-                __FUNCTION__, fd, strerror(errno));
+        mlog(IDX_DRARE, "%s failed write to index %s: %s", 
+                __FUNCTION__, getPath().c_str(), strerror(errno));
     }
     hostIndex.clear();
     return ( ret < 0 ? -errno : 0 );
+}
+
+int 
+Index::sync() {
+    return plf->sync();
 }
 
 // takes a path and returns a ptr to the mmap of the file 
@@ -1268,8 +1270,8 @@ void Index::truncateHostIndex( off_t offset ) {
 // created a partial global index, and truncated that global
 // index, so now we need to dump the modified global index into
 // a new local index
-int Index::rewriteIndex( int fd ) {
-    this->fd = fd;
+int Index::rewriteIndex(PhysicalLogfile *plf) {
+    this->plf = plf;
     map<off_t,ContainerEntry>::iterator itr;
     map<double,ContainerEntry> global_index_timesort;
     map<double,ContainerEntry>::iterator itrd;

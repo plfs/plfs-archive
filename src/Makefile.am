@@ -65,6 +65,7 @@ OpenFile.h \
 plfs_private.h \
 ThreadPool.h \
 WriteFile.h \
+PhysicalLogFile.h \
 $(include_HEADERS) \
 $(dist_pkginclude_HEADERS)
 
@@ -77,6 +78,7 @@ LogMessage.cpp \
 OpenFile.cpp \
 ThreadPool.cpp \
 WriteFile.cpp \
+PhysicalLogFile.cpp \
 mlog.c \
 plfs.cpp
 

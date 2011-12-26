@@ -8,6 +8,7 @@
 #include <list>
 using namespace std;
 
+#include "PhysicalLogfile.h"
 #include "Util.h"
 #include "Metadata.h"
 
@@ -94,12 +95,14 @@ typedef struct {
 class Index : public Metadata {
     public:
         Index( string ); 
-        Index( string path, int fd ); 
+        Index( string path, PhysicalLogfile *plf); 
         ~Index();
 
         int readIndex( string hostindex );
     
         void setPath( string );
+
+        string getPath() { return this->physical_path; }
 
         bool ispopulated( );
 
@@ -108,14 +111,15 @@ class Index : public Metadata {
         size_t memoryFootprintMBs();    // how much area the index is occupying
 
         int flush();
+        int sync();
 
         off_t lastOffset( );
 
         void lock( const char *function );
         void unlock(  const char *function );
 
-        int getFd() { return fd; }
-        void resetFd( int fd ) { this->fd = fd; }
+        PhysicalLogfile *getFd() { return plf; }
+        void resetFd( PhysicalLogfile *plf ) { this->plf = plf; }
 
         size_t totalBytes( );
 
@@ -129,12 +133,12 @@ class Index : public Metadata {
         int insertGlobal( ContainerEntry * );
         void merge( Index *other);
         void truncate( off_t offset );
-        int rewriteIndex( int fd );
+        int rewriteIndex( PhysicalLogfile *plf );
         void truncateHostIndex( off_t offset );
 
         void compress();
         int debug_from_stream(void *addr);
-        int global_to_file(int fd);
+        int global_to_file(int fd); // should be PhysicalLogfile ??
         int global_from_stream(void *addr); 
         int global_to_stream(void **buffer,size_t *length);
 		friend ostream& operator <<(ostream &,const Index &);
@@ -179,7 +183,7 @@ class Index : public Metadata {
         int    chunk_id;
         off_t  last_offset;
         size_t total_bytes;
-        int    fd;
+        PhysicalLogfile *plf;
         bool buffering;    // are we buffering the index on write?
         bool buffer_filled; // were we buffering but ran out of space? 
         pthread_mutex_t    fd_mux;   // to allow thread safety

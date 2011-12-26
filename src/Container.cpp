@@ -1619,7 +1619,7 @@ int Container::Truncate( const string &path, off_t offset ) {
 	// preserving only entries that contain data prior to truncate offset
     DIR *td = NULL, *hd = NULL; struct dirent *tent = NULL;
     while((ret = nextdropping(path,&indexfile,INDEXPREFIX, &td,&hd,&tent))== 1){
-        Index index( indexfile, -1 );
+        Index index(indexfile, NULL);
         mlog(CON_DCOMMON, "%s new idx %p %s", __FUNCTION__,
              &index,indexfile.c_str());
         ret = index.readIndex( indexfile );
@@ -1628,14 +1628,16 @@ int Container::Truncate( const string &path, off_t offset ) {
                 mlog(CON_DCOMMON, "%s %p at %ld",__FUNCTION__,&index,
                         (unsigned long)offset);
                 index.truncate( offset );
-                int fd = Util::Open(indexfile.c_str(), O_TRUNC | O_WRONLY);
-                if ( fd < 0 ) {
+                PhysicalLogfile *plf = new PhysicalLogfile(indexfile);
+                ret = plf->open(DEFAULT_MODE);
+                if ( ret < 0 ) {
                     mlog(CON_CRIT, "Couldn't overwrite index file %s: %s",
-                         indexfile.c_str(), strerror( fd ));
+                         indexfile.c_str(), strerror( ret ));
                     return -errno;
                 }
-                ret = index.rewriteIndex( fd );
-                Util::Close( fd );
+                ret = index.rewriteIndex( plf );
+                plf->close();
+                delete plf;
                 if ( ret != 0 ) break;
             }
         } else {

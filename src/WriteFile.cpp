@@ -58,10 +58,10 @@ int WriteFile::sync( pid_t pid ) {
         // ugh, sometimes FUSE passes in weird pids, just ignore this
         //ret = -ENOENT;
     } else {
-        ret = Util::Fsync( ofd->fd );
+        ret = ofd->plf->sync();
         Util::MutexLock( &index_mux, __FUNCTION__ );
         if ( ret == 0 ) index->flush();
-        if ( ret == 0 ) ret = Util::Fsync( index->getFd() );
+        if ( ret == 0 ) index->sync();
         Util::MutexUnlock( &index_mux, __FUNCTION__ );
         if ( ret != 0 ) ret = -errno;
     }
@@ -78,14 +78,16 @@ int WriteFile::addWriter( pid_t pid, bool child ) {
     if ( ofd ) {
         ofd->writers++;
     } else {
-        int fd = openDataFile( physical_path, hostname, pid, DROPPING_MODE); 
-        if ( fd >= 0 ) {
+        PhysicalLogfile *plf = new PhysicalLogfile(physical_path);
+        ret = plf->open(DROPPING_MODE);
+        if ( ret == 0 ) {
             struct OpenFd ofd;
             ofd.writers = 1;
-            ofd.fd = fd;
+            ofd.plf = plf;
             fds[pid] = ofd;
         } else {
             ret = -errno;
+            delete plf;
         }
     }
     int writers = incrementOpens(0); 
@@ -117,11 +119,7 @@ size_t WriteFile::numWriters( ) {
     return writers;
 }
 
-// ok, something is broken again.
-// it shows up when a makefile does a command like ./foo > bar
-// the bar gets 1 open, 2 writers, 1 flush, 1 release
-// and then the reference counting is screwed up
-// the problem is that a child is using the parents fd
+// each pid has it's own OpenFd
 struct OpenFd * WriteFile::getFd( pid_t pid ) {
     map<pid_t,OpenFd>::iterator itr;
     struct OpenFd *ofd = NULL;
@@ -164,20 +162,23 @@ struct OpenFd * WriteFile::getFd( pid_t pid ) {
     return ofd;
 }
 
-int WriteFile::closeFd( int fd ) {
-    map<int,string>::iterator paths_itr;
-    paths_itr = paths.find( fd );
+int 
+WriteFile::closeFd( PhysicalLogfile *plf ) {
+    map<PhysicalLogfile *,string>::iterator paths_itr;
+    paths_itr = paths.find( plf );
     string path = ( paths_itr == paths.end() ? "ENOENT?" : paths_itr->second );
-    int ret = Util::Close( fd );
-    mlog(WF_DAPI, "%s:%s closed fd %d for %s: %d %s",
-            __FILE__, __FUNCTION__, fd, path.c_str(), ret, 
+    int ret = plf->close(); 
+    mlog(WF_DAPI, "%s:%s closed open logfile for %s: %d %s",
+            __FILE__, __FUNCTION__, path.c_str(), ret, 
             ( ret != 0 ? strerror(errno) : "success" ) );
-    paths.erase ( fd );
+    paths.erase ( plf );
+    delete plf;
     return ret;
 }
 
 // returns -errno or number of writers
-int WriteFile::removeWriter( pid_t pid ) {
+int 
+WriteFile::removeWriter( pid_t pid ) {
     int ret = 0;
     Util::MutexLock(   &data_mux , __FUNCTION__);
     struct OpenFd *ofd = getFd( pid );
@@ -192,8 +193,8 @@ int WriteFile::removeWriter( pid_t pid ) {
     } else {
         ofd->writers--;
         if ( ofd->writers <= 0 ) {
-            ret = closeFd( ofd->fd );
-            fds.erase( pid );
+            fds.erase(pid);
+            ret = closeFd( ofd->plf );
         }
     }
     mlog(WF_DAPI, "%s (%d) on %s now has %d writers: %d", 
@@ -235,11 +236,12 @@ ssize_t WriteFile::write(const char *buf, size_t size, off_t offset, pid_t pid){
         }
     }
     if ( ofd && ret >= 0 ) {
-        int fd = ofd->fd;
-        // write the data file
+        PhysicalLogfile *plf = ofd->plf;
+        // write the data file if size > 0.
         double begin, end;
         begin = Util::getTime();
-        ret = written = ( size ? Util::Write( fd, buf, size ) : 0 );
+        ret = plf->append(buf,size);
+        ret = written = ( size ? plf->append(buf,size) : 0 );
         end = Util::getTime();
 
         // then the index
@@ -248,7 +250,7 @@ ssize_t WriteFile::write(const char *buf, size_t size, off_t offset, pid_t pid){
             index->addWrite( offset, ret, pid, begin, end );
             // TODO: why is 1024 a magic number?
             if (write_count%1024==0 && write_count>0) {
-                ret = index->flush();
+                index->flush();
                 // Check if the index has grown too large stop buffering
                 if(index->memoryFootprintMBs() > index_buffer_mbs) {
                     index->stopBuffering();
@@ -270,13 +272,13 @@ ssize_t WriteFile::write(const char *buf, size_t size, off_t offset, pid_t pid){
 int WriteFile::openIndex( pid_t pid ) {
     int ret = 0;
     string index_path;
-    int fd = openIndexFile(physical_path, hostname, pid, DROPPING_MODE,
-            &index_path);
-    if ( fd < 0 ) {
+    PhysicalLogfile *plf = openIndexFile(physical_path, hostname, pid, 
+            DROPPING_MODE, &index_path);
+    if ( plf == NULL) {
         ret = -errno;
     } else {
         Util::MutexLock(&index_mux , __FUNCTION__);
-        index = new Index(physical_path, fd);
+        index = new Index(physical_path, plf);
         Util::MutexUnlock(&index_mux, __FUNCTION__);
         mlog(WF_DAPI, "In open Index path is %s",index_path.c_str());
         index->index_path=index_path;
@@ -305,7 +307,7 @@ int WriteFile::Close() {
         // these should already be closed here
         // from each individual pid's close but just in case
     for( itr = fds.begin(); itr != fds.end(); itr++ ) {
-        if ( closeFd( itr->second.fd ) != 0 ) {
+        if ( closeFd( itr->second.plf ) != 0 ) {
             failures++;
         }
     }
@@ -322,29 +324,35 @@ int WriteFile::truncate( off_t offset ) {
     return 0;
 }
 
-int WriteFile::openIndexFile(string path, string host, pid_t p, mode_t m,
+PhysicalLogfile * 
+WriteFile::openIndexFile(string path, string host, pid_t p, mode_t m,
         string* index_path) 
 {
     *index_path = Container::getIndexPath(path,host,p,createtime);
     return openFile(*index_path,m);
 }
 
-int WriteFile::openDataFile(string path, string host, pid_t p, mode_t m){
+PhysicalLogfile * 
+WriteFile::openDataFile(string path, string host, pid_t p, mode_t m){
     return openFile(Container::getDataPath(path,host,p,createtime),m);
 }
 
-// returns an fd or -1
-int WriteFile::openFile( string physicalpath, mode_t mode ) {
+// returns a PhysicalLogfile or NULL 
+PhysicalLogfile * 
+WriteFile::openFile( string physicalpath, mode_t mode ) {
+    PhysicalLogfile *plf = new PhysicalLogfile(physicalpath);
     mode_t old_mode=umask(0);
-    int flags = O_WRONLY | O_APPEND | O_CREAT;
-    int fd = Util::Open( physicalpath.c_str(), flags, mode );
-    mlog(WF_DAPI, "%s.%s open %s : %d %s", 
-            __FILE__, __FUNCTION__, 
-            physicalpath.c_str(), 
-            fd, ( fd < 0 ? strerror(errno) : "" ) );
-    if ( fd >= 0 ) paths[fd] = physicalpath;    // remember so restore works
+    int ret = plf->open(mode);
+    mlog(WF_DAPI, "%s.%s open %s : %d %s", __FILE__, __FUNCTION__, 
+            physicalpath.c_str(), ret, ( ret < 0 ? strerror(errno) : "" ) );
+    if ( ret == 0 ) paths[plf] = physicalpath;    // remember so restore works
     umask(old_mode);
-    return ( fd >= 0 ? fd : -errno );
+    if (ret != 0) {
+        delete plf;
+        return NULL;
+    } else {
+        return plf;
+    }
 }
 
 // we call this after any calls to f_truncate
@@ -352,10 +360,10 @@ int WriteFile::openFile( string physicalpath, mode_t mode ) {
 // in that case, we need to restore them
 // what if rename is called and then f_truncate?
 // return 0 or -errno
-int WriteFile::restoreFds( ) {
-    map<int,string>::iterator paths_itr;
+int 
+WriteFile::restoreFds( ) {
+    map<PhysicalLogfile *,string>::iterator paths_itr;
     map<pid_t, OpenFd >::iterator pids_itr;
-    int ret = 0;
 
     // if an open WriteFile ever gets truncated after being renamed, that
     // will be really tricky.  Let's hope that never happens, put an assert
@@ -367,6 +375,7 @@ int WriteFile::restoreFds( ) {
     
     // first reset the index fd
     if ( index ) {
+        PhysicalLogfile *plf = NULL;
         Util::MutexLock( &index_mux, __FUNCTION__ );
         index->flush();
 
@@ -375,26 +384,26 @@ int WriteFile::restoreFds( ) {
         string indexpath = paths_itr->second;
 
         if ( closeFd( index->getFd() ) != 0 )    return -errno;
-        if ( (ret = openFile( indexpath, mode )) < 0 ) return -errno;
-        index->resetFd( ret );
+        if ( (plf = openFile( indexpath, mode )) == NULL ) return -errno;
+        index->resetFd( plf );
         Util::MutexUnlock( &index_mux, __FUNCTION__ );
     }
 
     // then the data fds
     for( pids_itr = fds.begin(); pids_itr != fds.end(); pids_itr++ ) {
 
-        paths_itr = paths.find( pids_itr->second.fd );
+        paths_itr = paths.find( pids_itr->second.plf );
         if ( paths_itr == paths.end() ) return -ENOENT;
 
         string datapath = paths_itr->second;
-        if ( closeFd( pids_itr->second.fd ) != 0 ) return -errno;
+        if ( closeFd( pids_itr->second.plf ) != 0 ) return -errno;
 
-        pids_itr->second.fd = openFile( datapath, mode );
-        if ( pids_itr->second.fd < 0 ) return -errno;
+        pids_itr->second.plf = openFile( datapath, mode );
+        if ( pids_itr->second.plf == NULL ) return -errno;
     }
 
     // normally we return ret at the bottom of our functions but this
-    // function had so much error handling, I just cut out early on any 
+    // function has so much error handling, we just cut out early on any 
     // error.  therefore, if we get here, it's happy days!
     mlog(WF_DAPI, "Exiting %s",__FUNCTION__);
     return 0;
