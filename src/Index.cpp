@@ -1135,7 +1135,7 @@ void Index::addWrite( off_t offset, size_t length, pid_t pid,
         double begin_timestamp, double end_timestamp ) 
 {
     Metadata::addWrite( offset, length );
-    int quant = hostIndex.size();
+    size_t quant = hostIndex.size();
     bool abutable = true;
         // we use this mode to be able to create trace vizualizations
         // so we don't want to merge anything bec that will reduce the

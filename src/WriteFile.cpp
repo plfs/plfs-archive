@@ -78,9 +78,9 @@ int WriteFile::addWriter( pid_t pid, bool child ) {
     if ( ofd ) {
         ofd->writers++;
     } else {
-        PhysicalLogfile *plf = new PhysicalLogfile(physical_path);
-        ret = plf->open(DROPPING_MODE);
-        if ( ret == 0 ) {
+        PhysicalLogfile *plf = 
+            openDataFile(physical_path,hostname,pid,DROPPING_MODE);
+        if (plf) {
             struct OpenFd ofd;
             ofd.writers = 1;
             ofd.plf = plf;
@@ -165,14 +165,21 @@ struct OpenFd * WriteFile::getFd( pid_t pid ) {
 int 
 WriteFile::closeFd( PhysicalLogfile *plf ) {
     map<PhysicalLogfile *,string>::iterator paths_itr;
-    paths_itr = paths.find( plf );
-    string path = ( paths_itr == paths.end() ? "ENOENT?" : paths_itr->second );
-    int ret = plf->close(); 
-    mlog(WF_DAPI, "%s:%s closed open logfile for %s: %d %s",
+    paths_itr = paths.find(plf);
+    int ret = 0;
+    // shouldn't be possible to close twice since we remove it
+    if (paths_itr == paths.end()) {
+        // possibly it was already closed
+        mlog(WF_DAPI, "%s:%s nothing to close\n", __FILE__,__FUNCTION__);
+    } else {
+        string path = paths_itr->second;
+        ret = plf->close(); 
+        mlog(WF_DAPI, "%s:%s closed open logfile for %s: %d %s",
             __FILE__, __FUNCTION__, path.c_str(), ret, 
             ( ret != 0 ? strerror(errno) : "success" ) );
-    paths.erase ( plf );
-    delete plf;
+        paths.erase(plf);
+        delete plf;
+    }
     return ret;
 }
 
@@ -192,9 +199,9 @@ WriteFile::removeWriter( pid_t pid ) {
         assert( 0 );
     } else {
         ofd->writers--;
-        if ( ofd->writers <= 0 ) {
+        if (ofd->writers <= 0) {
             fds.erase(pid);
-            ret = closeFd( ofd->plf );
+            ret = closeFd(ofd->plf);
         }
     }
     mlog(WF_DAPI, "%s (%d) on %s now has %d writers: %d", 
@@ -240,7 +247,6 @@ ssize_t WriteFile::write(const char *buf, size_t size, off_t offset, pid_t pid){
         // write the data file if size > 0.
         double begin, end;
         begin = Util::getTime();
-        ret = plf->append(buf,size);
         ret = written = ( size ? plf->append(buf,size) : 0 );
         end = Util::getTime();
 
@@ -290,9 +296,10 @@ int WriteFile::openIndex( pid_t pid ) {
 int WriteFile::closeIndex( ) {
     int ret = 0;
     Util::MutexLock(   &index_mux , __FUNCTION__);
+    assert(index);
     ret = index->flush();
-    ret = closeFd( index->getFd() );
-    delete( index );
+    ret = closeFd(index->getFd());
+    delete(index);
     index = NULL;
     Util::MutexUnlock( &index_mux, __FUNCTION__ );
     return ret;

@@ -368,7 +368,8 @@ plfs_dump_config(int check_dirs, int make_dir) {
     cout << "Config file " << pconf->file << " correctly parsed:" << endl
         << "Num Hostdirs: " << pconf->num_hostdirs << endl
         << "Threadpool size: " << pconf->threadpool_size << endl
-        << "Write index buffer size (mbs): " << pconf->buffer_mbs << endl
+        << "Write index buffer size (mbs): " << pconf->index_buffer_mbs << endl
+        << "Write data buffer size (mbs): " << pconf->data_buffer_mbs << endl
         << "Num Mountpoints: " << pconf->mnt_pts.size() << endl;
     if (pconf->global_summary_dir) {
         cout << "Global summary dir: " << *(pconf->global_summary_dir) << endl;
@@ -1575,7 +1576,8 @@ set_default_confs(PlfsConf *pconf) {
     pconf->threadpool_size = 8;
     pconf->direct_io = 0;
     pconf->err_msg = NULL;
-    pconf->buffer_mbs = 64;
+    pconf->data_buffer_mbs = 4; // try to issue only large physical writes
+    pconf->index_buffer_mbs = 64;  // large buffer to keep entirety in memory
     pconf->global_summary_dir = NULL;
     pconf->test_metalink = 0;
 
@@ -1604,8 +1606,13 @@ static void parse_conf_keyval(PlfsConf *pconf, PlfsMount **pmntp, char *file,
     int v;
 
     if(strcmp(key,"index_buffer_mbs")==0) {
-        pconf->buffer_mbs = atoi(value);
-        if (pconf->buffer_mbs <0) {
+        pconf->index_buffer_mbs = atoi(value);
+        if (pconf->index_buffer_mbs <0) {
+            pconf->err_msg = new string("illegal negative value");
+        }
+    } else if(strcmp(key,"data_buffer_mbs")==0) {
+        pconf->data_buffer_mbs = atoi(value);
+        if (pconf->data_buffer_mbs <0) {
             pconf->err_msg = new string("illegal negative value");
         }
     } else if(strcmp(key,"include")==0) {
@@ -2098,7 +2105,7 @@ plfs_open(Plfs_fd **pfd,const char *logical,int flags,pid_t pid,mode_t mode,
             size_t indx_sz = 0; 
             if(open_opt&&open_opt->pinter==PLFS_MPIIO &&open_opt->buffer_index){
                 // this means we want to flatten on close
-                indx_sz = get_plfs_conf()->buffer_mbs; 
+                indx_sz = get_plfs_conf()->index_buffer_mbs; 
             }
             wf = new WriteFile(path, Util::hostname(), mode, indx_sz); 
             new_writefile = true;

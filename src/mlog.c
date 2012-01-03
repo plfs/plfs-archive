@@ -682,11 +682,13 @@ static void vmlog(int flags, const char *fmt, va_list ap) {
  */
 int mlog_str2pri(char *pstr) {
     char ptmp[8];
-    int lcv;
+    int lcv,len;
 
     /* make sure we have a valid input */
-    if (strlen(pstr) > 5)
+    len = (int)strlen(pstr);
+    if (len > 5) {
         return(-1);
+    }
     strcpy(ptmp, pstr);     /* because we may overwrite parts of it */
 
     /*
