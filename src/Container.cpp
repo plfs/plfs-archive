@@ -1192,11 +1192,13 @@ int Container::createHelper(const string &expanded_path, const string &hostname,
 
         // first the top level container
     double begin_time, end_time;
+    bool existing_container = false;
     int res = 0;
     mode_t existing_mode = 0;
     res = isContainer( expanded_path.c_str(), &existing_mode );
     // check if someone is trying to overwrite a directory?
     if (!res && S_ISDIR(existing_mode)) res = -EISDIR;    
+    existing_container = res;
 
     if (!res) {
         plfs_debug("Making top level container %s %x\n", 
@@ -1213,7 +1215,10 @@ int Container::createHelper(const string &expanded_path, const string &hostname,
                     expanded_path.c_str(), strerror(errno));
         }
     }
-    return res;
+
+    // hmm.  what should we do if someone calls create on an existing object
+    // I think we need to return success since ADIO expects this
+    return (existing_container ? 0 : res);
 }
 
 // This should be in a mutex if multiple procs on the same node try to create
