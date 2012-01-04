@@ -31,6 +31,7 @@ For PLFS we have defined the following facilities, so far:
  - fileops (FOP)
  - utilities (UT)
  - store (STO)
+ - logfile (PLOG)
  - FUSE (FUSE)
  - MPI (MPI)
 
