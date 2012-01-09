@@ -695,8 +695,9 @@ int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     // automatically collapses redundant entries
     set<string>::iterator itr;
     int i =0;
-    for(itr=opendir->entries.begin(); ret==0 && itr!=opendir->entries.end(); 
-            itr++,i++) 
+    for(    itr=opendir->entries.begin(); 
+            ! EOD && ret==0 && itr!=opendir->entries.end(); 
+            itr++,i++ ) 
     {
         plfs_debug("Returning dirent %s\n", (*itr).c_str());
         opendir->last_offset=i;
