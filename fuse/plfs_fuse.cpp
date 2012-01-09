@@ -669,23 +669,23 @@ int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
     // pull the opendir that was stashed on the open
     OpenDir *opendir = (OpenDir*)fi->fh;
+    bool EOD = false; // are we at end of directory already?
 
     // skip out early if they're already read to end
     if (offset >= (off_t)opendir->entries.size()) {
         plfs_debug("Skipping %s of %s (EOD)\n",__FUNCTION__,strPath.c_str());
-        PLFS_EXIT;
+        EOD = true;
     }
 
     // check whether someone seeked backward.  If so, refresh.
     // we need to do this because we once saw this:
     // opendir, readdir 0, unlink entry E, readdir 0, stat E 
     // this caused an unexpected ENOENT bec readdir said E existed but it didn't
-    if (opendir->last_offset > offset) {
+    if (!EOD && opendir->last_offset > offset) {
         plfs_debug("Rereading dir %s\n",strPath.c_str());
         opendir->last_offset = offset;
         opendir->entries.clear();
         ret = plfs_readdir(strPath.c_str(),(void*)(&(opendir->entries)));
-        if (ret!=0) PLFS_EXIT;
     }
 
     // now iterate through for all entries so long as filler has room
@@ -695,7 +695,9 @@ int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     // automatically collapses redundant entries
     set<string>::iterator itr;
     int i =0;
-    for(itr=opendir->entries.begin(); itr!=opendir->entries.end(); itr++,i++) {
+    for(itr=opendir->entries.begin(); ret==0 && itr!=opendir->entries.end(); 
+            itr++,i++) 
+    {
         plfs_debug("Returning dirent %s\n", (*itr).c_str());
         opendir->last_offset=i;
         if ( i >= offset ) {
