@@ -20,6 +20,7 @@
 #include <sys/mount.h>
 #include <sys/statvfs.h>
 #include <sys/time.h>
+#include <syslog.h>
 #include <time.h>
 #include <pwd.h>
 #include <grp.h>
@@ -62,6 +63,12 @@ typedef struct OpenDirStruct {
     set<string> entries;
     off_t last_offset;
 } OpenDir;
+
+class generic_exception: public exception{
+    virtual const char* what() const throw(){
+        return "A general exception has occurred.";
+    }
+} genex;
 
 #ifdef FUSE_COLLECT_TIMES
     #define START_TIMES double begin, end; begin = plfs_wtime();
@@ -131,16 +138,25 @@ typedef struct OpenDirStruct {
                    lm.flush();                                                \
                    SAVE_IDS;                                                  \
                    SET_IDS(fuse_get_context()->uid,fuse_get_context()->gid);  \
-                   int ret = 0;                                               
+                   int ret = 0;                                               \
+                   try {
+                
                    
 
-#define PLFS_EXIT  SET_IDS(s_uid,s_gid);                                \
+#define PLFS_EXIT  }                                                    \
+                   catch(exception &e) {                                \
+                       catch_exception(funct_id.str(), e);              \
+                   }                                                    \
+                   catch (...) {                                        \
+                       catch_exception(funct_id.str(), genex);          \
+                   }                                                    \
+                   SET_IDS(s_uid,s_gid);                                \
                    RESTORE_GROUPS;                                      \
                    END_TIMES;                                           \
                    END_MESSAGE;					                        \
                    lm2 << funct_id.str() << endl; lm2.flush();          \
                    DEBUG_MUTEX_OFF;                                     \
-                   return ret;
+                   return ret;                                          \
 
 #define EXIT_IF_DEBUG  if ( isdebugfile(path) ) return 0;
 
@@ -1210,6 +1226,18 @@ int Plfs::f_rename( const char *path, const char *to ) {
     }
 
     PLFS_EXIT;
+}
+
+void Plfs::catch_exception( string func_id, exception &e) {
+    openlog ("PLFS-LOG", LOG_PID | LOG_CONS, LOG_USER);
+    string sysmsg("[plfs] Caught exception in function: ");
+    syslog (LOG_ERR, sysmsg.c_str());
+    sysmsg = func_id;
+    syslog (LOG_ERR, sysmsg.c_str());
+    sysmsg = (e.what());
+    syslog (LOG_ERR, sysmsg.c_str());
+    closelog();
+    throw e;
 }
 
 string Plfs::pathToHash ( string expanded , uid_t uid , int flags ) {

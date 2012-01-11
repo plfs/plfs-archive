@@ -63,6 +63,7 @@ class Plfs : public fusexx::fuse<Plfs> {
         
 
 	private:
+        static void catch_exception (string func_id, exception &e);
         static string pathToHash ( string expanded , uid_t uid , int flags ); 
         static string expandPath( const char * );
         static int makePlfsFile( string, mode_t, int );
