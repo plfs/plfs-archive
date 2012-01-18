@@ -61,6 +61,7 @@ class Plfs : public fusexx::fuse<Plfs> {
         // not overloaded.  something I added to parse command line args
         int init( int *argc, char **argv );
         
+        static int dbg_debug_read(char *buf, size_t size, off_t offset);
 
 	private:
         static void catch_exception (string func_id, exception &e);

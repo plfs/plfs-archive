@@ -24,3 +24,6 @@ setenv CXXFLAGS '-Wall -Werror'
 
 Notice especially the bottom two.  We want warning free code so print out
 all warnings and treat them as errors.
+
+3) DEBUGGING WITH MLOG
+Please read README.mlog
