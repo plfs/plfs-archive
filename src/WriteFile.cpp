@@ -97,7 +97,6 @@ int WriteFile::addWriter( pid_t pid, bool child ) {
     mlog(WF_DAPI, "%s (%d) on %s now has %d writers", 
             __FUNCTION__, pid, physical_path.c_str(), writers );
     Util::MutexUnlock( &data_mux, __FUNCTION__ );
-    assert(writers>0);  // sanity check
     return ( ret == 0 ? writers : ret );
 }
 

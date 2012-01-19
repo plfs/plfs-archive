@@ -525,6 +525,7 @@ addWriter(WriteFile *wf,pid_t pid,const char *path,mode_t mode,string logical) {
 
         // try to open the data file
         writers = ret = wf->addWriter( pid, false );  
+        assert(writers != 0);  //Sanity check
         if (ret >= 0) { ret = 0; break;  }  // Success.  All done.
         if (ret != -ENOENT) break;          // Unexpected error.  
         
