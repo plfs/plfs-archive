@@ -472,122 +472,152 @@ plfs_create( const char *logical, mode_t mode, int flags, pid_t pid ) {
     PLFS_EXIT(ret);
 }
 
-// this code is where the magic lives to get the distributed hashing
-// each proc just tries to create their data and index files in the
-// canonical_container/hostdir but if that hostdir doesn't exist,
-// then the proc creates a shadow_container/hostdir and links that
-// into the canonical_container
+// this is the function that actually tries to create the data file
+// it does it indirectly with its call to WriteFile::addWriter
+// 
+// this code is where the metalinks get created if necessary
+// first figure out whether to use shadow or canonical 
+// then try to addWriter with the write file which will do the physical open
+// if that fails, then make sure that the hostdir (and metalink) is in place
+//
+// an alternative would be to first stat the subdir and then create if
+// necessary.  But we don't want every writer to do that.  So assume it's in
+// place so that only the first writer fails and then creates and everyone
+// else just does a single operation here.
+//
 // returns number of current writers sharing the WriteFile * or -errno
 int
-addWriter(WriteFile *wf, pid_t pid, const char *path, mode_t mode, 
-        string logical ) 
-{
+addWriter(WriteFile *wf,pid_t pid,const char *path,mode_t mode,string logical) {
     int ret = -ENOENT;  // be pessimistic
-    int writers = 0;
+    int writers = 0;    // the return value on success
 
-    // just loop a second time in order to deal with ENOENT
+    // first figure out whether we are in shadow or canonical
+    char *hostname = Util::hostname();
+    string shadow;            // full path to shadow container
+    string canonical;         // full path to canonical container
+    string subdir;            // the name of the subdir itself
+    string shadow_subdir;     // full path to shadow subdir
+    string canonical_subdir;  // full path to the canonical subdir
+    string shadow_backend;    // full path of shadow backend 
+    string canonical_backend; // full path of canonical backend 
+
+    // set up our paths.  expansion errors shouldn't happen but check anyway
+    // set up shadow first
+    ExpansionInfo exp_info;
+    shadow = expandPath(logical,&exp_info,HASH_BY_NODE,-1,0); 
+    if (exp_info.Errno) PLFS_EXIT(exp_info.Errno);
+    shadow_subdir = Container::getHostDirPath(shadow,hostname);
+    subdir = shadow_subdir.substr(shadow.size(),string::npos);
+    shadow_backend = get_backend(exp_info);
+
+    // now set up canonical
+    canonical = expandPath(logical,&exp_info,HASH_BY_FILENAME,-1,0);
+    if (exp_info.Errno) PLFS_EXIT(exp_info.Errno);
+    canonical_backend = get_backend(exp_info);
+    canonical_subdir = Container::getHostDirPath(canonical,hostname);
+
+    // set writefile path since writefile is where the physical open happens
+    bool using_shadow = (shadow!=canonical); 
+    if (using_shadow) wf->setPath(shadow);
+
+    // try up to twice.  If we fail w/ ENOENT, make missing subdir and retry 
     for( int attempts = 0; attempts < 2; attempts++ ) {
-        writers = ret = wf->addWriter( pid, false ); 
-        if ( ret != -ENOENT ) break;    // everything except ENOENT leaves
+
+        // try to open the data file
+        writers = ret = wf->addWriter( pid, false );  
+        if (ret >= 0) { ret = 0; break;  }  // Success.  All done.
+        if (ret != -ENOENT) break;          // Unexpected error.  
         
-        // if we get here, the hostdir doesn't exist (we got ENOENT)
-        // here is a super simple place to add the distributed metadata stuff.
-        // 1) create a shadow container by hashing on node name
-        // 2) create a shadow hostdir inside it
-        // 3) create a metalink in canonical container identifying shadow 
-        // 4) change the WriteFile path to point to shadow
-        // 4) loop and try one more time 
-        char *hostname = Util::hostname();
-        string shadow;            // full path to shadow container
-        string canonical;         // full path to canonical
-        string hostdir;           // the name of the hostdir itself
-        string shadow_hostdir;    // full path to shadow hostdir
-        string canonical_hostdir; // full path to the canonical hostdir
-        string shadow_backend;    // full path of shadow backend 
-        string canonical_backend; // full path of canonical backend 
+        // if we get here, we got ENOENT: 
+        // thus we need to create the subdir and retry
 
-        // set up our paths.  expansion errors shouldn't happen but check anyway
-        // set up shadow first
-        ExpansionInfo exp_info;
-        shadow = expandPath(logical,&exp_info,HASH_BY_NODE,-1,0); 
-        if (exp_info.Errno) PLFS_EXIT(exp_info.Errno);
-        shadow_hostdir = Container::getHostDirPath(shadow,hostname);
-        hostdir = shadow_hostdir.substr(shadow.size(),string::npos);
-        shadow_backend = get_backend(exp_info);
+        if (using_shadow) {
+            bool try_again = false;         // should we abort early and loop?
 
-        // now set up canonical
-        canonical = expandPath(logical,&exp_info,HASH_BY_FILENAME,-1,0);
-        if (exp_info.Errno) PLFS_EXIT(exp_info.Errno);
-        canonical_backend = get_backend(exp_info);
-        canonical_hostdir = Container::getHostDirPath(canonical,hostname);
-
-        // ok.  we are trying very hard to avoid doing a stat on an open
-        // we don't want to slow down an open for write by checking whether
-        // there is a file in place.  So in the case without multiple backends
-        // this is simple.  If we fail to create the subdir w/ ENOENT, that 
-        // means there is no such file.  Of course, this does mean that if
-        // there is a logical directory in place where someone tries to write
-        // to it as if it's a file, then the writes will succeed but the thing
-        // will still be a dir and the user will see all the internals of a 
-        // container.  
-        // so in the case where we are trying to put the subdir into canonical,
-        // case 1:
-        // then we don't need a metalink bec we put subdir directly into canon
-        // then we just error out bec canonical doesn't exist.
-        // in the case where we are trying to put the subdir into a shadow, 
-        // then this is trickier.  We have two choices:
-        // 2a) make the shadow, then make the metalink, if metalink fails bec
-        // there is no canonical, then clean up the shadow
-        // 2b) make the metalink first, if it fails bec there is no canonical, 
-        // then return ENOENT.  If it succeeds, then make the shadow.  Only 
-        // problem is if someone does a stat/read open after we've made metalink
-        // but before we've made shadow, then the metalink resolution will fail.
-        // However, metalink resolution should generally be allowed to fail due
-        // to the case in which the shadow is not visible on this node (e.g. in
-        // a burst buffer where everyone has only access to their own burstbuf)
-        bool using_shadow = (shadow!=canonical); 
-        bool metalink_created = false;  // assume we don't, set true if so
-
-        // if we are using a shadow, then link it in 
-        if (using_shadow) { // case 1 skips this
-            // link the shadow hostdir into its canonical location
-            // some errors are OK: indicate merely that we lost race to sibling
-            mlog(INT_DCOMMON, "Need to link %s into %s (hostdir ret %d)", 
-                    shadow_hostdir.c_str(), canonical.c_str(),ret);
+            // make the metalink first.  Slight race here where metalink can
+            // exist before it's target but that's OK since PLFS will have to
+            // deal with situtation where not all subdirs are available.
+            // Possible that we are racing siblings to create this metalink.
             ret = Container::createMetalink(canonical_backend,shadow_backend,
-                    canonical_hostdir);
-            if (ret==-EISDIR) {
-                ret = 0; // a sibling raced us and made the directory for us
-                wf->setPath(canonical); // no longer using shadow 
-            } else if (ret==-EEXIST||ret==0) {
-                metalink_created = (ret==0);
-                // TODO:  a sibling could race us and create same metalink
-                // but pointing to a different shadow directory.  If we get
-                // EEXIST, then we need to readlink and make sure it's pointing
-                // where we want.  If not, we need a mechanism to create a
-                // unique metalink
-                ret = 0; // either a sibling raced us and made link or we did
-                wf->setPath(shadow);    // change WriteFile to point at shadow
-            } 
+                    canonical_subdir);
+            switch(ret) {
+                case 0: 
+                    // we won the race
+                    break;
+                case -EISDIR:   
+                    // sibling won race and made canonical subdir
+                    // no problem, just loop and use newly created subdir 
+                    wf->setPath(canonical);
+                    try_again = true;
+                    break;
+                case -EEXIST:
+                    // sibling won race and made a metalink
+                    // might be OK if sibling is using same shadow
+                    // could be bad if sibling is using different shadow
+                    // This badness only possible if using shadow_backends
+                    // directive in the plfsrc
+                    // TODO: readlink the metalink and make sure it's OK
+                    // but only in the case where using shadow_backends
+                    // keep going in this case to make the shadow subdir
+                    // the sibling that won the race will also try but we
+                    // still need to try as well in case we pass that sibling
+                    // and try again before sibling creates the shadow subdir
+                    ret = 0;
+                    try_again = false;
+                    mlog(INT_DRARE, "Possible error in %s.  Lost race to "
+                        "create metalink %s\n",
+                        __FUNCTION__, shadow_backend.c_str());
+                    break;
+                default:
+                    // some unexpected error
+                    mlog(INT_DRARE, "Unexpected error in %s to "
+                        "create metalink %s\n",
+                        __FUNCTION__, shadow_backend.c_str());
+                    try_again = false;
+                    break;
+            }
+            if (try_again) continue;    // loop
+            if (ret != 0)  break;       // exit with error
         }
-    
-        // make the shadow container and hostdir (it might be canonical)
-        if (ret==0) {
-            mlog(INT_DCOMMON, "Making %s hostdir for %s at %s",
-                shadow==canonical?"canonical":"shadow",
+
+        // if we get here, then either 
+        // 1) we are not using a shadow
+        // 2) we are using a shadow and the metalink has been created
+        // in both cases, we need to make a subdir.  in the second case,
+        // we also need to make the shadow container
+
+        // some variables for readability
+        parentStatus parent_status;
+        string container; 
+        string container_type;
+        if (using_shadow) {
+            container = shadow;
+            parent_status = PARENT_ABSENT;
+            container_type = "shadow";
+        } else {
+            container = canonical;
+            parent_status = PARENT_CREATED;
+            container_type = "canonical";
+        }
+
+        // here is where we actually try to create the missing subdir
+        // if it's a shadow subdir, we also need to make the shadow container 
+        mlog(INT_DCOMMON, 
+                "Making %s subdir %s for %s at %s",
+                container_type.c_str(),
+                subdir.c_str(),
                 logical.c_str(),
-                shadow.c_str());
-            ret =Container::makeHostDir(shadow,hostname,mode,
-                    using_shadow?PARENT_ABSENT:PARENT_CREATED);
-            if (ret==-EISDIR||ret==-EEXIST) {
-                // a sibling beat us. No big deal. shouldn't happen in ADIO though
-                ret = 0;
-            }
-            if (ret!=0) {
-                fprintf(stderr,
-                    "TODO:Need to remove overly eagerly created metalink %s\n",
-                    canonical_hostdir.c_str());
-            }
+                container.c_str()
+            );
+        ret =Container::makeHostDir(container,hostname,mode,parent_status);
+        if (ret==-EISDIR||ret==-EEXIST) {
+            // a sibling beat us. No big deal. shouldn't happen in ADIO though
+            ret = 0;
+        }
+        if (ret!=0 && using_shadow) {
+            mlog(INT_DRARE, 
+                "TODO: %s Need to remove overly eagerly created metalink %s\n",
+                __FUNCTION__, canonical_subdir.c_str());
         }
 
         if (ret!=0) {
@@ -595,10 +625,14 @@ addWriter(WriteFile *wf, pid_t pid, const char *path, mode_t mode,
                     __FUNCTION__, shadow.c_str());
             continue; 
         }
-    }
+
+        // if ret == 0 here, that means we created the missing subdir, 
+        // so we'll loop and try again to open/create the data file
+
+    } // end the for statement that loops up to twice to deal wih missing subdir
 
     // all done.  we return either -errno or number of writers.  
-    if ( ret == 0 ) ret = writers;
+    if (ret==0) ret = writers;
     PLFS_EXIT(ret);
 }
 

@@ -67,8 +67,6 @@ class WriteFile : public Metadata {
         map< PhysicalLogfile *, string > paths;  // needed for restore
         pthread_mutex_t    index_mux;  // to use the shared index 
         pthread_mutex_t    data_mux;   // to access our map of fds 
-        bool has_been_renamed; // use this to guard against a truncate following
-                               // a rename
         size_t index_buffer_mbs;
         Index *index;
         mode_t mode;

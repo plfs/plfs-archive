@@ -24,7 +24,6 @@ WriteFile::WriteFile(string path, string hostname,
     this->hostname          = hostname;
     this->index             = NULL;
     this->mode              = mode;
-    this->has_been_renamed  = false;
     this->createtime        = Util::getTime();
     this->write_count       = 0;
     this->index_buffer_mbs  = buffer_mbs;
@@ -33,9 +32,11 @@ WriteFile::WriteFile(string path, string hostname,
     pthread_mutex_init( &index_mux, NULL );
 }
 
+// this can get called if an open file is renamed
+// or when we discover that we need to put a writefile
+// on a shadow and not a canonical location
 void WriteFile::setPath ( string p ) {
     this->physical_path    = p;
-    this->has_been_renamed = true;
 }
 
 WriteFile::~WriteFile() {
@@ -96,6 +97,7 @@ int WriteFile::addWriter( pid_t pid, bool child ) {
     mlog(WF_DAPI, "%s (%d) on %s now has %d writers", 
             __FUNCTION__, pid, physical_path.c_str(), writers );
     Util::MutexUnlock( &data_mux, __FUNCTION__ );
+    assert(writers>0);  // sanity check
     return ( ret == 0 ? writers : ret );
 }
 
@@ -371,12 +373,6 @@ int
 WriteFile::restoreFds( ) {
     map<PhysicalLogfile *,string>::iterator paths_itr;
     map<pid_t, OpenFd >::iterator pids_itr;
-
-    // if an open WriteFile ever gets truncated after being renamed, that
-    // will be really tricky.  Let's hope that never happens, put an assert
-    // to guard against it.  I guess it if does happen we just need to do
-    // reg ex changes to all the paths
-    assert( ! has_been_renamed );
 
     mlog(WF_DAPI, "Entering %s",__FUNCTION__);
     
