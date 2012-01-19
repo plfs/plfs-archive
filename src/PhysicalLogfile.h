@@ -3,6 +3,8 @@
 #include "COPYRIGHT.h"
 
 #include <string>
+#include <sys/stat.h>
+
 using namespace std;
 
 // Use this class for all log files that are just appended to.
