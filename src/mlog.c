@@ -1411,14 +1411,14 @@ int mlog_mbcopy(char *buf, int offset, int len) {
 /*
  * plfs_debug: tmp wrapper 
  */
-/*void plfs_debug(const char *fmt, ...) {
+void plfs_debug(const char *fmt, ...) {
 
     va_list ap;
 
     va_start(ap, fmt);
     vmlog(MLOG_DBG, fmt, ap);
     va_end(ap);
-}*/
+}
 /* XXXCDC: END TMP */
 
 /*
