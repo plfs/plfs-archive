@@ -61,10 +61,13 @@ using namespace std;
 #else
     #define DEBUG_ENTER /*mlog(UT_DAPI, "Enter %s\n", __FUNCTION__ );*/
     #define DEBUG_EXIT  LogMessage lm1;                             \
-                        lm1 << "Util::" << setw(13) << __FUNCTION__ \
-                            << setw(7) << setprecision(0) << ret    \
+                        ostringstream oss;                          \
+                        oss << "Util::" << setw(13) << __FUNCTION__; \
+                        if (path) oss << " on " << path << " ";     \
+                        oss << setw(7) << setprecision(0) << ret    \
                             << " " << setprecision(4) << fixed      \
                             << end-begin << endl;                   \
+                        lm1 << oss.str();                           \
                         lm1.flush();                                \
                         mlog(UT_DAPI, "%s", oss.str().c_str());
 
@@ -85,10 +88,12 @@ using namespace std;
                         DEBUG_ENTER;        \
                         begin = getTime(); 
 
-    #define ENTER_UTIL  int ret = 0;       \
+    #define ENTER_UTIL  const char *path = NULL;  \
+                        int ret = 0;              \
                         ENTER_SHARED;
 
-    #define ENTER_IO    ssize_t ret = 0;    \
+    #define ENTER_IO    const char *path = NULL;  \
+                        ssize_t ret = 0;    \
                         ENTER_SHARED;
 
     #define EXIT_SHARED DEBUG_EXIT;                                 \

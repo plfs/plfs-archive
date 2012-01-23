@@ -238,7 +238,7 @@ void Index::init( string physical ) {
 Index::Index( string logical, int fd ) : Metadata::Metadata() {
     init( logical );
     this->fd = fd;
-    mlog(IDX_DAPI, "%s: created index on %s, fd=", __FUNCTION__,
+    mlog(IDX_DAPI, "%s: created index on %s, fd=%d", __FUNCTION__,
         physical_path.c_str(), fd);
 }
 
