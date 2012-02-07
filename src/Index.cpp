@@ -626,7 +626,7 @@ int Index::global_to_stream(void **buffer,size_t *length) {
     size_t quant = global_index.size();
 
     //Check if we stopped buffering, if so return -1 and length of -1
-    if(buffering && buffer_filled){
+    if(!buffering && buffer_filled){
         *length=(size_t)-1;
         return -1;
     }
