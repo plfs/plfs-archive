@@ -7,6 +7,8 @@ set patch = ad-patches/openmpi/ompi-${OMPI_VERSION}-plfs.patch
 \rm -rf /tmp/${USER}-ompi-${OMPI_VERSION}
 mkdir -p $adio_path/ad_plfs
 cp ad_plfs/* $adio_path/ad_plfs
+
+
 # when make dist calls us, it first copies Makefile.am.ompi to /tmp
 # if we're run independently, put it there ourselves
 if ( ! -f /tmp/Makefile.am.ompi ) then
@@ -14,10 +16,12 @@ if ( ! -f /tmp/Makefile.am.ompi ) then
 endif
 /bin/cp -f /tmp/Makefile.am.ompi $adio_path/ad_plfs/Makefile.am
 
+echo $adio_path
+
 rm -f $patch; touch $patch
-foreach file ( ad_plfs/*.[ch] ad_plfs/Makefile.am )
+foreach file ( $adio_path/ad_plfs/*.[ch] $adio_path/ad_plfs/Makefile.am )
   echo "Creating patch for $file"
-  diff -Naur openmpi-${OMPI_VERSION}/ompi/mca/io/romio/romio/adio/$file $adio_path/$file >> $patch
+  diff -Naur openmpi-${OMPI_VERSION}/ompi/mca/io/romio/romio/adio/$file $file >> $patch
 end
 \rm -rf ${USER}-ompi-${OMPI_VERSION}
 
