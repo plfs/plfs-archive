@@ -33,12 +33,17 @@ void ADIOI_PLFS_ReadContig(ADIO_File fd, void *buf, int count,
     }
     plfs_debug( "%s: offset %ld len %ld rank %d\n",
                 myname, (long)myoff, (long)len, rank );
-    if ((fd->access_mode != ADIO_RDONLY) && fd->fs_ptr) {
-        // calls plfs_sync + barrier to ensure all ranks flush in-memory
-        // index before any rank calling plfs_read.
-        // need not do this for read-only file.
-        plfs_sync( fd->fs_ptr, rank );
-        MPI_Barrier( fd->comm );
+
+    // this sync is only needed currently for container mode
+    // for flat file mode, we can rely on the underlying filesystem
+    if (plfs_get_filetype(fd->filename) == CONTAINER) {
+        if ((fd->access_mode != ADIO_RDONLY) && fd->fs_ptr) {
+            // calls plfs_sync + barrier to ensure all ranks flush in-memory
+            // index before any rank calling plfs_read.
+            // need not do this for read-only file.
+            plfs_sync( fd->fs_ptr, rank );
+            MPI_Barrier( fd->comm );
+        }
     }
     err = plfs_read( fd->fs_ptr, buf, len, myoff );
 #ifdef HAVE_STATUS_SET_BYTES
