@@ -225,6 +225,28 @@ void ADIOI_PLFS_Open(ADIO_File fd, int *error_code)
         return;
     }
     // if we make it here, we're doing RDONLY, WRONLY, or RDWR
+
+    // at this point, we want to do different for container/flat_file mode
+    if (plfs_get_filetype(fd->filename) != CONTAINER) {
+        err = plfs_open(&pfd,fd->filename,amode,rank,perm,NULL);
+        if ( err < 0 ) {
+            *error_code = MPIO_Err_create_code(MPI_SUCCESS, 
+                                            MPIR_ERR_RECOVERABLE,
+                                           myname, __LINE__, MPI_ERR_IO,
+                                           "**io",
+                                           "**io %s", strerror(-err));
+            plfs_debug( "%s: failure %s\n", myname, strerror(-err) );
+            return err;
+        } else {
+            plfs_debug( "%s: Success on open(%d)!\n", myname, rank );
+            fd->fs_ptr = *pfd;
+            fd->fd_direct = -1;
+            *error_code = MPI_SUCCESS;
+            return 0;
+        }
+    }
+
+    // if we get here, we're in container mode; continue with the optimizations
     ret = open_helper(fd,&pfd,error_code,perm,amode,rank);
     MPI_Allreduce(&ret, &err, 1, MPI_INT, MPI_MIN, fd->comm);
     if ( err != 0 ) {
@@ -384,7 +406,7 @@ int broadcast_index(Plfs_fd **pfd, ADIO_File fd,
     if (!rank) {
         plfs_debug("Broadcasting the sizes of the index:%d "
                    "and compressed index%d\n" ,index_size[0],index_size[1])
-    };
+    }
     MPIBCAST(index_size, 2, MPI_LONG, 0, fd->comm);
     if(rank!=0) {
         index_stream = malloc(index_size[0]);
