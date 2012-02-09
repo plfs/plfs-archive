@@ -111,6 +111,10 @@ size_t plfs_gethostdir_id(char*);
 /* Index stream related functions */
 int plfs_index_stream(Plfs_fd **pfd, char ** buffer);
 
+/* plfs_init
+    it just warms up the plfs structures used in expandPath
+*/
+int plfs_init();
 
 int plfs_merge_indexes(Plfs_fd **pfd, char *index_streams, 
                         int *index_sizes, int procs);

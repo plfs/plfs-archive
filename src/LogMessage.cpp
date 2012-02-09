@@ -20,6 +20,7 @@ int LogMessage::init( ) {
     int ret = 0;
     log_array_index = 0;
     log_array_size  = 0;
+    pthread_mutex_init ( &log_mutex, NULL );
     return ret;
 }
 

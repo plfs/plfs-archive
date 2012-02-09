@@ -10,6 +10,7 @@
 #include "OpenFile.h"
 #include "ThreadPool.h"
 #include "FileOp.h"
+#include "LogMessage.h"
 
 #include <errno.h>
 #include <list>
@@ -60,11 +61,24 @@ typedef struct {
     int which_backend;
 } ExpansionInfo;
 
+// a (non-thread proof) way to ensure we only init once
+bool
+plfs_conditional_init() {
+    static bool inited = false;
+    bool ret = true;
+    if (!inited) {
+        ret = plfs_init();
+        inited = true;
+    }
+    return ret;
+}
+
 #define PLFS_ENTER PLFS_ENTER2(PLFS_PATH_REQUIRED)
 
 #define PLFS_ENTER2(X) \
  int ret = 0;\
  ExpansionInfo expansion_info; \
+ plfs_conditional_init(); \
  string path = expandPath(logical,&expansion_info,HASH_BY_FILENAME,-1,0); \
  mlog(INT_DAPI, "EXPAND in %s: %s->%s\n",__FUNCTION__,logical,path.c_str()); \
  if (expansion_info.expand_error && X==PLFS_PATH_REQUIRED) { \
@@ -1264,8 +1278,9 @@ plfs_read( Plfs_fd *pfd, char *buf, size_t size, off_t offset ) {
     PLFS_EXIT(ret);
 }
 
+
 bool
-plfs_init(PlfsConf *pconf) { 
+plfs_warm_path_resolution(PlfsConf *pconf) { 
     map<string,PlfsMount*>::iterator itr = pconf->mnt_pts.begin();
     if (itr==pconf->mnt_pts.end()) return false;
     ExpansionInfo exp_info;
@@ -1458,6 +1473,26 @@ static void setup_mlog(PlfsConf *pconf) {
 #endif
 
     return;
+}
+
+// this init's the library if it hasn't been done yet
+int
+plfs_init() {
+    static PlfsConf *pconf = NULL;
+    if ( ! pconf ) {
+        LogMessage::init();
+        pconf = get_plfs_conf();
+        if ( !pconf ) {
+            return 0;
+        }
+        setup_mlog(pconf);
+        bool warmed = plfs_warm_path_resolution(pconf); 
+        if ( !warmed ) {
+            mlog(MLOG_WARN, "Unable to warm path resolution\n"); 
+        }
+        return (int)warmed;
+    }
+    return 1;
 }
 
 // inserts a mount point into a plfs conf structure
@@ -1796,7 +1831,7 @@ parse_conf(FILE *fp, string file, PlfsConf *pconf) {
 PlfsConf*
 get_plfs_conf() {
     static PlfsConf *pconf = NULL;
-    if (pconf ) return pconf;
+    if (pconf) return pconf;
 
     /*   
      * bring up a simple mlog here so we can collect early error messages
@@ -1809,7 +1844,7 @@ get_plfs_conf() {
                   /* don't count the null at end of mlog_facsarray */
                   sizeof(mlog_facsarray)/sizeof(mlog_facsarray[0]) - 1, 
                   MLOG_WARN, MLOG_WARN, NULL, 0, MLOG_LOGPID, 0) == 0) { 
-        setup_mlog_facnamemask(NULL);                                                                                                                                                                                                                 
+        setup_mlog_facnamemask(NULL); 
     } 
 
     map<string,string> confs;
@@ -1841,10 +1876,6 @@ get_plfs_conf() {
             else pconf = tmppconf; 
         }
         break;
-    }
-
-    if (pconf){
-        setup_mlog(pconf);
     }
 
     return pconf;

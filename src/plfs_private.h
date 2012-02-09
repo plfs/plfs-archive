@@ -58,10 +58,6 @@ PlfsConf* get_plfs_conf( );
 PlfsMount * find_mount_point(PlfsConf *pconf, const string &path, bool &found);
 PlfsMount * find_mount_point_using_tokens(PlfsConf *, vector <string> &, bool&);
 
-/* plfs_init
-    it just warms up the plfs structures used in expandPath
-*/
-bool plfs_init(PlfsConf*);
 char **plfs_mlogargs(int *mlargc, char **mlargv);
 char *plfs_mlogtag(char *newtag);
 
