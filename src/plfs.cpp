@@ -1485,7 +1485,6 @@ plfs_init() {
         if ( !pconf ) {
             return 0;
         }
-        setup_mlog(pconf);
         bool warmed = plfs_warm_path_resolution(pconf); 
         if ( !warmed ) {
             mlog(MLOG_WARN, "Unable to warm path resolution\n"); 
@@ -1540,6 +1539,19 @@ set_default_confs(PlfsConf *pconf) {
     pconf->buffer_mbs = 64;
     pconf->global_summary_dir = NULL;
     pconf->test_metalink = 0;
+    /* default mlog settings */
+    pconf->mlog_flags = MLOG_LOGPID;
+    pconf->mlog_defmask = MLOG_WARN;
+    pconf->mlog_stderrmask = MLOG_CRIT;
+    pconf->mlog_file = NULL;
+    pconf->mlog_msgbuf_size = 4096;
+    pconf->mlog_syslogfac = LOG_USER;
+    pconf->mlog_setmasks = NULL;
+/*
+ * This one is in the trunk now, 2/14/12, but not needed in 2.1.1rc1.
+ *
+ *  pconf->tmp_mnt = NULL;
+ */
 }
 
 /**
@@ -1830,8 +1842,14 @@ parse_conf(FILE *fp, string file, PlfsConf *pconf) {
 // in adio, there are no threads.  should be OK.  
 PlfsConf*
 get_plfs_conf() {
+    static pthread_mutex_t confmutex = PTHREAD_MUTEX_INITIALIZER;
     static PlfsConf *pconf = NULL;
-    if (pconf) return pconf;
+
+    pthread_mutex_lock(&confmutex);
+    if (pconf) {
+        pthread_mutex_unlock(&confmutex);
+        return pconf;
+    }
 
     /*   
      * bring up a simple mlog here so we can collect early error messages
@@ -1877,6 +1895,11 @@ get_plfs_conf() {
         }
         break;
     }
+
+    if (pconf) {
+        setup_mlog(pconf);
+    }
+    pthread_mutex_unlock(&confmutex);
 
     return pconf;
 }
