@@ -159,6 +159,11 @@ int plfs_recover(const char *path);
 
 int plfs_rename( const char *from, const char *to );
 
+/*
+   currently this is just used by FUSE after successfully renames an open file 
+*/
+int plfs_rename_open_file(Plfs_fd *, const char *path);
+
 int plfs_rmdir( const char *path );
 
 void plfs_serious_error(const char *msg,pid_t pid );

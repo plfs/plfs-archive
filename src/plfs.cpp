@@ -774,6 +774,13 @@ plfs_readdir( const char *logical, void *vptr ) {
     PLFS_EXIT(ret);
 }
 
+int
+plfs_rename_open_file( Plfs_fd *pfd, const char *logical ) {
+    PLFS_ENTER;
+    pfd->setPath(path.c_str());
+    PLFS_EXIT(ret); 
+}
+
 // just rename all the shadow and canonical containers 
 // then call recover_file to move canonical stuff if necessary 
 int
