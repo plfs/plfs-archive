@@ -1136,7 +1136,7 @@ Index::addWrite( off_t offset, size_t length, pid_t pid,
        // check whether incoming abuts with last and we want to compress
     if ( compress_contiguous && !hostIndex.empty() &&
         hostIndex.back().id == pid  &&
-        hostIndex.back().logical_offset + hostIndex.back().length == offset)
+        hostIndex.back().logical_offset + hostIndex.back().length == (unsigned) offset)
     {
         mlog(IDX_DCOMMON, "Merged new write with last at offset %ld."
             " New length is %d.\n",
