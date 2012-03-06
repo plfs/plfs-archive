@@ -55,7 +55,8 @@ protected:
         hdfsFile file;
         int open_mode;        
     };
-    map<int, struct openFile> fdMap; // Maps from int file descriptors to HDFS files.
+    // Maps from int file descriptors to HDFS files.
+    map<int, struct openFile> fdMap;
     const char* hostName;
     int portNum;
 
@@ -68,7 +69,7 @@ protected:
     };
     
     // To assign unique fds.
-    pthread_mutex_t fd_count_mutex;
+    pthread_mutex_t fd_mc_mutex;  /* protects fdMap and fd_count */
     int fd_count;
     int AddFileToMap(hdfsFile file, int open_mode);
     hdfsFile GetFileFromMap(int fd);
