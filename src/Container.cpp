@@ -1046,6 +1046,7 @@ int Container::makeTopLevel( const string &expanded_path,
                 // version stuff in it.  In that case, just assume
                 // compatible?  we could move this up into the temporary so
                 // it's made before the rename.
+#if 0 /* XXXCDC: DISABLE VERSION FILE, DOESNT PLAY NICE WITH HDFS */
             ostringstream oss2;
             oss2 << expanded_path << "/" << VERSIONPREFIX
                  << "-tag." << STR(TAG_VERSION)
@@ -1055,6 +1056,7 @@ int Container::makeTopLevel( const string &expanded_path,
             if (makeDropping(oss2.str()) < 0) {
                 return -errno;
             }
+#endif
             break;
         }
     }
