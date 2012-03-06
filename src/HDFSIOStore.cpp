@@ -1,12 +1,335 @@
 #include <errno.h>
 #include <iostream>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <grp.h>
 #include <pwd.h>
 #include <string.h>
 #include "Util.h"
 #include "HDFSIOStore.h"
 
+/*
+ * copy of TAILQ.  not all system have <sys/queue.h> so just replicate
+ * a bit of it here so that we know we've got it covered.
+ */
+#define _XTAILQ_HEAD(name, type, qual)                                  \
+struct name {                                                           \
+        qual type *tqh_first;           /* first element */             \
+        qual type *qual *tqh_last;      /* addr of last next element */ \
+}       
+#define XTAILQ_HEAD(name, type)  _XTAILQ_HEAD(name, struct type,)
+ 
+#define XTAILQ_HEAD_INITIALIZER(head)                                   \
+        { NULL, &(head).tqh_first }
+
+#define _XTAILQ_ENTRY(type, qual)                                      \
+struct {                                                                \
+        qual type *tqe_next;            /* next element */              \
+        qual type *qual *tqe_prev;      /* address of previous next element */\
+}
+#define XTAILQ_ENTRY(type)       _XTAILQ_ENTRY(struct type,)
+
+#define XTAILQ_INIT(head) do {                                          \
+        (head)->tqh_first = NULL;                                       \
+        (head)->tqh_last = &(head)->tqh_first;                          \
+} while (/*CONSTCOND*/0)
+
+#define XTAILQ_EMPTY(head)               ((head)->tqh_first == NULL)
+#define XTAILQ_FIRST(head)               ((head)->tqh_first)
+
+#define XTAILQ_REMOVE(head, elm, field) do {                            \
+        if (((elm)->field.tqe_next) != NULL)                            \
+                (elm)->field.tqe_next->field.tqe_prev =                 \
+                    (elm)->field.tqe_prev;                              \
+        else                                                            \
+                (head)->tqh_last = (elm)->field.tqe_prev;               \
+        *(elm)->field.tqe_prev = (elm)->field.tqe_next;                 \
+} while (/*CONSTCOND*/0)
+
+#define XTAILQ_INSERT_HEAD(head, elm, field) do {                       \
+        if (((elm)->field.tqe_next = (head)->tqh_first) != NULL)        \
+                (head)->tqh_first->field.tqe_prev =                     \
+                    &(elm)->field.tqe_next;                             \
+        else                                                            \
+                (head)->tqh_last = &(elm)->field.tqe_next;              \
+        (head)->tqh_first = (elm);                                      \
+        (elm)->field.tqe_prev = &(head)->tqh_first;                     \
+} while (/*CONSTCOND*/0)
+
+/*
+ * XXXCDC: hdfs API wrapper code.
+ *
+ * There is a bug/issue with HDFS/Java and FUSE that causes it to leak
+ * memory (espeically during big file reads).  FUSE appears to create
+ * a new pthread for each request it receives --- that thread handles
+ * the request and then exits.  Having each HDFS request come from a
+ * different thread confuses HDFS/Java and it leaks memory.   I have a
+ * standalone test program (readkill.c) clearly shows this.
+ *
+ * The work around for this is to have a fixed pool of thread handle
+ * almost all HDFS API.  That way only a small number of pthreads make
+ * HDFS/Java API calls.
+ *
+ * To make this work, we define stub wrapper functions for all HDFS API
+ * calls.  The stubs handle the args and call hdfs_execute() to allocate
+ * a thread from the pool to process the request.
+ *
+ * The setup for this is to define all the HDFS APIs in "HDFS.api" and
+ * then run the perl script "hdfswrap.pl" to generate the "hdfswrap.h"
+ * file.  This file contains 3 items for each API:
+ *   1. an "_args" structure to collect args and ret vals
+ *   2. a "_handler" callback that executes in the thread pool and calls
+ *      the real HDFS API into Java
+ *   3. a "_wrap" wrapper function that loads an _args structure and
+ *      calls hdfs_execute() to send the API request to a thread in
+ *      the thread pool.
+ *
+ * at run time:
+ *   1. a FUSE thread calls the "_wrap" function it want to use
+ *   2. the "_wrap" function loads the "_args" struct and calls hdfs_execute()
+ *   3. hdfs_execute():
+ *       - ensures we are connected to the HDFS
+ *       - allocates a thread from the pool, creating a new one if appropriate
+ *       - if the thread pool is full, then it waits for a thread to free
+ *       - the allocated thread is loaded with the request and dispatched
+ *       - we block waiting for the request to be serviced
+ *       - when the request is done we collect results and free the thread
+ *   4. the "_wrap" function returns the results to the caller
+ *
+ * note that hdfs_execute() works around another bug as well... if we
+ * connect to a HDFS filesystem and then fork, the forked child will
+ * not be able to make calls into HDFS (java) --- they will just hang.
+ * so we make the main connection to HDFS happen in hdfs_execute() so that
+ * FUSE daemon processes will not have their requests hang.  (the old
+ * version would connect to HDFS at init time, then fork a daemon process,
+ * expecting that daemon to be able to use the HDFS connection... that
+ * doesn't work).
+ *
+ * The thread pool stuff should work for non-FUSE-based PLFS apps as
+ * well.   It isn't really necessary in non-FUSE cases, but it doesn't
+ * hurt to have it here anyway (other than a little additional overhead).
+ */
+
+#include "hdfswrap.h"
+/*
+ * define a limit to the total number of threads than can be in our
+ * HDFS I/O pool.   hopefully this is larger than anything FUSE will
+ * need.
+ */
+#define HDFS_MAXTHR 64   /* max number of thread */
+#define HDFS_PRETHR 64   /* number to preallocate at boot */
+
+/**
+ * hdfs_opthread: describes a thread in the HDFS I/O pool
+ */
+struct hdfs_opthread {
+    /* the 3 args from hdfs_execute() are stored in the next 3 fields... */
+    const char *funame;    /*!< just for debugging */
+    void *fuarg;           /*!< arg for handler function */
+    void (*fuhand)(void *ap);       /*!< the "_handler" function to call */
+    
+    pthread_t worker;      /*!< id of this worker thread (for debug) */
+    int myerrno;           /*!< passed back up to wrapper */
+    int done;              /*!< set to 1 when thread's work is complete */
+    pthread_cond_t hold;   /*!< opthread holds here waiting for work */
+    pthread_cond_t block;  /*!< caller blocks here for reply */
+    XTAILQ_ENTRY(hdfs_opthread) q;  /*!< busy/free linkage */
+};
+
+/**
+ * hdfs_opq: a queue of threads (busy/free)
+ */
+XTAILQ_HEAD(hdfs_opq, hdfs_opthread);
+
+/**
+ * hdfs_gtstate: HDFS global thread pool state
+ */
+struct hdfs_gtstate {
+    pthread_mutex_t gts_mux; /*!< protects all global state */
+    hdfsFS *fsp;             /*!< points to iostore object fs field */
+    const char *hname;       /*!< for reconnect */
+    int port;                /*!< for reconnect */
+    struct hdfs_opq free;    /*!< queue of free threads */
+    struct hdfs_opq busy;    /*!< queue of busy threads */
+    int nthread;             /*!< total number of threads allocated */
+    int nwanted;             /*!< non-zero we are waiting for a free thread */
+    pthread_cond_t thblk;    /*!< block here if waiting for a free thread */
+};
+
+static struct hdfs_gtstate hst = { 0 };   /* global state here! */
+
+/**
+ * hdfs_opr_main: main routine for operator thread
+ *
+ * @param args points to this thread's opthread structure
+ */
+void *hdfs_opr_main(void *args) {
+    struct hdfs_opthread *me;
+
+    me = (struct hdfs_opthread *)args;
+
+    /*
+     * bootstrap task: the thread that created us is waiting on
+     * me->block for us to finish our init.
+     */
+    pthread_mutex_lock(&hst.gts_mux);
+    XTAILQ_INSERT_HEAD(&hst.free, me, q);
+    me->done = 1;
+    pthread_cond_signal(&me->block);
+    
+    while (1) {
+        /* drops lock and wait for work */
+        pthread_cond_wait(&me->hold, &hst.gts_mux);
+        if (me->done)
+            continue;    /* wasn't for me */
+
+        /* drop lock while we are talking to HDFS */
+        pthread_mutex_unlock(&hst.gts_mux);
+        me->fuhand(me->fuarg);   /* do the callback */
+        me->myerrno = errno;     /* save errno */
+        pthread_mutex_lock(&hst.gts_mux);
+
+        /* mark our job as done and signal caller (waiting in hdfs_execute) */
+        me->done = 1;
+        pthread_cond_signal(&me->block);
+    }
+
+    /*NOTREACHED*/
+    pthread_mutex_unlock(&hst.gts_mux);
+    return(NULL);
+}
+
+/**
+ * hdfs_alloc_opthread: allocate a new opthread
+ *
+ * @return the new opthread structure
+ */
+struct hdfs_opthread *hdfs_alloc_opthread() {
+    struct hdfs_opthread *opr;
+    static int attr_init = 0;
+    static pthread_attr_t attr;
+    int chold, cblock;
+
+    /* one time static init */
+    if (attr_init == 0) {
+        if (pthread_attr_init(&attr) != 0) {
+            fprintf(stderr, "hdfs_alloc_opthread: attr init failed?!\n");
+            return(NULL);
+        }
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+        attr_init++;
+    }
+
+    opr = (struct hdfs_opthread *)malloc(sizeof(*opr));
+    if (!opr)
+        return(NULL);
+    opr->done = 0;
+
+    chold = pthread_cond_init(&opr->hold, NULL);
+    cblock = pthread_cond_init(&opr->block, NULL);
+    if (pthread_create(&opr->worker, &attr, hdfs_opr_main, opr) != 0) {
+        fprintf(stderr, "pthread_create failed!\n");
+        goto failed;
+    }
+    return(opr);
+    /*NOTREACHED*/
+
+ failed:
+    if (chold == 0) pthread_cond_destroy(&opr->hold);
+    if (cblock == 0) pthread_cond_destroy(&opr->block);
+    free(opr);
+    fprintf(stderr, "hdfs_alloc_opthread: FAILED\n");
+    return(NULL);
+}
+
+/**
+ * hdfs_execute: run a HDFS function inside our HDFS thread pool
+ *
+ * @param name the name of the function we are calling (for debug)
+ * @param a the args to the handler function
+ * @param hand pointer to the handler function
+ */
+void hdfs_execute(const char *name, void *a, void (*hand)(void *ap)) {
+    struct hdfs_opthread *opr;
+    int lcv, mustwait;
+
+    pthread_mutex_lock(&hst.gts_mux);
+    
+    /* re-establish connection to HDFS if necessary */
+    if (*hst.fsp == NULL) {
+        *hst.fsp = hdfsConnect(hst.hname, hst.port);  /* don't wrap this */
+        if (*hst.fsp == NULL) {
+            fprintf(stderr, "hdfs_execute: reestablish failed!\n");
+            /* XXX: what else can we do but exit? */
+            exit(1);
+        }
+
+        /* preallocate thread pool if requested */
+        for (lcv = 0 ; lcv < HDFS_PRETHR ; lcv++) {
+            opr = hdfs_alloc_opthread();
+            if (opr) {
+                hst.nthread++;
+                while (opr->done == 0) {
+                    pthread_cond_wait(&opr->block, &hst.gts_mux);
+                }
+            }
+        }   /* end of preallocation loop */
+      
+    }
+
+    /* get an operator thread */
+    mustwait = 0;
+    while ((opr = XTAILQ_FIRST(&hst.free)) == NULL) {
+        /* wait if we must or we are at max threads */
+        if (mustwait || hst.nthread >= HDFS_MAXTHR) {
+            hst.nwanted++;
+            pthread_cond_wait(&hst.thblk, &hst.gts_mux);
+            hst.nwanted--;
+            continue;    /* try again */
+        }
+
+        /* try and allocate a new thread */
+        opr = hdfs_alloc_opthread();
+        if (opr == NULL) {
+            if (hst.nthread == 0) {  /* can't wait for nothing */
+                fprintf(stderr, "hdfs_execute: thread alloc deadlock!\n");
+                exit(1);
+            }
+            mustwait = 1;
+            continue;
+        }
+
+        /* wait for new thread to startup and add to free list... */
+        hst.nthread++;
+        while (opr->done == 0) {
+            pthread_cond_wait(&opr->block, &hst.gts_mux);
+        }
+        /* try again */
+        continue;
+    }
+    
+    /* dispatch thread */
+    XTAILQ_REMOVE(&hst.free, opr, q);
+    opr->funame = name;
+    opr->fuarg = a;
+    opr->fuhand = hand;
+    opr->myerrno = 0;
+    opr->done = 0;
+    XTAILQ_INSERT_HEAD(&hst.busy, opr, q);
+    pthread_cond_broadcast(&opr->hold);
+    
+    while (opr->done == 0) {   /* wait for op to complete */
+        pthread_cond_wait(&opr->block, &hst.gts_mux);
+    }
+    
+    errno = opr->myerrno;
+    XTAILQ_REMOVE(&hst.busy, opr, q);
+    XTAILQ_INSERT_HEAD(&hst.free, opr, q);
+    if (hst.nwanted > 0)
+        pthread_cond_signal(&hst.thblk);
+    
+    pthread_mutex_unlock(&hst.gts_mux);
+}
 
 /**
  * hdfsOpenFile_retry: wrapper for hdfsOpenFile() that retries on failure.
@@ -26,9 +349,11 @@ static hdfsFile hdfsOpenFile_retry(hdfsFS fs, const char* path, int flags,
     hdfsFile file;
     int tries;
  
+    /* XXXCDC: could hardwire replication to 1 here */
+    
     for (tries = 0, file = NULL ; !file && tries < 5 ; tries++) {
-        file = hdfsOpenFile(fs, path, flags, bufferSize, 
-                            replication, blocksize);
+        file = hdfsOpenFile_wrap(fs, path, flags, bufferSize, 
+                                 replication, blocksize);
         if (!file) {
             fprintf(stderr, "hdfsOpenFile_retry(%s) failed try %d\n", 
                     path, tries);
@@ -45,13 +370,49 @@ static hdfsFile hdfsOpenFile_retry(hdfsFS fs, const char* path, int flags,
 HDFSIOStore::HDFSIOStore(const char* host, int port)
     : fdMap(), hostName(host), portNum(port), fd_count(3)
 {
-    // Get ourselves a filesystem connection.
-    fs = hdfsConnect(hostName, portNum);
-    if (!fs)
-        Util::Debug("Couldn't connect to HDFS server %s on port %d\n", host, port);
+    pid_t child;
+    int status;
+    
+    /*
+     * XXX
+     * 
+     * we probe HDFS in a child process to avoid JVM issues (FUSE
+     * forks a daemon after this call, and the daemon's JVM calls
+     * all hang because the JVM was inited in the parent process).
+     * the fork avoids this issue.
+     */
+    child = fork();
+    if (child == 0) {
+        fs = hdfsConnect(hostName, portNum);  /* don't wrap this */
+        hdfsDisconnect(fs);
+        exit((fs == NULL) ? 1 : 0);
+    }
+    status = -1;
+    if (child != -1) 
+        (void)waitpid(child, &status, 0);
+    if (status != 0) {
+        fprintf(stderr, "Cannot connect to HDFS(%s,%d)!\n", host, port);
+        exit(1);
+    }
+    fs = NULL;   /* we'll reconnect in hdfs_execute() */
+    
+    /* Initialize our mutex for protecting the fdMap and fd count. */
+    status = pthread_mutex_init(&fd_mc_mutex, NULL);
 
-    // Initialize our mutex for protecting the fd count.
-    pthread_mutex_init(&fd_count_mutex, NULL);
+    /* init the hst */
+    status += pthread_mutex_init(&hst.gts_mux, NULL);
+    hst.fsp = &fs;
+    hst.hname = hostName;
+    hst.port = portNum;
+    XTAILQ_INIT(&hst.free);
+    XTAILQ_INIT(&hst.busy);
+    hst.nthread = hst.nwanted = 0;
+    status += pthread_cond_init(&hst.thblk, NULL);
+
+    if (status != 0) {
+        fprintf(stderr, "HDFS pthread init failed! (%d)\n", status);
+        exit(1);
+    }
 }
 
 /**
@@ -65,10 +426,10 @@ int HDFSIOStore::AddFileToMap(hdfsFile file, int open_mode)
     struct openFile of;
     of.file = file;
     of.open_mode = open_mode;
-    pthread_mutex_lock(&fd_count_mutex);
+    pthread_mutex_lock(&fd_mc_mutex);
     fd = fd_count++;
-    pthread_mutex_unlock(&fd_count_mutex);
     fdMap[fd] = of;
+    pthread_mutex_unlock(&fd_mc_mutex);
 
     return fd;
 }
@@ -78,7 +439,9 @@ int HDFSIOStore::AddFileToMap(hdfsFile file, int open_mode)
  */
 void HDFSIOStore::RemoveFileFromMap(int fd)
 {
+    pthread_mutex_lock(&fd_mc_mutex);
     fdMap.erase(fd);
+    pthread_mutex_unlock(&fd_mc_mutex);
 }
 
 /** 
@@ -87,22 +450,36 @@ void HDFSIOStore::RemoveFileFromMap(int fd)
  */
 hdfsFile HDFSIOStore::GetFileFromMap(int fd)
 {
+    hdfsFile rv;
     map<int, openFile>::iterator it;
+
+    pthread_mutex_lock(&fd_mc_mutex);
     it= fdMap.find(fd);
     if (it == fdMap.end()) {
-        return NULL;
+        rv = NULL;
+    } else {
+        rv = it->second.file;
     }
-    return it->second.file;
+    pthread_mutex_unlock(&fd_mc_mutex);
+
+    return(rv);
 }
 
 int HDFSIOStore::GetModeFromMap(int fd)
 {
+    int rv;
     map<int, openFile>::iterator it;
+
+    pthread_mutex_lock(&fd_mc_mutex);
     it= fdMap.find(fd);
     if (it == fdMap.end()) {
-        return NULL;
+        rv = -1;
+    } else {
+        rv = it->second.open_mode;
     }
-    return it->second.open_mode;
+    pthread_mutex_unlock(&fd_mc_mutex);
+
+    return(rv);
 }
 
 /**
@@ -113,7 +490,7 @@ int HDFSIOStore::GetModeFromMap(int fd)
 int HDFSIOStore::Access(const char* path, int mode) 
 {
     // hdfsExists says it returns 0 on success, but I believe this to be wrong documentation.
-    if ((mode & F_OK) && hdfsExists(fs, path)) {
+    if ((mode & F_OK) && hdfsExists_wrap(fs, path)) {
         errno = ENOENT;
         return -1;
     }
@@ -122,7 +499,7 @@ int HDFSIOStore::Access(const char* path, int mode)
 
 int HDFSIOStore::Chmod(const char* path, mode_t mode) 
 {
-    return 0; //hdfsChmod(fs, path, mode);
+    return 0; //hdfsChmod_wrap(fs, path, mode);
 }
 
 /**
@@ -137,7 +514,7 @@ int HDFSIOStore::Chown(const char *path, uid_t owner, gid_t group)
     if (!group_s || !passwd_s)
         return -1;
 
-    return hdfsChown(fs, path, passwd_s->pw_name, group_s->gr_name);
+    return hdfsChown_wrap(fs, path, passwd_s->pw_name, group_s->gr_name);
 }
 
 /**
@@ -158,11 +535,11 @@ int HDFSIOStore::Close(int fd)
     }
     /*    std::cout << "FD " << fd << " corresponds to hdfsFile " << openFile << "\n";*/
     //if (GetModeFromMap(fd) == O_WRONLY) {
-    if (hdfsFlush(fs, openFile)) {
+    if (hdfsFlush_wrap(fs, openFile)) {
         Util::Debug("Couldn't flush file. Probably open for reads.\n");
     }
     //}
-    ret = hdfsCloseFile(fs, openFile);
+    ret = hdfsCloseFile_wrap(fs, openFile);
     if (ret) {
         //std::cout << "Error closing hdfsFile\n";
         return ret;
@@ -176,7 +553,7 @@ int HDFSIOStore::Close(int fd)
         std::cout << "Error re-opening the file!" << errno << "\n";
     } else {
         std::cout << "Could successfully re-open. Interesting....\n";
-        hdfsCloseFile(fs, openFile);
+        hdfsCloseFile_wrap(fs, openFile);
     }
     */
     RemoveFileFromMap(fd);
@@ -191,7 +568,7 @@ int HDFSIOStore::Closedir(DIR* dirp)
 {
     struct openDir *theDir = (struct openDir*)dirp;
     if (theDir->infos)
-        hdfsFreeFileInfo(theDir->infos, theDir->numEntries);
+        hdfsFreeFileInfo_wrap(theDir->infos, theDir->numEntries);
     delete theDir;
     return 0;
 }
@@ -209,7 +586,7 @@ int HDFSIOStore::Creat(const char*path, mode_t mode)
     hdfsFile file = hdfsOpenFile_retry(fs, path, O_WRONLY, 0, 0, 0);
     if (!file)
         return -1;
-    //hdfsChmod(fs, path, mode);
+    //hdfsChmod_wrap(fs, path, mode);
     
     // We've created the file, set its mode. Now add it to map!
     fd = AddFileToMap(file, O_WRONLY);
@@ -223,7 +600,7 @@ int HDFSIOStore::Fsync(int fd)
         errno = EBADF;
         return -1;
     }
-    return hdfsFlush(fs, openFile);
+    return hdfsFlush_wrap(fs, openFile);
 }
 
 /**
@@ -247,7 +624,7 @@ off_t HDFSIOStore::Lseek(int fd, off_t offset, int whence)
         new_offset = offset;
         break;
     case SEEK_CUR:
-        new_offset = hdfsTell(fs, openFile) + offset;
+        new_offset = hdfsTell_wrap(fs, openFile) + offset;
         break;
     case SEEK_END:
         // I'm not entirely sure about this call. I'm assuming hdfsAvailable()
@@ -256,11 +633,12 @@ off_t HDFSIOStore::Lseek(int fd, off_t offset, int whence)
         // the size through a hdfsGetPathInfo() call. However, this requires
         // a path, not an hdfsFile. This would require storing paths in our
         // map as well. At this point, I'm reluctant to do that.
-        new_offset = hdfsTell(fs, openFile) + hdfsAvailable(fs, openFile) + offset;
+        new_offset = hdfsTell_wrap(fs, openFile) +
+            hdfsAvailable_wrap(fs, openFile) + offset;
         break;
     }
 
-    if (hdfsSeek(fs, openFile, new_offset)) {
+    if (hdfsSeek_wrap(fs, openFile, new_offset)) {
         return -1;
     } 
     return new_offset;
@@ -279,11 +657,11 @@ int HDFSIOStore::Lstat(const char* path, struct stat* buf)
  */
 int HDFSIOStore::Mkdir(const char* path, mode_t mode)
 {
-    if (hdfsCreateDirectory(fs, path)) {
+    if (hdfsCreateDirectory_wrap(fs, path)) {
         return -1;
     }
 
-    return hdfsChmod(fs, path, mode);
+    return hdfsChmod_wrap(fs, path, mode);
 }
 
 /**
@@ -307,7 +685,7 @@ void* HDFSIOStore::Mmap(void *addr, size_t len, int prot, int flags, int fd, off
     
     if (!openFile) {
         errno = EBADF;
-        return NULL;
+        return ((void *) -1);
     }
 
     // We ignore most of the values passed in.
@@ -315,16 +693,17 @@ void* HDFSIOStore::Mmap(void *addr, size_t len, int prot, int flags, int fd, off
     buffer = new char[len];
 
     if (!buffer) {
-        return NULL;
+        errno = ENOMEM;
+        return ((void *) -1);
     }
     // Try to read in the file.
     while (bytes_read < len) {
-        int res = hdfsPread(fs, openFile, offset+bytes_read, 
-                            buffer+bytes_read, len-bytes_read);
+        int res = hdfsPread_wrap(fs, openFile, offset+bytes_read, 
+                                 buffer+bytes_read, len-bytes_read);
         if (res == -1) {
             // An error in reading.
             delete[] buffer;
-            return NULL;
+            return ((void *) -1);
         }
         bytes_read += res;
     }
@@ -361,7 +740,7 @@ int HDFSIOStore::Open(const char* path, int flags)
     } else if (flags & O_WRONLY)  {
         new_flags = O_WRONLY;
     } else if (flags & O_RDWR) {
-        if (!hdfsExists(fs, path)) {
+        if (!hdfsExists_wrap(fs, path)) {
             // If the file exists, open Read Only!
             flags = O_RDONLY;
         } else {
@@ -374,12 +753,12 @@ int HDFSIOStore::Open(const char* path, int flags)
     }
 
     //std::cout << "Attempting open on " << path << "\n";
-    /*if (hdfsExists(fs, path)) {
+    /*if (hdfsExists_wrap(fs, path)) {
         std::cout << "Doesn't exist yet....\n";
     } else {
-        hdfsFileInfo* info = hdfsGetPathInfo(fs, path);
+        hdfsFileInfo* info = hdfsGetPathInfo_wrap(fs, path);
         std::cout << "Exists and has " << info->mSize << " bytes\n";
-        hdfsFreeFileInfo(info, 1);
+        hdfsFreeFileInfo_wrap(info, 1);
     }*/
     openFile = hdfsOpenFile_retry(fs, path, new_flags, 0, 0, 0);
     
@@ -434,7 +813,7 @@ DIR* HDFSIOStore::Opendir(const char *name)
     // an empty directory.
     dir->numEntries = -1; 
     // We have space to remember the directory. Now slurp in all its files.
-    dir->infos = hdfsListDirectory(fs, name, &dir->numEntries);
+    dir->infos = hdfsListDirectory_wrap(fs, name, &dir->numEntries);
     if (!dir->infos && dir->numEntries != 0) {
         delete dir;
         return NULL;
@@ -471,7 +850,7 @@ ssize_t HDFSIOStore::Pread(int fd, void* buf, size_t count, off_t offset)
         return -1;
     }
     //std::cout << "Reading " << count << "bytes\n";
-    return hdfsPread(fs, openFile, offset, buf, count);
+    return hdfsPread_wrap(fs, openFile, offset, buf, count);
 }
 
 /**
@@ -495,7 +874,7 @@ ssize_t HDFSIOStore::Read(int fd, void *buf, size_t count)
         return -1;
     }
     //std::cout << "Reading " << count << "bytes\n";
-    return hdfsRead(fs, openFile, buf, count);
+    return hdfsRead_wrap(fs, openFile, buf, count);
 }
 
 /**
@@ -554,7 +933,7 @@ struct dirent *HDFSIOStore::Readdir(DIR *dirp)
  */
 int HDFSIOStore::Rename(const char *oldpath, const char *newpath)
 {
-    return hdfsRename(fs, oldpath, newpath);
+    return hdfsRename_wrap(fs, oldpath, newpath);
 }
 
 /**
@@ -563,7 +942,7 @@ int HDFSIOStore::Rename(const char *oldpath, const char *newpath)
  */
 int HDFSIOStore::Rmdir(const char* path)
 {
-    return hdfsDelete(fs, path, 1);
+    return hdfsDelete_wrap(fs, path, 1);
 }
 /**
  * Stat. This one is mostly a matter of datat structure conversion to keep everything
@@ -571,7 +950,7 @@ int HDFSIOStore::Rmdir(const char* path)
  */
 int HDFSIOStore::Stat(const char* path, struct stat* buf)
 {
-    hdfsFileInfo* hdfsInfo = hdfsGetPathInfo(fs, path);
+    hdfsFileInfo* hdfsInfo = hdfsGetPathInfo_wrap(fs, path);
     if (!hdfsInfo) {
         //std::cout << "Failed to get stat for path " << path << "\n";
         errno = ENOENT;
@@ -617,7 +996,7 @@ int HDFSIOStore::Stat(const char* path, struct stat* buf)
     // This one's a total lie. There's no tracking of metadata change time
     // in HDFS, so we'll just use the modification time again.
     buf->st_ctime = hdfsInfo->mLastMod;
-    hdfsFreeFileInfo(hdfsInfo, 1);
+    hdfsFreeFileInfo_wrap(hdfsInfo, 1);
     return 0;
 }
 
@@ -662,13 +1041,27 @@ ssize_t HDFSIOStore::Readlink(const char*link, char *buf, size_t bufsize)
  */
 int HDFSIOStore::Truncate(const char* path, off_t length)
 {
+    hdfsFileInfo *hdfsInfo;
+    int lenis0;
     hdfsFile truncFile;
+
+    /* can't partially truncate on HDFS */
     if (length > 0) {
         errno = EINVAL; // EFBIG is also an option.
         return -1;
     }
-    // Make sure the file exists. A truncate call should not CREATE a new
-    // file.
+
+    hdfsInfo = hdfsGetPathInfo_wrap(fs, path);
+    if (!hdfsInfo) {
+        /* XXX: libhdfs is supposed to set errno to reasonable value */
+        return(-1);
+    }
+    lenis0 = (hdfsInfo->mSize == 0);
+    hdfsFreeFileInfo_wrap(hdfsInfo, 1);
+
+    if (lenis0)
+        return(0);   /* already truncated? */
+
     // BUG: This should really be made atomic with the open call. Otherwise
     // the following sequence is possible:
     // 1. Thread A calls truncate() on 'foo'. It does the hdfsExists() check
@@ -676,20 +1069,18 @@ int HDFSIOStore::Truncate(const char* path, off_t length)
     // 2. Thread B begins running and deletes 'foo'.
     // 3. Thread A begins running again and performs the truncating open call.
     // This creates a new zero-length file.
-    // This situation can be avoided with a mutex controlling delete and truncate,
+    // This situation can be avoided with a mutex controlling delete & truncate,
     // but for the time being, I think this is too expensive for the behavior
     // benefits.
-    if (hdfsExists(fs, path)) { // -1 if it doesn't exist.
-        errno = ENOENT;
-        return -1;
-    }
+
     // Attempt to open the file to truncate it.
     truncFile = hdfsOpenFile_retry(fs, path, O_WRONLY, 0, 0, 0);
     if (!truncFile) {
         return -1;
     }
 
-    hdfsCloseFile(fs, truncFile);
+    hdfsCloseFile_wrap(fs, truncFile);
+
     return 0;
 }
 
@@ -698,7 +1089,7 @@ int HDFSIOStore::Truncate(const char* path, off_t length)
  */
 int HDFSIOStore::Unlink(const char* path)
 {
-    return hdfsDelete(fs, path, 1);
+    return hdfsDelete_wrap(fs, path, 1);
 }
 
 /**
@@ -716,7 +1107,7 @@ int HDFSIOStore::Utime(const char* filename, const struct utimbuf *times)
         times = &now;
     }
 
-    return hdfsUtime(fs, filename, times->modtime, times->actime);
+    return hdfsUtime_wrap(fs, filename, times->modtime, times->actime);
 }
 
 /**
@@ -729,5 +1120,5 @@ ssize_t HDFSIOStore::Write(int fd, const void* buf, size_t len)
         errno = EBADF;
         return -1;
     }
-    return hdfsWrite(fs, openFile, buf, len);
+    return hdfsWrite_wrap(fs, openFile, buf, len);
 }
