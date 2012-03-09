@@ -478,6 +478,18 @@ container_readdir( const char *logical, void *vptr )
     PLFS_EXIT(ret);
 }
 
+// this function is important because when an open file is renamed
+// we need to know about it bec when the file is closed we need
+// to know the correct phyiscal path to the container in order to
+// create the meta dropping
+int
+container_rename_open_file(Container_OpenFile *of, const char *logical) 
+{
+    PLFS_ENTER;
+    of->setPath(path.c_str());
+    PLFS_EXIT(ret);
+}
+
 // just rename all the shadow and canonical containers
 // then call recover_file to move canonical stuff if necessary
 int
@@ -1049,9 +1061,10 @@ plfs_parindex_read(int rank,int ranks_per_comm,void *index_files,
 
 // TODO: change name to container_*
 int
-plfs_merge_indexes(Container_OpenFile **pfd, char *index_streams,
+plfs_merge_indexes(Plfs_fd **fd_in, char *index_streams,
                    int *index_sizes, int procs)
 {
+    Container_OpenFile **pfd = (Container_OpenFile **)fd_in;
     int count;
     Index *root_index;
     mlog(INT_DAPI, "Entering plfs_merge_indexes");
@@ -1108,8 +1121,9 @@ plfs_parindexread_merge(const char *path,char *index_streams,
 // Can't directly access the FD struct in ADIO
 // TODO: change name to container_*
 int
-plfs_index_stream(Container_OpenFile **pfd, char **buffer)
+plfs_index_stream(Plfs_fd **fd_in, char **buffer)
 {
+    Container_OpenFile **pfd = (Container_OpenFile **)fd_in;
     size_t length;
     int ret;
     if ( (*pfd)->getIndex() !=  NULL ) {
@@ -1674,6 +1688,7 @@ container_sync( Container_OpenFile *pfd, pid_t pid )
 int
 truncateFile(const char *logical,bool open_file)
 {
+	PLFS_ENTER;
     TruncateOp op(open_file);
     // ignore ENOENT since it is possible that the set of files can contain
     // duplicates.
@@ -1683,7 +1698,16 @@ truncateFile(const char *logical,bool open_file)
     op.ignore(ACCESSFILE);
     op.ignore(OPENPREFIX);
     op.ignore(VERSIONPREFIX);
-    return plfs_file_operation(logical,op);
+    ret = plfs_file_operation(logical,op);
+
+	if (ret == 0 && open_file) {
+		// this is a bit goofy.  if open_file, we just truncate all the droppigns
+		// we don't remove droppings bec some other proc might have them open
+		// however, we do need to remove the droppings in the meta dir bec they
+		// are no longer accurate.  Then we prolly want to create a new meta dropping
+		ret = Container::truncateMeta(path, 0);
+	}
+	PLFS_EXIT(ret);
 }
 
 // this should only be called if the uid has already been checked

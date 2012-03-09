@@ -4,11 +4,13 @@
 #include "plfs_private.h"
 #include "Util.h"
 #include "mlog.h"
+#include "LogMessage.h"
 
 // why is these included???!!!????
 #include "FlatFileFS.h"
 #include "ContainerFS.h"
 #include <assert.h>
+#include <stdlib.h>
 
 #include <syslog.h>    /* for mlog init */
 
@@ -443,16 +445,53 @@ remove_all(vector<string> &unlinks)
     return ret;
 }
 
+// a (non-thread proof) way to ensure we only init once
 bool
-plfs_init(PlfsConf *pconf)
-{
-    map<string,PlfsMount *>::iterator itr = pconf->mnt_pts.begin();
-    if (itr==pconf->mnt_pts.end()) {
-        return false;
+plfs_conditional_init() {
+    static bool inited = false;
+    bool ret = true;
+    if (!inited) {
+        ret = plfs_init();
+        inited = true;
     }
+    return ret;
+}
+
+bool
+plfs_warm_path_resolution(PlfsConf *pconf) { 
+    map<string,PlfsMount*>::iterator itr = pconf->mnt_pts.begin();
+    if (itr==pconf->mnt_pts.end()) return false;
     ExpansionInfo exp_info;
-    expandPath(itr->first,&exp_info,EXPAND_CANONICAL,-1,0);
+    expandPath(itr->first,&exp_info,EXPAND_SHADOW,-1,0);
     return(exp_info.expand_error ? false : true);
+}
+
+// this init's the library if it hasn't been done yet
+bool
+plfs_init()
+{
+    static pthread_mutex_t confmutex = PTHREAD_MUTEX_INITIALIZER;
+    static PlfsConf *pconf = NULL;
+    bool ret = true;
+    if ( ! pconf ) {    // not yet initialized.  Try to do so.
+        pthread_mutex_lock(&confmutex); // who should initialize?
+        if (pconf) { // someone beat us in race.  they will initialize.
+            ret = true;
+        } else {    // we won race.  we need to initialize.
+            LogMessage::init();
+            pconf = get_plfs_conf();
+            if ( !pconf ) {
+                ret = false;    // something failed
+            } else {
+                ret = plfs_warm_path_resolution(pconf); 
+                if ( !ret ) {
+                    mlog(MLOG_WARN, "Unable to warm path resolution\n"); 
+                }
+            }
+        }
+        pthread_mutex_unlock(&confmutex); 
+    }
+    return ret;
 }
 
 /**
@@ -1044,8 +1083,12 @@ parse_conf(FILE *fp, string file, PlfsConf *pconf)
 PlfsConf *
 get_plfs_conf()
 {
+    static pthread_mutex_t confmutex = PTHREAD_MUTEX_INITIALIZER;
     static PlfsConf *pconf = NULL;   /* note static */
+
+    pthread_mutex_lock(&confmutex);
     if (pconf ) {
+        pthread_mutex_unlock(&confmutex);
         return pconf;
     }
     /*
@@ -1097,6 +1140,7 @@ get_plfs_conf()
     if (pconf) {
         setup_mlog(pconf);
     }
+    pthread_mutex_unlock(&confmutex);
     return pconf;
 }
 

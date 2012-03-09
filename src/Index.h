@@ -33,17 +33,16 @@ class IndexFileInfo
 class HostEntry
 {
     public:
-        HostEntry() { }
-        HostEntry( off_t o, size_t s, pid_t p ) {
-            logical_offset = o;
-            length = s;
-            id = p;
-        }
+        HostEntry();
+        HostEntry( off_t o, size_t s, pid_t p );
+        HostEntry( const HostEntry& copy );
         bool overlap( const HostEntry& );
         bool contains ( off_t ) const;
         bool splittable ( off_t ) const;
         bool abut   ( const HostEntry& );
         off_t logical_tail( ) const;
+        bool follows(const HostEntry&);
+        bool preceeds(const HostEntry&);
 
     protected:
         off_t  logical_offset;
@@ -75,6 +74,8 @@ class ContainerEntry : HostEntry
     public:
         bool mergable( const ContainerEntry& );
         bool abut( const ContainerEntry& );
+        bool follows( const ContainerEntry& );
+        bool preceeds( const ContainerEntry& );
         ContainerEntry split(off_t); //split in half, this is back, return front
 
     protected:

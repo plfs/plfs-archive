@@ -224,7 +224,7 @@ static void plfsfuse_mlogargfilter(int *argc, char **argv)
         return;    /* no args, no work */
     }
     mlac = 0;
-    mlav = (char **) malloc(*argc * sizeof(*argv));
+    mlav = (char **) calloc(1, *argc * sizeof(*argv));
     if (mlav == NULL) {
         fprintf(stderr, "plfsfuse_mlogargfilter: malloc failed?  skipping.\n");
         return;
@@ -269,7 +269,9 @@ int Plfs::init( int *argc, char **argv )
     myhost = hostname;
     // we've been stashing stuff in self but we can also stash in
     // fuse_get_context()->private_data
+
     // ask the library to read in our configuration parameters
+    plfs_init(); 
     pconf = get_plfs_conf();
     if (!pconf || pconf->err_msg) {
         fprintf(stderr,"FATAL: %s",
@@ -277,7 +279,7 @@ int Plfs::init( int *argc, char **argv )
                 : "no plfsrc file found.\n");
         return pconf ? -EINVAL : -ENOENT;
     }
-    plfs_init(pconf); // warm up the path resolution cache
+
     // parse args to see if direct_io is set
     // on older fuses, direct_io allows large IO's but disables mmap
     // in that case, disable the exec bit so users see something
@@ -621,7 +623,7 @@ int Plfs::get_groups( vector<gid_t> *vec )
 {
     int ngroups = getgroups(0, 0);
     gid_t *groups = new gid_t[ngroups];
-    //(gid_t *) malloc(ngroups * sizeof (gid_t));
+    //(gid_t *) calloc(1, ngroups * sizeof (gid_t));
     int val = getgroups (ngroups, groups);
     //int val = fuse_getgroups(ngroups, groups);
     for( int i = 0; i < val; i++ ) {
@@ -1263,7 +1265,8 @@ int Plfs::f_rename( const char *path, const char *to )
                     // Extract the uid and flags from the string
                     removeOpenFile(current.path, pid, pfd);
                     addOpenFile(pathHash, pid, pfd);
-                    pfd->setPath( toPath );
+                    pfd->rename(toPath.c_str());
+                    //pfd->setPath( toPath );
                     mlog(FUSE_DCOMMON, "Rename open file %s -> %s "
                          "(hope this works)",
                          path, to );

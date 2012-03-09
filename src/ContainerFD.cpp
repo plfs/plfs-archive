@@ -31,6 +31,11 @@ Container_fd::read(char *buf, size_t size, off_t offset)
     return container_read(fd, buf, size, offset);
 }
 
+int
+Container_fd::rename(const char *path) {
+    return container_rename_open_file(fd,path);
+}
+
 ssize_t
 Container_fd::write(const char *buf, size_t size, off_t offset, pid_t pid)
 {
@@ -46,7 +51,8 @@ Container_fd::sync(pid_t pid)
 int
 Container_fd::trunc(const char *path, off_t offset)
 {
-    return container_trunc(fd, path, offset, 0);
+    bool open_file = true; // Yes, I am an open file handle.
+    return container_trunc(fd, path, offset, open_file);
 }
 
 int

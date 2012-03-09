@@ -9,6 +9,7 @@
 #include <dirent.h>
 #include <math.h>
 #include <assert.h>
+#include <string.h>
 #include <sys/syscall.h>
 #include <sys/param.h>
 #include <sys/mount.h>
@@ -31,6 +32,28 @@
 #define MAP_NOCACHE 0
 #endif
 
+HostEntry::HostEntry() {
+    // valgrind complains about unitialized bytes in this thing
+    // this is because there is padding in this object
+    // so let's initialize our entire self
+    memset(this,0,sizeof(*this));
+}
+
+HostEntry::HostEntry(off_t o, size_t s, pid_t p) {
+    logical_offset = o;
+    length = s;
+    id = p;
+}
+
+HostEntry::HostEntry(const HostEntry& copy) {
+    // similar to standard constructor, this
+    // is used when we do things like push a HostEntry
+    // onto a vector.  We can't rely on default constructor bec on the 
+    // same valgrind complaint as mentioned in the first constructor
+    memset(this,0,sizeof(*this));
+    memcpy(this,&copy,sizeof(*this));
+}
+
 bool
 HostEntry::overlap( const HostEntry& other )
 {
@@ -52,10 +75,25 @@ HostEntry::splittable( off_t offset ) const
 }
 
 bool
+HostEntry::preceeds( const HostEntry& other )
+{
+    return    logical_offset  + length == (unsigned int)other.logical_offset
+              &&  physical_offset + length == (unsigned int)other.physical_offset
+              &&  id == other.id;
+}
+
+bool
+HostEntry::follows( const HostEntry& other )
+{
+    return other.logical_offset + other.length == (unsigned int)logical_offset
+           && other.physical_offset + other.length == (unsigned int)physical_offset
+           && other.id == id;
+}
+
+bool
 HostEntry::abut( const HostEntry& other )
 {
-    return logical_offset + (off_t)length == other.logical_offset
-           || other.logical_offset + (off_t)other.length == logical_offset;
+    return (follows(other) || preceeds(other));
 }
 
 off_t
@@ -86,6 +124,7 @@ IndexFileInfo::listToStream(vector<IndexFileInfo> &list,int *bytes)
     char *buf_pos;
     int size;
     vector<IndexFileInfo>::iterator itr;
+    (*bytes) = 0;
     for(itr=list.begin(); itr!=list.end(); itr++) {
         (*bytes)+=sizeof(double);
         (*bytes)+=sizeof(pid_t);
@@ -96,7 +135,7 @@ IndexFileInfo::listToStream(vector<IndexFileInfo> &list,int *bytes)
     // Make room for number of Index File Info
     (*bytes)+=sizeof(int);
     // This has to be freed somewhere
-    buffer=(char *)malloc(*bytes);
+    buffer=(char *)calloc(1, *bytes);
     if(!buffer) {
         *bytes=-1;
         return (void *)buffer;
@@ -182,12 +221,27 @@ ContainerEntry::split(off_t offset)
 }
 
 bool
+ContainerEntry::preceeds( const ContainerEntry& other )
+{
+    if (!HostEntry::preceeds(other)) {
+        return false;
+    }
+    return (physical_offset + (off_t)length == other.physical_offset);
+}
+
+bool
+ContainerEntry::follows( const ContainerEntry& other )
+{
+    if (!HostEntry::follows(other)) {
+        return false;
+    }
+    return (other.physical_offset + (off_t)other.length == physical_offset);
+}
+
+bool
 ContainerEntry::abut( const ContainerEntry& other )
 {
-    return ( HostEntry::abut(other) &&
-             ( physical_offset + (off_t)length == other.physical_offset
-               || other.physical_offset + (off_t)other.length
-               == physical_offset ) );
+    return (preceeds(other) || follows(other));
 }
 
 bool
@@ -697,7 +751,7 @@ int Index::global_to_stream(void **buffer,size_t *length)
     *length += quant*sizeof(ContainerEntry);
     *length += chunks_length;
     // allocate the buffer
-    *buffer = malloc(*length);
+    *buffer = calloc(1, *length);
     // Let's check this malloc and make sure it succeeds
     if(!buffer) {
         mlog(IDX_DRARE, "%s, Malloc of stream buffer failed",__FUNCTION__);
@@ -909,8 +963,8 @@ Index::insertGlobal( ContainerEntry *g_entry )
     pair<map<off_t,ContainerEntry>::iterator,bool> ret;
     bool overlap  = false;
     ostringstream oss;
-    mlog(IDX_DAPI, "Inserting offset %ld into index of %s",
-         (long)g_entry->logical_offset, physical_path.c_str());
+    mlog(IDX_DAPI, "Inserting offset %ld into index of %s (%d)",
+         (long)g_entry->logical_offset, physical_path.c_str(),g_entry->id);
     ret = insertGlobalEntry( g_entry );
     if ( ret.second == false ) {
         oss << "overlap1" <<endl<< *g_entry <<endl << ret.first->second << endl;
@@ -943,7 +997,7 @@ Index::insertGlobal( ContainerEntry *g_entry )
         handleOverlap( *g_entry, ret );
     } else if (compress_contiguous) {
         // does it abuts with the one before it
-        if (ret.first!=global_index.begin() && g_entry->abut(prev->second) ) {
+        if (ret.first!=global_index.begin() && g_entry->follows(prev->second)) {
             oss << "Merging index for " << *g_entry << " and " << prev->second
                 << endl;
             mlog(IDX_DCOMMON, "%s", oss.str().c_str());
@@ -1180,6 +1234,7 @@ Index::addWrite( off_t offset, size_t length, pid_t pid,
     } else {
         // create a new index entry for this write
         HostEntry entry;
+        memset(&entry,0,sizeof(HostEntry)); // suppress valgrind complaint
         entry.logical_offset = offset;
         entry.length         = length;
         entry.id             = pid;
