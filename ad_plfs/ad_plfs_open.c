@@ -225,16 +225,15 @@ void ADIOI_PLFS_Open(ADIO_File fd, int *error_code)
         return;
     }
     // if we make it here, we're doing RDONLY, WRONLY, or RDWR
-
     // at this point, we want to do different for container/flat_file mode
     if (plfs_get_filetype(fd->filename) != CONTAINER) {
         err = plfs_open(&pfd,fd->filename,amode,rank,perm,NULL);
         if ( err < 0 ) {
-            *error_code = MPIO_Err_create_code(MPI_SUCCESS, 
-                                            MPIR_ERR_RECOVERABLE,
-                                           myname, __LINE__, MPI_ERR_IO,
-                                           "**io",
-                                           "**io %s", strerror(-err));
+            *error_code = MPIO_Err_create_code(MPI_SUCCESS,
+                                               MPIR_ERR_RECOVERABLE,
+                                               myname, __LINE__, MPI_ERR_IO,
+                                               "**io",
+                                               "**io %s", strerror(-err));
             plfs_debug( "%s: failure %s\n", myname, strerror(-err) );
             return err;
         } else {
@@ -245,7 +244,6 @@ void ADIOI_PLFS_Open(ADIO_File fd, int *error_code)
             return 0;
         }
     }
-
     // if we get here, we're in container mode; continue with the optimizations
     ret = open_helper(fd,&pfd,error_code,perm,amode,rank);
     MPI_Allreduce(&ret, &err, 1, MPI_INT, MPI_MIN, fd->comm);

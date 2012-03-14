@@ -42,7 +42,6 @@ void ADIOI_PLFS_Close(ADIO_File fd, int *error_code)
     }
     double start_time,end_time;
     start_time=MPI_Wtime();
-
     if (plfs_get_filetype(fd->filename) != CONTAINER) {
         err = plfs_close(fd->fs_ptr, rank, uid,amode,NULL);
     } else {
@@ -53,8 +52,8 @@ void ADIOI_PLFS_Close(ADIO_File fd, int *error_code)
             // up the close_opt
             close_opt.valid_meta=0;
             plfs_debug("Rank: %d in flatten then close\n",rank);
-            err = flatten_then_close(fd, fd->fs_ptr, rank, amode, procs, 
-                    &close_opt, fd->filename,uid);
+            err = flatten_then_close(fd, fd->fs_ptr, rank, amode, procs,
+                                     &close_opt, fd->filename,uid);
         } else {
             // for ADIO, just 0 creates the openhosts and the meta dropping
             // Grab last offset and total bytes from all ranks and reduce to max

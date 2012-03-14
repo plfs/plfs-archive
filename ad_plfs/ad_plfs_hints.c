@@ -16,7 +16,6 @@ void ADIOI_PLFS_SetInfo(ADIO_File fd, MPI_Info users_info, int *error_code)
     int gen_error_code,rank;
     MPI_Comm_rank( fd->comm, &rank );
     *error_code = MPI_SUCCESS;
-
     // these optimizations only make sense in container mode
     if (plfs_get_filetype(fd->filename) != CONTAINER) {
         disable_broadcast = 1;
@@ -24,7 +23,6 @@ void ADIOI_PLFS_SetInfo(ADIO_File fd, MPI_Info users_info, int *error_code)
         flatten_close = 0;
         disable_parindex_read = 1;
     }
-
     if ((fd->info) == MPI_INFO_NULL) {
         /* This must be part of the open call. can set striping parameters
          * if necessary.

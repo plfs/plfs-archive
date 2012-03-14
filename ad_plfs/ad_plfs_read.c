@@ -33,7 +33,6 @@ void ADIOI_PLFS_ReadContig(ADIO_File fd, void *buf, int count,
     }
     plfs_debug( "%s: offset %ld len %ld rank %d\n",
                 myname, (long)myoff, (long)len, rank );
-
     // this sync is only needed currently for container mode
     // for flat file mode, we can rely on the underlying filesystem
     if (plfs_get_filetype(fd->filename) == CONTAINER) {
