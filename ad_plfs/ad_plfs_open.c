@@ -235,13 +235,13 @@ void ADIOI_PLFS_Open(ADIO_File fd, int *error_code)
                                                "**io",
                                                "**io %s", strerror(-err));
             plfs_debug( "%s: failure %s\n", myname, strerror(-err) );
-            return err;
+            return;
         } else {
             plfs_debug( "%s: Success on open(%d)!\n", myname, rank );
-            fd->fs_ptr = *pfd;
+            fd->fs_ptr = pfd;
             fd->fd_direct = -1;
             *error_code = MPI_SUCCESS;
-            return 0;
+            return;
         }
     }
     // if we get here, we're in container mode; continue with the optimizations

@@ -45,23 +45,11 @@ void ADIOI_PLFS_Close(ADIO_File fd, int *error_code)
     if (plfs_get_filetype(fd->filename) != CONTAINER) {
         err = plfs_close(fd->fs_ptr, rank, uid,amode,NULL);
     } else {
-        flatten = ad_plfs_hints (fd , rank, "plfs_flatten_close");
-        // Only want to do this on write
-        if(flatten && fd->access_mode!=ADIO_RDONLY) {
-            // flatten on close takes care of calling plfs_close and setting
-            // up the close_opt
-            close_opt.valid_meta=0;
-            plfs_debug("Rank: %d in flatten then close\n",rank);
-            err = flatten_then_close(fd, fd->fs_ptr, rank, amode, procs,
-                                     &close_opt, fd->filename,uid);
-        } else {
-            // for ADIO, just 0 creates the openhosts and the meta dropping
-            // Grab last offset and total bytes from all ranks and reduce to max
-            plfs_debug("Rank: %d in regular close\n",rank);
-            if(fd->access_mode!=ADIO_RDONLY) {
-                reduce_meta(fd, fd->fs_ptr, fd->filename, &close_opt, rank);
-            }
-            err = plfs_close(fd->fs_ptr, rank, uid,amode,&close_opt);
+        // for ADIO, just 0 creates the openhosts and the meta dropping
+        // Grab the last offset and total bytes from all ranks and reduce to max
+        plfs_debug("Rank: %d in regular close\n",rank);
+        if(fd->access_mode!=ADIO_RDONLY) {
+            reduce_meta(fd, fd->fs_ptr, fd->filename, &close_opt, rank);
         }
     }
     plfs_debug("%d: close time: %.2f\n", rank,MPI_Wtime()-start_time);
@@ -198,7 +186,7 @@ void reduce_meta(ADIO_File afd, Plfs_fd *fd,const char *filename,
     plfs_query(fd, NULL, NULL, NULL, &lazy_stat);
     if (lazy_stat == 0) {
         // every rank calls plfs_sync to flush in-memory index.
-        plfs_sync(fd, rank);
+        plfs_sync(fd);
         MPI_Barrier(afd->comm);
         // rank 0 does slow stat, need not BCAST here
         if (rank == 0) {
