@@ -1,0 +1,42 @@
+#COPYRIGHT#
+.TH plfs_read 3 12/3/2010 "#PACKAGE_STRING#" 
+.SH NAME
+plfs_read 
+.SH SYNTAX
+#include <plfs.h>
+.PP
+ssize_t plfs_read( Plfs_fd *, char *buf, size_t size, off_t offset );
+
+.SH DESCRIPTION
+Read up to 
+.I size 
+or EOF from file handle 
+.I Plfs_fd 
+into buffer. See 
+.I read(2) 
+for more information.  This call is thread-safe.
+
+.SH INPUT PARAMETERS
+.TP 1i
+Plfs_fd
+the file handle returned from plfs_open
+.TP 1i
+buf
+Buffer to read into
+.TP 1i
+size
+Size to read
+.TP li
+offset
+Offset to start with
+
+.SH RETURN VALUES
+Most PLFS functions return 0 or -errno, except write and read
+which return the number of bytes or -errno
+
+.SH AUTHORS
+#AUTHORS#
+
+.SH SEE ALSO
+#SEEALSO3#
+

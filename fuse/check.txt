@@ -1,0 +1,1492 @@
+    25   johnbent #include "plfs.h"
+   193   johnbent #include "plfs_private.h"
+    29   johnbent #include "OpenFile.h"
+    26   johnbent #include "LogMessage.h"
+    25   johnbent #include "COPYRIGHT.h"
+    25   johnbent 
+    25   johnbent #include <errno.h>
+    25   johnbent #include <string>
+    25   johnbent #include <fstream>
+    25   johnbent #include <iostream>
+    25   johnbent #include <fcntl.h>
+    25   johnbent #include <iostream>
+    25   johnbent #include <limits>
+    25   johnbent #include <assert.h>
+    25   johnbent #include <stdlib.h>
+    25   johnbent #include <sys/types.h>
+    25   johnbent #include <sys/dir.h>
+    25   johnbent #include <sys/syscall.h>
+    25   johnbent #include <sys/param.h>
+    25   johnbent #include <sys/mount.h>
+    25   johnbent #include <sys/statvfs.h>
+    25   johnbent #include <sys/time.h>
+    25   johnbent #include <time.h>
+    78   johnbent #include <pwd.h>
+    78   johnbent #include <grp.h>
+   505   johnbent #include <map>
+    25   johnbent #include <iomanip>
+    25   johnbent #include <iostream>
+    25   johnbent #include <sstream>
+    26   johnbent #include "plfs_fuse.h"
+    25   johnbent #include "fusexx.h"
+    25   johnbent 
+   217 samuelgutierrez #ifdef HAVE_SYS_FSUID_H
+   217 samuelgutierrez     #include <sys/fsuid.h>
+   217 samuelgutierrez #endif
+   217 samuelgutierrez 
+    25   johnbent using namespace std;
+    25   johnbent 
+   706 chuckcranor #define DEBUGPREFIX ".plfs"          /* all debug files start with this */
+   706 chuckcranor #define DEBUGMAXOFF (1024*1024*1024) /* for sanity checking */
+    25   johnbent 
+   706 chuckcranor /**
+   717   johnbent  * pfuse_debug_driver: PLFS/FUSE debug file driver
+   706 chuckcranor  */
+   717   johnbent struct pfuse_debug_driver {
+   706 chuckcranor     const char *name;         /*!< file name, excluding the DEBUGPREFIX */
+   717   johnbent     int (*getsize)(struct pfuse_debug_driver *dd);    /*!< for getattr */
+   706 chuckcranor     /*!< read/write data from dbg file, NULL if not needed */
+   706 chuckcranor     int (*dbgread)(char *buf, size_t size, off_t offset);
+   706 chuckcranor     int (*dbgwrite)(const char *buf, size_t size, off_t offset);
+   706 chuckcranor };
+   706 chuckcranor 
+   706 chuckcranor /*
+   706 chuckcranor  * table to drive the debug files... with necessary prototypes.
+   706 chuckcranor  */
+   717   johnbent static int dbg_sizer(struct pfuse_debug_driver *dd);
+   706 chuckcranor static int dbg_log_read(char *buf, size_t size, off_t offset);
+   717   johnbent static int dbg_msgbufsz(struct pfuse_debug_driver *dd);
+   706 chuckcranor static int dbg_msgbuf_read(char *buf, size_t size, off_t offset);
+   717   johnbent static int dbg_mlogsize(struct pfuse_debug_driver *dd);
+   706 chuckcranor static int dbg_mlogmask_read(char *buf, size_t size, off_t offset);
+   706 chuckcranor static int dbg_mlogmask_write(const char *buf, size_t size, off_t offset);
+   706 chuckcranor 
+   717   johnbent static struct pfuse_debug_driver pfuse_dbgfiles[] = {
+   706 chuckcranor     { "debug",    dbg_sizer, Plfs::dbg_debug_read, NULL },
+   706 chuckcranor     { "log",      dbg_sizer, dbg_log_read, NULL },
+   706 chuckcranor     { "msgbuf",   dbg_msgbufsz, dbg_msgbuf_read, NULL },
+   706 chuckcranor     { "mlogmask", dbg_mlogsize, dbg_mlogmask_read, dbg_mlogmask_write },
+   706 chuckcranor };
+   706 chuckcranor 
+    53   johnbent // the reason we need this struct is because we want to know the original
+    53   johnbent // pid at the f_release bec fuse_get_context->pid returns 0 in the f_release
+    70   johnbent // and the original uid and gid because these are also 0 in the f_release
+    53   johnbent // each open gets a unique one of these but they share the internal Plfs_fd
+    70   johnbent // we also want to set and restore the uid and the gid
+    53   johnbent struct OpenFile {
+    53   johnbent     Plfs_fd *pfd;
+    53   johnbent     pid_t    pid;
+    70   johnbent     uid_t    uid;
+    70   johnbent     gid_t    gid;
+   113   johnbent     int      flags;
+    53   johnbent };
+    53   johnbent 
+   592   johnbent // we create this on f_opendir and use it at f_readdir
+   592   johnbent // we need it because we want to track when an opendir handle is 
+   592   johnbent // seeked backwards.  In such a case we probably need to refetch the
+   592   johnbent // directory contents.
+   592   johnbent typedef struct OpenDirStruct {
+   717   johnbent         set<string> entries;
+   717   johnbent             off_t last_offset;
+   592   johnbent } OpenDir;
+   592   johnbent 
+   275    nmtadam #ifdef FUSE_COLLECT_TIMES
+   235   johnbent     #define START_TIMES double begin, end; begin = plfs_wtime();
+   235   johnbent     #define END_TIMES   end = plfs_wtime(); \
+   235   johnbent                         plfs_stat_add( __FUNCTION__, end-begin, (ret<0) );
+   275    nmtadam     #define START_MESSAGE \
+   275    nmtadam 	   funct_id << setw(16) << fixed << setprecision(16)          \
+   275    nmtadam 		<< begin << " PLFS::" << __FUNCTION__                 \
+   275    nmtadam 		<< " on " << path << " pid "                          \
+   275    nmtadam 		<< fuse_get_context()->pid << " ";                    
+   275    nmtadam     #define END_MESSAGE \
+   275    nmtadam 	   funct_id << (ret >= 0 ? "success" : strerror(-ret) ) \
+   275    nmtadam 		    << " " << end-begin << "s"; 
+    25   johnbent #else
+    25   johnbent     #define START_TIMES
+    25   johnbent     #define END_TIMES
+   275    nmtadam     #define START_MESSAGE \
+   275    nmtadam 	   funct_id << setw(16) << fixed << setprecision(16)          \
+   275    nmtadam 		<< " PLFS::" << __FUNCTION__                          \
+   275    nmtadam 		<< " on " << path << " pid "                          \
+   275    nmtadam 		<< fuse_get_context()->pid << " ";                   
+   275    nmtadam     #define END_MESSAGE funct_id << (ret >= 0 ? "success" : strerror(-ret) ) 
+    25   johnbent #endif
+    25   johnbent 
+    79   johnbent 
+   217 samuelgutierrez #ifdef __APPLE__
+    90   johnbent     #define SET_IDS(X,Y)
+    90   johnbent     #define SAVE_IDS
+   175   johnbent     #define RESTORE_GROUPS
+   175   johnbent     #define RESTORE_IDS
+   175   johnbent     #define GET_GROUPS
+   176   johnbent     #define SET_GROUPS(X)
+    27   johnbent #else
+   175   johnbent     #define GET_GROUPS get_groups(&orig_groups);
+   176   johnbent     #define SET_GROUPS(X) set_groups(X); 
+   175   johnbent     #define RESTORE_IDS    SET_IDS(save_uid,save_gid);
+   235   johnbent     #define SAVE_IDS uid_t s_uid = plfs_getuid(); gid_t s_gid = plfs_getgid();
+   235   johnbent     #define SET_IDS(X,Y)   plfs_setfsuid( X );    plfs_setfsgid( Y ); 
+   175   johnbent     #define RESTORE_GROUPS setgroups( orig_groups.size(),                   \
+   175   johnbent                                 (const gid_t*)&(orig_groups.front()));
+    27   johnbent #endif
+    27   johnbent 
+   369   johnbent // this bit here is due to PLFS-FUSE crashing on johnbent's mac laptop and
+   369   johnbent // desktop.  I discovered that passing -s to FUSE to make it run in single
+   369   johnbent // threaded mode made the crash go away on the laptop, so I added this to
+   369   johnbent // make PLFS itself run single-threaded.  But FUSE-PLFS still crashed so 
+   369   johnbent // this suggests something wrong in FUSE itself
+   369   johnbent //#define DEBUG_MUTEX 0
+   369   johnbent #ifdef DEBUG_MUTEX
+   369   johnbent     #define DEBUG_MUTEX_ON plfs_mutex_lock(&self->debug_mutex,__FUNCTION__); 
+   369   johnbent     #define DEBUG_MUTEX_OFF plfs_mutex_unlock(&self->debug_mutex,__FUNCTION__); 
+   369   johnbent #else
+   369   johnbent     #define DEBUG_MUTEX_ON
+   369   johnbent     #define DEBUG_MUTEX_OFF
+   369   johnbent #endif
+   369   johnbent 
+    90   johnbent #define PLFS_ENTER vector<gid_t> orig_groups;                                 \
+    90   johnbent                    ostringstream funct_id;                                    \
+    90   johnbent                    LogMessage lm, lm2;                                        \
+   369   johnbent                    DEBUG_MUTEX_ON;                                            \
+    90   johnbent                    string strPath  = expandPath( path );                      \
+   175   johnbent                    GET_GROUPS;                                                \
+   176   johnbent                    SET_GROUPS(fuse_get_context()->uid);                       \
+    90   johnbent                    START_TIMES;                                               \
+   294   johnbent                    START_MESSAGE;                                             \
+   294   johnbent                    lm << funct_id.str() << endl;                              \
+   294   johnbent                    lm.flush();                                                \
+    90   johnbent                    SAVE_IDS;                                                  \
+    90   johnbent                    SET_IDS(fuse_get_context()->uid,fuse_get_context()->gid);  \
+   250    nmtadam                    int ret = 0;                                               
+   250    nmtadam                    
+    25   johnbent 
+    90   johnbent #define PLFS_EXIT  SET_IDS(s_uid,s_gid);                                \
+    90   johnbent                    RESTORE_GROUPS;                                      \
+    90   johnbent                    END_TIMES;                                           \
+   369   johnbent                    END_MESSAGE;					                        \
+    90   johnbent                    lm2 << funct_id.str() << endl; lm2.flush();          \
+   369   johnbent                    DEBUG_MUTEX_OFF;                                     \
+    90   johnbent                    return ret;
+    79   johnbent 
+   706 chuckcranor #define EXIT_IF_DEBUG  if ( get_dbgdrv(path) != NULL) return 0;
+    25   johnbent 
+    53   johnbent #define GET_OPEN_FILE  struct OpenFile *openfile = (struct OpenFile*)fi->fh; \
+   113   johnbent                        Plfs_fd *of = NULL;                                   \
+   113   johnbent                        if ( openfile ) {                                     \
+   113   johnbent                            of = (Plfs_fd *)openfile->pfd;                    \
+   113   johnbent                            ostringstream oss;                                \
+   113   johnbent                            oss << __FUNCTION__ << " got OpenFile for " <<    \
+   706 chuckcranor                                strPath.c_str() << " (" << of << ")" ;   \
+   706 chuckcranor                            mlog(FUSE_DCOMMON, "%s", oss.str().c_str() ); \
+   113   johnbent                        }
+    25   johnbent 
+   250    nmtadam 
+    25   johnbent std::vector<std::string> &
+    25   johnbent split(const std::string &s, const char delim, std::vector<std::string> &elems) {
+    25   johnbent     std::stringstream ss(s);
+    25   johnbent     std::string item;
+    25   johnbent     while(std::getline(ss, item, delim)) {
+    25   johnbent         elems.push_back(item);
+    25   johnbent     }
+    25   johnbent     return elems;
+    25   johnbent }
+    25   johnbent 
+   706 chuckcranor /**
+   706 chuckcranor  * plfsfuse_mlogargfilter: filter out the mlog args from the command
+   706 chuckcranor  * line and save them away for future use.
+   706 chuckcranor  * 
+   706 chuckcranor  * @param argc from main.C
+   706 chuckcranor  * @param argv from main.C
+   706 chuckcranor  */
+   706 chuckcranor 
+   706 chuckcranor static void plfsfuse_mlogargfilter(int *argc, char **argv) {
+   706 chuckcranor     int mlac, lcv, cnt;
+   706 chuckcranor     char **mlav;
+   706 chuckcranor 
+   706 chuckcranor     if (*argc < 3)
+   706 chuckcranor         return;         /* no args, no work */
+   706 chuckcranor 
+   706 chuckcranor     mlac = 0;
+   706 chuckcranor     mlav = (char **) malloc(*argc * sizeof(*argv));
+   706 chuckcranor     if (mlav == NULL) {
+   706 chuckcranor         fprintf(stderr, "plfsfuse_mlogargfilter: malloc failed?  skipping.\n");
+   706 chuckcranor         return;
+   706 chuckcranor     }
+   706 chuckcranor 
+   706 chuckcranor     /* all --mlog args are key/value pairs, to match plfsrc */
+   706 chuckcranor     for (lcv = 1 ; lcv < (*argc - 1) ; /*null*/) {
+   706 chuckcranor         if (strncmp(argv[lcv], "--mlog_", 7) != 0) {
+   706 chuckcranor             lcv++;
+   706 chuckcranor             continue;    /* skip if not for us */
+   706 chuckcranor         }
+   706 chuckcranor 
+   706 chuckcranor         /* copy over to our area */
+   706 chuckcranor         mlav[mlac++] = argv[lcv];
+   706 chuckcranor         mlav[mlac++] = argv[lcv+1];
+   706 chuckcranor 
+   706 chuckcranor         /* remove the key/value pair from system argv */
+   706 chuckcranor         for (cnt = lcv + 2 ; cnt < *argc ; cnt++) {
+   706 chuckcranor             argv[cnt - 2] = argv[cnt];
+   706 chuckcranor         }
+   706 chuckcranor         *argc = *argc - 2;
+   706 chuckcranor         /* lcv remains the same */
+   706 chuckcranor     }
+   706 chuckcranor 
+   706 chuckcranor     /* save results, if we find any */
+   706 chuckcranor     if (mlac == 0) {
+   706 chuckcranor         free(mlav);
+   706 chuckcranor     } else {
+   706 chuckcranor         plfs_mlogargs(&mlac, mlav);
+   706 chuckcranor     }
+   706 chuckcranor }
+   706 chuckcranor 
+    25   johnbent // set this up to parse command line args
+    25   johnbent // move code from constructor in here
+    25   johnbent // and stop using /etc config file
+    25   johnbent int Plfs::init( int *argc, char **argv ) {
+   235   johnbent     char hostname[_POSIX_PATH_MAX];
+   706 chuckcranor 
+   706 chuckcranor     (void)plfs_mlogtag(argv[0]);
+   706 chuckcranor     plfsfuse_mlogargfilter(argc, argv);
+   706 chuckcranor 
+   706 chuckcranor     // figure out our hostname now in order to make containers
+    25   johnbent     if (gethostname(hostname, sizeof(hostname)) < 0) {
+   706 chuckcranor         fprintf(stderr, "plfsfuse gethostname failed\n");
+    25   johnbent         return -errno;
+    25   johnbent     }
+    53   johnbent     myhost = hostname; 
+    25   johnbent 
+   193   johnbent     // we've been stashing stuff in self but we can also stash in
+   193   johnbent     // fuse_get_context()->private_data
+   193   johnbent 
+   109   johnbent     LogMessage::init( );
+    25   johnbent 
+   193   johnbent     // ask the library to read in our configuration parameters
+   193   johnbent     pconf = get_plfs_conf();
+   514   johnbent     if (!pconf || pconf->err_msg) {
+   514   johnbent         fprintf(stderr,"FATAL: %s", 
+   514   johnbent                 pconf ?  pconf->err_msg->c_str()
+   514   johnbent                 : "no plfsrc file found.\n");
+   514   johnbent         return pconf ? -EINVAL : -ENOENT;  
+   193   johnbent     }
+   202   johnbent     plfs_init(pconf); // warm up the path resolution cache
+   113   johnbent 
+   193   johnbent         // parse args to see if direct_io is set
+   193   johnbent         // on older fuses, direct_io allows large IO's but disables mmap
+   193   johnbent         // in that case, disable the exec bit so users see something
+   193   johnbent         // sensible when they try to exec a plfs file
+   193   johnbent         // they'll chmod 0777 and look and see no exec bit and say wtf?
+   193   johnbent         // whereas if we allow the exec bit and they try to exec it, they
+   193   johnbent         // get a cryptic error
+   193   johnbent     pconf->direct_io = 0;
+   193   johnbent     bool mnt_pt_found = false;
+   193   johnbent     for( int i = 1; i < *argc; i++ ) {  // skip program name
+    77   johnbent         if ( strstr( argv[i], "direct_io" ) ) {
+   193   johnbent             pconf->direct_io = 1;
+    77   johnbent         }
+   334    nmtadam         if ( argv[i][0] != '-' && ! mnt_pt_found ) {
+   525   johnbent             string mnt_pt = argv[i];
+   525   johnbent             pmnt = find_mount_point(pconf,mnt_pt,mnt_pt_found);
+   422   johnbent             if ( ! mnt_pt_found ) {
+   422   johnbent                 fprintf(stderr,"FATAL mount point mismatch: %s not found\n", 
+   422   johnbent                     argv[i] );
+   733 tj-machado                 plfs_dump_config(false, false);
+   196   johnbent                 return -ECONNREFUSED;  
+   196   johnbent             }
+   193   johnbent             mnt_pt_found = true;
+   193   johnbent         }
+    25   johnbent     }
+   193   johnbent     if ( mnt_pt_found ) {
+   422   johnbent         cerr << "Starting PLFS on " << hostname << ":" << pmnt->mnt_pt << endl;
+    25   johnbent     }
+    25   johnbent 
+   202   johnbent 
+    25   johnbent         // create a dropping so we know when we start   
+   235   johnbent     mode_t mode = (S_IRUSR|S_IWUSR|S_IXUSR|S_IXGRP|S_IXOTH); 
+    25   johnbent     int fd = open( "/tmp/plfs.starttime",
+   235   johnbent             O_WRONLY | O_APPEND | O_CREAT, mode );
+    25   johnbent     char buffer[1024];
+   235   johnbent     snprintf( buffer, 1024, "PLFS started at %.2f\n", plfs_wtime() );
+   112   johnbent     write( fd, buffer, strlen(buffer) );
+    25   johnbent     close( fd );
+    25   johnbent 
+    25   johnbent         // init our mutex
+    53   johnbent     pthread_mutex_init( &(container_mutex), NULL );
+    53   johnbent     pthread_mutex_init( &(fd_mutex), NULL );
+    80   johnbent     pthread_mutex_init( &(group_mutex), NULL );
+   369   johnbent     pthread_mutex_init( &(debug_mutex), NULL );
+    25   johnbent 
+    30   johnbent         // we used to make a trash container but now that we moved to library, 
+    30   johnbent         // fuse layer doesn't handle silly rename
+    30   johnbent         // we also have (temporarily?) removed the dangler stuff
+    25   johnbent 
+    25   johnbent     return 0;
+    25   johnbent }
+    25   johnbent 
+    25   johnbent // Constructor
+    25   johnbent Plfs::Plfs () {
+    25   johnbent     extra_attempts      = 0;
+    25   johnbent     wtfs                = 0;
+    25   johnbent     make_container_time = 0;
+    25   johnbent     o_rdwrs             = 0;
+   235   johnbent     begin_time          = plfs_wtime();
+    25   johnbent }
+    25   johnbent 
+    25   johnbent string Plfs::expandPath( const char *path ) {
+   259    nmtadam 
+   256   johnbent     string full_logical;
+   422   johnbent     static int mnt_len = strlen(self->pmnt->mnt_pt.c_str());
+   422   johnbent     if ( ! strncmp(path,self->pmnt->mnt_pt.c_str(),mnt_len) ) {
+   256   johnbent         full_logical = path; // already absolute
+   256   johnbent     } else {
+   258   johnbent         // another weird thing is that sometimes the path is not prefaced with a
+   258   johnbent         // slash.  in that case, add one btwn it and the mount point
+   264   johnbent         // actually, this happens on a symlink and this means that the symlink
+   264   johnbent         // should be to a relative path, so don't screw with it
+   264   johnbent         // actually, we will change it but for the symlink call we won't pass
+   264   johnbent         // the expanded path
+   264   johnbent         /*
+   258   johnbent         if ( path[0] == '/' ) {
+   258   johnbent             full_logical = self->pconf->mnt_pt + path; // make absolute
+   258   johnbent         } else {
+   258   johnbent             full_logical = self->pconf->mnt_pt + '/' + path; // make absolute
+   258   johnbent         }
+   264   johnbent         */
+   422   johnbent         full_logical = self->pmnt->mnt_pt + path; // make absolute
+   256   johnbent     }
+   706 chuckcranor     mlog(FUSE_DCOMMON, "%s %s->%s", __FUNCTION__, path, full_logical.c_str());
+   256   johnbent     return full_logical;
+   259    nmtadam     
+    25   johnbent }
+    25   johnbent 
+   706 chuckcranor /**
+   706 chuckcranor  * get_dbgdrv: get the debug driver for the given file
+   706 chuckcranor  *
+   706 chuckcranor  * @param path the file we are requesting info for
+   706 chuckcranor  * @return the driver for the file, or NULL if there isn't one
+   706 chuckcranor  */
+   717   johnbent static struct pfuse_debug_driver *get_dbgdrv(const char *path) {
+   706 chuckcranor     const char *cp;
+   717   johnbent     unsigned lcv;
+    25   johnbent 
+   706 chuckcranor     cp = path;
+   717   johnbent     if (*cp == '/') {
+   717   johnbent         /* skip leading '/' if present */
+   706 chuckcranor         cp++;
+   717   johnbent     }
+   706 chuckcranor 
+   706 chuckcranor     /* first check the prefix */
+   717   johnbent     if (strncmp(cp, DEBUGPREFIX, sizeof(DEBUGPREFIX) - 1) != 0) {
+   706 chuckcranor         return(NULL);
+   717   johnbent     }
+   706 chuckcranor     cp += ( sizeof(DEBUGPREFIX) - 1);
+   706 chuckcranor 
+   717   johnbent     for (lcv = 0;
+   717   johnbent          lcv < sizeof(pfuse_dbgfiles)/sizeof(pfuse_dbgfiles[0]); 
+   717   johnbent          lcv++) 
+   717   johnbent     {
+   706 chuckcranor         if (strcmp(pfuse_dbgfiles[lcv].name, cp) == 0)
+   706 chuckcranor             return(&pfuse_dbgfiles[lcv]);
+    25   johnbent     }
+   706 chuckcranor     return(NULL);
+    25   johnbent }
+    25   johnbent 
+   559   johnbent // this is not just a simple wrapper since we cache some state here
+   559   johnbent // about what files we've made.  This might get some performance but
+   559   johnbent // maybe at the cost of correctness.  hmmmm.
+    25   johnbent int Plfs::makePlfsFile( string expanded_path, mode_t mode, int flags ) {
+    25   johnbent     int res = 0;
+   706 chuckcranor     mlog(FUSE_DAPI, "Need to create container for %s (%s %d)", 
+    25   johnbent             expanded_path.c_str(), 
+    53   johnbent             self->myhost.c_str(), fuse_get_context()->pid );
+    25   johnbent 
+    25   johnbent         // so this is distributed across multi-nodes so the lock
+    25   johnbent         // doesn't fully help but it does help a little bit for multi-proc
+    25   johnbent         // on this node
+    43   johnbent         // if the container has already been created, don't create it again
+   167   johnbent         // hmmm, not sure about this code.  What if some other node unlinks
+   167   johnbent         // the container and then we'll assume it's created here?
+   235   johnbent     double time_start = plfs_wtime();
+   235   johnbent     plfs_mutex_lock( &self->container_mutex, __FUNCTION__ );
+    25   johnbent     int extra_attempts = 0;
+    53   johnbent     if (self->createdContainers.find(expanded_path)
+    53   johnbent             ==self->createdContainers.end()) 
+    25   johnbent     {
+   277   johnbent         res = plfs_create( expanded_path.c_str(), mode, flags, 
+   277   johnbent                 fuse_get_context()->pid );
+    25   johnbent         self->extra_attempts += extra_attempts;
+    25   johnbent         if ( res == 0 ) {
+    53   johnbent             self->createdContainers.insert( expanded_path );
+   706 chuckcranor             mlog(FUSE_DCOMMON, "%s Stashing mode for %s: %d",
+   112   johnbent                 __FUNCTION__, expanded_path.c_str(), (int)mode );
+    25   johnbent             self->known_modes[expanded_path] = mode;
+    25   johnbent         }
+    25   johnbent     }
+   235   johnbent     plfs_mutex_unlock( &self->container_mutex, __FUNCTION__ );
+    25   johnbent 
+   235   johnbent     double time_end = plfs_wtime();
+    25   johnbent     self->make_container_time += (time_end - time_start);
+    25   johnbent     if ( time_end - time_start > 2 ) {
+   706 chuckcranor         mlog(FUSE_DRARE, "WTF: %s of %s took %.2f secs", __FUNCTION__,
+    25   johnbent                 expanded_path.c_str(), time_end - time_start );
+    25   johnbent         self->wtfs++;
+    25   johnbent     }
+    25   johnbent     return res;
+    25   johnbent }
+    25   johnbent 
+    25   johnbent // slight chance that the access file doesn't exist yet.
+    30   johnbent // this doesn't use the iterate_backend function if it's a directory.
+    30   johnbent // Since it only reads the dir, checking only one of cloned dirs is sufficient
+    25   johnbent int Plfs::f_access(const char *path, int mask) {
+    25   johnbent     EXIT_IF_DEBUG;
+    25   johnbent     PLFS_ENTER;
+    31   johnbent     ret = plfs_access( strPath.c_str(), mask );
+    25   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+    25   johnbent int Plfs::f_mknod(const char *path, mode_t mode, dev_t rdev) {
+    25   johnbent     PLFS_ENTER;
+    77   johnbent 
+   706 chuckcranor     mlog(FUSE_DAPI, "%s on %s mode %d rdev %d",__FUNCTION__,path,mode,rdev);
+   559   johnbent 
+    28   johnbent     ret = makePlfsFile( strPath.c_str(), mode, 0 );
+    43   johnbent     if ( ret == 0 ) {
+    43   johnbent         // we think we've made the file. Let's double check.
+    77   johnbent         // this is probably unnecessary.
+    77   johnbent         /*
+    43   johnbent         struct stat stbuf;
+    43   johnbent         ret = f_getattr( path, &stbuf );
+    43   johnbent         if ( ret != 0 ) {
+    43   johnbent             cerr << "WTF? Just created file that doesn't exist?"
+    43   johnbent                  << path << ": " << strerror(-ret) << endl;
+    43   johnbent             exit( 0 );
+    43   johnbent         }
+    77   johnbent         */
+    43   johnbent     }
+    25   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+    25   johnbent // very strange.  When fuse gets the ENOSYS for 
+    25   johnbent // create, it then calls mknod.  The same exact code which works in
+    25   johnbent // mknod fails if we put it in here
+    25   johnbent // maybe that's specific to mac's
+    25   johnbent // now I'm seeing that *usually* when f_create gets the -ENOSYS, that the
+    25   johnbent // caller will then call f_mknod, but that doesn't always happen in big
+    25   johnbent // untar of tarballs, so I'm gonna try to call f_mknod here
+    30   johnbent // the big tarball thing seems to work again with this commented out.... ?
+    25   johnbent int Plfs::f_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
+    90   johnbent     PLFS_ENTER;
+    28   johnbent     //ret = f_mknod( strPath.c_str(), mode, 0 );
+    25   johnbent     ret = -ENOSYS;
+   250    nmtadam     PLFS_EXIT    ;
+    25   johnbent }
+    25   johnbent 
+    25   johnbent // returns 0 or -errno
+    25   johnbent // nothing to do for a read file
+    25   johnbent int Plfs::f_fsync(const char *path, int datasync, struct fuse_file_info *fi) {
+    90   johnbent     PLFS_ENTER; GET_OPEN_FILE;
+   580   johnbent     if (of) plfs_sync(of, fuse_get_context()->pid);
+    25   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+    25   johnbent // this means it is an open file.  That means we also need to check our
+    25   johnbent // current write file and adjust those indices also if necessary
+    25   johnbent int Plfs::f_ftruncate(const char *path, off_t offset, struct fuse_file_info *fi)
+    25   johnbent {
+   746   johnbent     EXIT_IF_DEBUG;
+    90   johnbent     PLFS_ENTER; GET_OPEN_FILE;
+   580   johnbent     if(of) plfs_sync(of,fuse_get_context()->pid); // flush any index buffers
+   657   johnbent     ret = plfs_trunc( of, strPath.c_str(), offset, true );
+    25   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+    25   johnbent // use removeDirectoryTree to remove all data but not the dir structure
+    25   johnbent // return 0 or -errno 
+    25   johnbent int Plfs::f_truncate( const char *path, off_t offset ) {
+   746   johnbent     EXIT_IF_DEBUG;
+    25   johnbent     PLFS_ENTER;
+   657   johnbent     ret = plfs_trunc( NULL, strPath.c_str(), offset, false );
+    25   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+    43   johnbent // a helper for f_getattr and f_fgetattr.  
+   459   johnbent int Plfs::getattr_helper( string expanded, const char *path, 
+   459   johnbent         struct stat *stbuf, Plfs_fd *of ) 
+    43   johnbent {
+   717   johnbent     struct pfuse_debug_driver *dd;
+   459   johnbent     bool sz_only = false;
+   459   johnbent     int ret = plfs_getattr( of, expanded.c_str(), stbuf, sz_only );
+    43   johnbent     if ( ret == -ENOENT ) {
+   706 chuckcranor         if ( (dd = get_dbgdrv(path)) != NULL ) {
+    43   johnbent             stbuf->st_mode = S_IFREG | 0444;
+   746   johnbent             if (dd->dbgwrite) stbuf->st_mode |= 0200;
+    43   johnbent             stbuf->st_nlink = 1;
+   706 chuckcranor             stbuf->st_size = dd->getsize(dd);
+   269   johnbent             struct timeval  tv;
+   269   johnbent             gettimeofday(&tv, NULL);
+   269   johnbent             stbuf->st_mtime = tv.tv_sec; 
+    43   johnbent             ret = 0; 
+    43   johnbent         } else {
+    43   johnbent             // let's remove this from our created containers
+    53   johnbent             // just in case.  We shouldn't have to do this here
+    53   johnbent             // since normally we try to keep 
+    43   johnbent             // created containers up to date ourselves
+    53   johnbent             // when we do unlinks 
+    43   johnbent             // but there is a chance that someone 
+    43   johnbent             // mucked with the backend or something so
+    43   johnbent             // we always want to make sure we now
+    43   johnbent             // when a container doesn't exist
+    43   johnbent             // this is because we once got in trouble 
+    43   johnbent             // when we didn't do a good job keeping 
+    43   johnbent             // created containers up to date and 
+    43   johnbent             // mknod thought a container existed but it didn't
+    53   johnbent             self->createdContainers.erase( expanded );
+    43   johnbent         }
+    43   johnbent     }
+    77   johnbent 
+    77   johnbent     // ok, we've done the getattr, if we're running in direct_io mode
+    77   johnbent     // and it's a file, let's lie and turn off the exec bit so that 
+    77   johnbent     // users will be explicitly disabled from trying to exec plfs files
+   193   johnbent     if ( ret == 0 && self->pconf->direct_io && S_ISREG(stbuf->st_mode) ) {
+    77   johnbent         stbuf->st_mode &= ( ~S_IXUSR & ~S_IXGRP & ~S_IXOTH );
+    77   johnbent     }
+    43   johnbent     return ret;
+    43   johnbent }
+    43   johnbent 
+    28   johnbent int Plfs::f_fgetattr(const char *path, struct stat *stbuf, 
+    28   johnbent         struct fuse_file_info *fi) 
+    28   johnbent {
+    90   johnbent     PLFS_ENTER; GET_OPEN_FILE;
+   459   johnbent     ret = getattr_helper( strPath, path, stbuf, of );
+   273   johnbent     PLFS_EXIT;
+    28   johnbent }
+    28   johnbent 
+    25   johnbent int Plfs::f_getattr(const char *path, struct stat *stbuf) {
+    25   johnbent     PLFS_ENTER;
+   459   johnbent     ret = getattr_helper( strPath, path, stbuf, NULL );
+   273   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+    29   johnbent // needs to work differently for directories
+    25   johnbent int Plfs::f_utime (const char *path, struct utimbuf *ut) {
+    25   johnbent     PLFS_ENTER;
+   193   johnbent     ret = plfs_utime( strPath.c_str(), ut );
+    25   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 		    
+    25   johnbent // this needs to recurse on all data and index files
+    25   johnbent int Plfs::f_chmod (const char *path, mode_t mode) {
+    25   johnbent     PLFS_ENTER;
+   250    nmtadam 
+   250    nmtadam     plfs_mutex_lock( &self->fd_mutex, __FUNCTION__ );
+   193   johnbent     ret = plfs_chmod( strPath.c_str(), mode );
+   193   johnbent     if ( ret == 0 ) {
+   706 chuckcranor         mlog(FUSE_DCOMMON, "%s Stashing mode for %s: %d",
+   193   johnbent             __FUNCTION__, strPath.c_str(), (int)mode );
+   193   johnbent         self->known_modes[strPath] = mode;
+    25   johnbent     }
+   575   johnbent     plfs_mutex_unlock( &self->fd_mutex, __FUNCTION__ );
+   575   johnbent     PLFS_EXIT;
+   575   johnbent 
+   575   johnbent     // ignore this clean-up code for now
+   575   johnbent     /*
+   250    nmtadam     SET_IDS(s_uid,s_gid);
+   250    nmtadam     RESTORE_GROUPS;
+   250    nmtadam     END_TIMES;
+   250    nmtadam     
+   250    nmtadam     if(ret == 0) {
+   456   johnbent         ret = plfs_chmod_cleanup( strPath.c_str(), mode );
+   250    nmtadam     }
+   250    nmtadam     plfs_mutex_unlock( &self->fd_mutex, __FUNCTION__ );
+   275    nmtadam     PLFS_EXIT; 
+   575   johnbent     */
+    25   johnbent }
+    78   johnbent 
+    78   johnbent // fills the set of supplementary groups of the effective uid
+    78   johnbent int Plfs::get_groups( vector<gid_t> *vec ) {
+   162   johnbent     int ngroups = getgroups(0, 0);
+   113   johnbent     gid_t *groups = new gid_t[ngroups];
+    78   johnbent     //(gid_t *) malloc(ngroups * sizeof (gid_t));
+    78   johnbent     int val = getgroups (ngroups, groups);
+   240    nmtadam     //int val = fuse_getgroups(ngroups, groups);
+    78   johnbent     for( int i = 0; i < val; i++ ) {
+    78   johnbent         vec->push_back( groups[i] );
+    78   johnbent     }
+   125   johnbent     delete []groups;
+   113   johnbent     groups = NULL;
+    78   johnbent     return ( val >= 0 ? 0 : -errno );
+    78   johnbent }
+    78   johnbent 
+    78   johnbent // fills the set of supplementary groups of a uid 
+    80   johnbent // I'm not sure right now and am doing testing.  hopefully I come back
+    80   johnbent // and clean up this comment but as of right now we are doing this at
+    80   johnbent // every entry point in PLFS_ENTER which makes this a very frequent
+    80   johnbent // operation.  I tried this once w/out a mutex and it seemed to make it
+    80   johnbent // segfault.  I'm scared that getgrent is not thread-safe so now this is
+    80   johnbent // in a mutex which seems ugly since it happens at every PLFS_ENTER.  So
+    80   johnbent // if we indeed execute this code at every PLFS_ENTER, we should probably
+    80   johnbent // consider caching mappings of uid's to group lists and we should probably
+    80   johnbent // also remember the age of each cache entry so that we periodically forget
+    80   johnbent // old cachings.  ugh.
+    80   johnbent // yes, it really needs the mutex, ugh.  let's try caching!
+    80   johnbent // ok, this all seems good.  I've now added caching.  Later, we'll have
+    80   johnbent // to add something to invalidate the cache entries.  At first I was just
+    80   johnbent // thinking about maintaining a timestamp for each entry but that's maybe
+    80   johnbent // a pain.  Prolly easier to just maintain a single timestamp for the whole
+    80   johnbent // cache and periodically flush it.  Wonder if querying time all the time
+    80   johnbent // will be a problem?  ugh.
+   175   johnbent // OK.  Now it's cached and periodically purged.  still ugly....
+    81   johnbent //
+    90   johnbent // TODO:
+    81   johnbent // HEY!  HEY!  When we can get fuse 2.8.XX, we can throw some of this crap
+    81   johnbent // away since Miklos has added fuse_getgroups which does this all for us!
+    81   johnbent // http://article.gmane.org/gmane.comp.file-systems.fuse.devel/7952
+    90   johnbent int Plfs::set_groups( uid_t uid ) {
+    78   johnbent     char *username;
+    78   johnbent     struct passwd *pwd;
+    90   johnbent     vector<gid_t> groups;
+   287    nmtadam     vector<gid_t> *groups_ptr = NULL;
+   235   johnbent     static double age = plfs_wtime();
+    90   johnbent         // unfortunately, I think this whole thing needs to be in a mutex
+    90   johnbent         // it used to be the case that we only had the mutex around the
+    90   johnbent         // code to read the groups and the lookup was unprotected
+    90   johnbent         // but now we need to periodically purge the data-structure and
+    90   johnbent         // I'm not sure the data-structure is thread-safe
+    90   johnbent         // what if we get an itr, and then someone else frees the structure,
+    90   johnbent         // and then we try to dereference the itr?
+   235   johnbent     plfs_mutex_lock( &self->group_mutex, __FUNCTION__ );
+    90   johnbent 
+    90   johnbent     // purge the cache every 30 seconds
+   235   johnbent     if ( plfs_wtime() - age > 30 ) {
+    90   johnbent         self->memberships.clear();
+   235   johnbent         age = plfs_wtime();
+    90   johnbent     }
+    90   johnbent 
+    90   johnbent     // do the lookup
+    90   johnbent     map<uid_t, vector<gid_t> >::iterator itr =
+    80   johnbent             self->memberships.find( uid );
+    90   johnbent 
+    90   johnbent     // if not found, find it and cache it
+    80   johnbent     if ( itr == self->memberships.end() ) {
+    80   johnbent         pwd      = getpwuid( uid );
+   241    nmtadam         if( pwd ) {
+   706 chuckcranor             mlog(FUSE_DCOMMON, "Need to find groups for %d", (int)uid );
+   241    nmtadam             username = pwd->pw_name;
+    78   johnbent 
+   241    nmtadam             // read the groups to discover the memberships of the caller
+   241    nmtadam             struct group *grp;
+   241    nmtadam             char         **members;
+   241    nmtadam             setgrent();
+   241    nmtadam             while( (grp = getgrent()) != NULL ) {
+   241    nmtadam                 members = grp->gr_mem;
+   241    nmtadam                 while (*members) {
+   241    nmtadam                     if ( strcmp( *(members), username ) == 0 ) {
+   241    nmtadam                         groups.push_back( grp->gr_gid );
+   241    nmtadam                     }
+   241    nmtadam                     members++;
+    80   johnbent                 }
+    78   johnbent             }
+   241    nmtadam             endgrent();
+   241    nmtadam             self->memberships[uid] = groups;
+   241    nmtadam             groups_ptr = &groups;
+    78   johnbent         }
+    80   johnbent     } else {
+    90   johnbent         groups_ptr = &(itr->second);
+    78   johnbent     }
+    90   johnbent 
+    90   johnbent     // now unlock the mutex, set the groups, and return 
+   235   johnbent     plfs_mutex_unlock( &self->group_mutex, __FUNCTION__ );
+   287    nmtadam     if ( groups_ptr == NULL) {
+   706 chuckcranor         mlog(FUSE_DRARE, "WTF: Got a null group ptr for %d", uid); 
+   287    nmtadam     } else {
+   287    nmtadam         setgroups( groups_ptr->size(), (const gid_t*)&(groups_ptr->front()) ); 
+   287    nmtadam     }
+    78   johnbent     return 0;
+    78   johnbent }
+   241    nmtadam 
+    25   johnbent int Plfs::f_chown (const char *path, uid_t uid, gid_t gid ) { 
+    80   johnbent     PLFS_ENTER;
+   235   johnbent     ret = plfs_chown(strPath.c_str(),uid,gid);
+   575   johnbent     PLFS_EXIT;
+   575   johnbent     // ignore this clean-up code for now
+   575   johnbent     /*
+   259    nmtadam     SET_IDS(s_uid,s_gid);
+   259    nmtadam     RESTORE_GROUPS;
+   259    nmtadam     END_TIMES; 
+   259    nmtadam     
+   259    nmtadam     if ( ret == 0)
+   259    nmtadam     {
+   259    nmtadam         ret = plfs_chown_cleanup ( path, uid, gid );
+   259    nmtadam     }
+   259    nmtadam     return ret;
+   575   johnbent     */
+    25   johnbent }
+    25   johnbent 
+    29   johnbent int Plfs::f_mkdir (const char *path, mode_t mode ) {
+    29   johnbent     PLFS_ENTER;
+   193   johnbent     ret = plfs_mkdir(strPath.c_str(),mode);
+    25   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+    25   johnbent int Plfs::f_rmdir( const char *path ) {
+    25   johnbent     PLFS_ENTER;
+   193   johnbent     ret = plfs_rmdir(strPath.c_str()); 
+    25   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+    25   johnbent // what if someone is calling unlink on an open file?
+    25   johnbent // boy I hope that never happens.  Actually, I think this should be OK
+    25   johnbent // because I believe that f_write will recreate the container if necessary.
+    25   johnbent // but not sure what will happen on a file open for read.
+    25   johnbent //
+    25   johnbent // anyway, not sure we need to worry about handling this weird stuff
+    25   johnbent // fine to leave it undefined.  users shouldn't do stupid stuff like this anyway
+    25   johnbent int Plfs::f_unlink( const char *path ) {
+    25   johnbent     PLFS_ENTER;
+    32   johnbent     ret = plfs_unlink( strPath.c_str() );
+    32   johnbent     if ( ret == 0 ) {
+    53   johnbent         self->createdContainers.erase( strPath );
+    32   johnbent     }
+    25   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+    25   johnbent // see f_readdir for some documentation here
+    25   johnbent // returns 0 or -errno
+    25   johnbent int Plfs::f_opendir( const char *path, struct fuse_file_info *fi ) {
+    90   johnbent     PLFS_ENTER;
+   592   johnbent     OpenDir *opendir = new OpenDir;
+   592   johnbent     opendir->last_offset = 0;
+   592   johnbent     fi->fh = NULL;
+   592   johnbent     ret = plfs_readdir(strPath.c_str(),(void*)(&(opendir->entries)));
+   592   johnbent     if (ret==0) fi->fh = (uint64_t)opendir;
+   592   johnbent     else delete opendir;
+    25   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+    25   johnbent int Plfs::f_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+    25   johnbent 		off_t offset, struct fuse_file_info *fi) 
+    25   johnbent {
+    90   johnbent     PLFS_ENTER;
+    25   johnbent 
+   592   johnbent     // pull the opendir that was stashed on the open
+   592   johnbent     OpenDir *opendir = (OpenDir*)fi->fh;
+   193   johnbent 
+   592   johnbent     // skip out early if they're already read to end
+   593   johnbent     if (offset >= (off_t)opendir->entries.size()) {
+   706 chuckcranor         mlog(FUSE_DCOMMON, "Skipping %s of %s (EOD)",__FUNCTION__,
+   706 chuckcranor              strPath.c_str());
+   592   johnbent         PLFS_EXIT;
+   289   johnbent     }
+   505   johnbent 
+   592   johnbent     // check whether someone seeked backward.  If so, refresh.
+   592   johnbent     // we need to do this because we once saw this:
+   592   johnbent     // opendir, readdir 0, unlink entry E, readdir 0, stat E 
+   592   johnbent     // this caused an unexpected ENOENT bec readdir said E existed but it didn't
+   592   johnbent     if (opendir->last_offset > offset) {
+   706 chuckcranor         mlog(FUSE_DCOMMON, "Rereading dir %s",strPath.c_str());
+   592   johnbent         opendir->last_offset = offset;
+   592   johnbent         opendir->entries.clear();
+   592   johnbent         ret = plfs_readdir(strPath.c_str(),(void*)(&(opendir->entries)));
+   592   johnbent         if (ret!=0) PLFS_EXIT;
+   592   johnbent     }
+   592   johnbent 
+   592   johnbent     // now iterate through for all entries so long as filler has room
+   592   johnbent     // only return entries that weren't previously returned (use offset)
+   592   johnbent     // plfs_readdir used to take a vector so we could use offset as random
+   592   johnbent     // access but w/ multiple backends, it's easy to use a set which 
+   592   johnbent     // automatically collapses redundant entries
+   592   johnbent     set<string>::iterator itr;
+   592   johnbent     int i =0;
+   592   johnbent     for(itr=opendir->entries.begin(); itr!=opendir->entries.end(); itr++,i++) {
+   706 chuckcranor         mlog(FUSE_DCOMMON, "Returning dirent %s", (*itr).c_str());
+   592   johnbent         opendir->last_offset=i;
+   592   johnbent         if ( i >= offset ) {
+   592   johnbent             if ( 0 != filler(buf,(*itr).c_str(),NULL,i+1) ) {
+   706 chuckcranor                 mlog(FUSE_DCOMMON, "%s: filler is full",__FUNCTION__);
+   592   johnbent                 break;
+   289   johnbent             }
+    25   johnbent         }
+   193   johnbent     }
+   193   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+    25   johnbent int Plfs::f_releasedir( const char *path, struct fuse_file_info *fi ) {
+    90   johnbent     PLFS_ENTER;
+   592   johnbent     if (fi->fh) delete (OpenDir*)fi->fh;
+    25   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+    25   johnbent // returns 0 or -errno
+    25   johnbent // O_WRONLY and O_RDWR are handled as a write
+    25   johnbent // O_RDONLY is handled as a read
+    25   johnbent // PLFS is optimized for O_WRONLY and tries to do OK for O_RDONLY
+    25   johnbent // O_RDWR is optimized for writes but the reads might be horrible
+    25   johnbent int Plfs::f_open(const char *path, struct fuse_file_info *fi) {
+    25   johnbent     fi->fh = (uint64_t)NULL;
+    25   johnbent     EXIT_IF_DEBUG;
+    90   johnbent     PLFS_ENTER;
+    31   johnbent     Plfs_fd *pfd = NULL;
+    53   johnbent     bool newly_created = false;
+    53   johnbent 
+    40   johnbent     mode_t mode = getMode( strPath );
+    53   johnbent 
+    53   johnbent     // race condition danger here
+    53   johnbent     // a proc can get the pfd but then 
+    53   johnbent     // before they add themselves too it
+    53   johnbent     // someone else in f_release closes it, sees that its
+    53   johnbent     // empty and trashes it
+    53   johnbent     // then we try to use it here
+    53   johnbent     // so to protect against this, move the mutex to the
+    53   johnbent     // back side of the plfs_open but that limits open
+    53   johnbent     // parallelism
+   235   johnbent     plfs_mutex_lock( &self->fd_mutex, __FUNCTION__ );
+   269   johnbent     string pathHash = pathToHash(strPath , fuse_get_context()->uid, fi->flags);
+   293   johnbent     pfd = findOpenFile(pathHash);
+    53   johnbent     if ( ! pfd ) newly_created = true;
+    53   johnbent 
+    74   johnbent     // every proc that opens a file creates a unique OpenFile but they share
+    74   johnbent     // a Plfs_fd
+    31   johnbent     ret = plfs_open( &pfd, strPath.c_str(), fi->flags, 
+   398   johnbent             fuse_get_context()->pid, mode,NULL );
+    53   johnbent 
+    25   johnbent     if ( ret == 0 ) {
+    53   johnbent         struct OpenFile *of = new OpenFile;
+   113   johnbent         of->pfd   = pfd;
+   113   johnbent         of->pid   = fuse_get_context()->pid;
+   113   johnbent         of->uid   = fuse_get_context()->uid; 
+   113   johnbent         of->gid   = fuse_get_context()->gid; 
+   113   johnbent         of->flags = fi->flags;
+    53   johnbent         fi->fh = (uint64_t)of;
+    53   johnbent         if ( newly_created ) {
+   293   johnbent             addOpenFile(pathHash, of->pid, pfd);
+    53   johnbent         }
+   292   johnbent         if ( fi->flags & O_RDWR ) self->o_rdwrs++;
+    25   johnbent     }
+   706 chuckcranor     //mlog(FUSE_DCOMMON, "%s: %s ref count: %d", __FUNCTION__, 
+   113   johnbent     //        strPath.c_str(), plfs_reference_count(pfd));
+   273   johnbent 
+   273   johnbent     if ( ret == 0 ) {
+   706 chuckcranor         mlog(FUSE_DCOMMON, "%s %s has %d references", __FUNCTION__, path,
+   273   johnbent                 pfd->incrementOpens(0));
+   273   johnbent     }
+   235   johnbent     plfs_mutex_unlock( &self->fd_mutex, __FUNCTION__ );
+    53   johnbent 
+    33   johnbent     // we can safely add more writers to an already open file
+    33   johnbent     // bec FUSE checks f_access before allowing an f_open
+   282   johnbent     if ( ret != 0 ) {
+   282   johnbent         ostringstream oss;
+   282   johnbent         oss << __FUNCTION__ << ": failed open on " << path << ": "
+   282   johnbent             << strerror(-ret) << endl;
+   282   johnbent         plfs_serious_error(oss.str().c_str(),fuse_get_context()->pid);
+   282   johnbent         cerr << "Calling plfs_serious_error" << endl;
+   282   johnbent     }
+    25   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+    25   johnbent // the release happens when all pids on a machine close the file
+    25   johnbent // but it happens multiple times (one for each proc who had it open)
+    25   johnbent // because multiple pids on a machine will open a file, we should
+    25   johnbent // make a structure that is keyed by the logical path which then
+    25   johnbent // contains fds for all the physical paths, then on release, we
+    25   johnbent // clean them all up, 
+    25   johnbent // probably we shouldn't see any IO after the first release
+    25   johnbent // so it should be safe to close all fd's on the first release
+    25   johnbent // and delete it.  But it's safer to wait until the last release
+    53   johnbent // 
+    25   johnbent int Plfs::f_release( const char *path, struct fuse_file_info *fi ) {
+    90   johnbent     PLFS_ENTER; GET_OPEN_FILE;
+    74   johnbent     // there is one 'Plfs_fd *of' shared by multiple procs
+   112   johnbent     // the Plfs_fd *of is removed by plfs_close since plfs_open created it
+    74   johnbent     // each proc has its own 'OpenFile openfile'
+    31   johnbent     if ( of ) {
+    90   johnbent         // this function is called by the root process so in order to set up
+    90   johnbent         // the persona, we need to pull the cached persona info
+    90   johnbent         // we need to set up the persona since closing the file will create
+    90   johnbent         // the metadata dropping and we need it created by the same persona
+    90   johnbent         // who created the container
+    90   johnbent         SET_IDS(    openfile->uid, openfile->gid );
+   176   johnbent         SET_GROUPS( openfile->uid );
+   235   johnbent         plfs_mutex_lock( &self->fd_mutex, __FUNCTION__ );
+   113   johnbent         assert( openfile->flags == fi->flags );
+   717   johnbent         mlog(FUSE_DAPI, "%s: %s ref count: %lu", __FUNCTION__, 
+   717   johnbent             strPath.c_str(), (unsigned long)plfs_reference_count(of));
+   463   johnbent         int remaining = plfs_close(of, openfile->pid, openfile->uid,
+   463   johnbent                 fi->flags ,NULL);
+    42   johnbent         fi->fh = (uint64_t)NULL;
+    53   johnbent         if ( remaining == 0 ) {
+   269   johnbent             string pathHash = pathToHash(strPath,openfile->uid,openfile->flags);
+   706 chuckcranor             mlog(FUSE_DCOMMON, "%s: Removing Open File: %s remaining: %d", 
+   269   johnbent                 __FUNCTION__, pathHash.c_str(), remaining);
+   269   johnbent             removeOpenFile(pathHash,openfile->pid,of);
+   269   johnbent             /*
+   269   johnbent             // we don't need to iterate through all open files here, do we?
+   250    nmtadam             list< struct hash_element > results;
+   250    nmtadam             findAllOpenFiles ( strPath , results);
+   250    nmtadam             while( results.size()!= 0 ) {
+   250    nmtadam                 struct hash_element current;
+   250    nmtadam                 current = results.front();
+   250    nmtadam                 results.pop_front();
+   250    nmtadam             }
+   269   johnbent             */
+    53   johnbent         } else {
+   706 chuckcranor             mlog(FUSE_DCOMMON,
+   706 chuckcranor                 "%s not yet removing open file for %s, pid %u, %d remaining",
+    53   johnbent                 __FUNCTION__, strPath.c_str(), openfile->pid, remaining );
+    53   johnbent         }
+   112   johnbent         delete openfile;
+   113   johnbent         openfile = NULL;
+   235   johnbent         plfs_mutex_unlock( &self->fd_mutex, __FUNCTION__ );
+    25   johnbent     }
+    25   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+   292   johnbent // the fd_mutex should be held when calling this
+   250    nmtadam int Plfs::addOpenFile( string expanded, pid_t pid, Plfs_fd *pfd) {
+   250    nmtadam 
+   114   johnbent     ostringstream oss;
+   114   johnbent     oss << __FUNCTION__ << " adding OpenFile for " <<
+   706 chuckcranor         expanded << " (" << pfd << ") pid " << pid;
+   706 chuckcranor     mlog(FUSE_DCOMMON, "%s", oss.str().c_str() ); 
+   114   johnbent     self->open_files[expanded] = pfd;
+   706 chuckcranor     //mlog(FUSE_DCOMMON, "Current open files: %s",
+   706 chuckcranor     //openFilesToString(false).c_str());
+   114   johnbent     return 0;
+   114   johnbent }
+   114   johnbent 
+   114   johnbent // when this is called we should be in a mutex
+   114   johnbent // this might sometimes fail to remove a file if we did a rename on an open file
+   114   johnbent // because the rename removes the open file and then when the release comes
+   114   johnbent // it has already been removed
+   293   johnbent int Plfs::removeOpenFile(string expanded, pid_t pid, Plfs_fd *pfd) {
+   114   johnbent     ostringstream oss;
+   114   johnbent     int erased = 0;
+   114   johnbent     erased = self->open_files.erase( expanded );
+   114   johnbent     oss << __FUNCTION__ << " removed " << erased << " OpenFile for " <<
+   706 chuckcranor         expanded << " (" << pfd << ") pid " << pid;
+   706 chuckcranor     mlog(FUSE_DCOMMON, "%s",oss.str().c_str());
+   706 chuckcranor     //mlog(FUSE_DCOMMON, "Current open files: %s",
+   706 chuckcranor     //     openFilesToString(false).c_str());
+   114   johnbent     return erased;
+   114   johnbent }
+   114   johnbent 
+    53   johnbent // just look to see if we already have a certain file open
+    25   johnbent // when this is called, we should already be in a mux 
+    53   johnbent Plfs_fd *Plfs::findOpenFile( string expanded ) {
+    53   johnbent     Plfs_fd *pfd  = NULL;
+    53   johnbent     HASH_MAP<string, Plfs_fd *>::iterator itr;
+    53   johnbent     itr = self->open_files.find( expanded );
+    53   johnbent     if ( itr == self->open_files.end() ) {
+   706 chuckcranor         mlog(FUSE_DCOMMON, "No OpenFile found for %s", expanded.c_str() );
+    53   johnbent         pfd = NULL;
+    25   johnbent     } else {
+   113   johnbent         ostringstream oss;
+    53   johnbent         pfd = itr->second;
+   113   johnbent         oss << __FUNCTION__ << " OpenFile " << pfd << " found for " <<
+   706 chuckcranor             expanded.c_str();
+   706 chuckcranor         mlog(FUSE_DCOMMON, "%s", oss.str().c_str() ); 
+    25   johnbent     }
+    53   johnbent     return pfd;
+    25   johnbent }
+    25   johnbent 
+    33   johnbent // look up a mode to pass to plfs_open.  We need to stash it bec FUSE doesn't 
+    33   johnbent // pass mode on open instead it passes it on mknod
+   235   johnbent // we assume this is only called on a container.  might be weird otherwise.
+    25   johnbent mode_t Plfs::getMode( string expanded ) {
+    25   johnbent     mode_t mode;
+    53   johnbent     char *whence;
+    25   johnbent     HASH_MAP<string, mode_t>::iterator itr =
+    25   johnbent             self->known_modes.find( expanded );
+    25   johnbent     if ( itr == self->known_modes.end() ) {
+   706 chuckcranor         mlog(FUSE_DCOMMON, "Pulling mode from Container" );
+   235   johnbent         plfs_mode(expanded.c_str(),&mode);
+    25   johnbent         self->known_modes[expanded] = mode;
+    70   johnbent         whence = (char*)"container";
+    25   johnbent     } else {
+    25   johnbent         mode = itr->second; 
+    70   johnbent         whence = (char*)"stashed value";
+    25   johnbent     }
+   706 chuckcranor     mlog(FUSE_DCOMMON, "%s pulled mode %d from %s", 
+   109   johnbent             __FUNCTION__, mode, whence);
+    25   johnbent     return mode;
+    25   johnbent }
+    25   johnbent 
+    25   johnbent int Plfs::f_write(const char *path, const char *buf, size_t size, off_t offset,
+    25   johnbent 		struct fuse_file_info *fi) 
+    25   johnbent {
+   746   johnbent     // special case the debug files
+   717   johnbent     struct pfuse_debug_driver *dd;
+   706 chuckcranor     if ((dd = get_dbgdrv(path)) != NULL) {
+   706 chuckcranor         if (offset < 0 || offset >= DEBUGMAXOFF || dd->dbgwrite == NULL)
+   706 chuckcranor             return(0);
+   706 chuckcranor         return(dd->dbgwrite(buf, size, offset));
+   706 chuckcranor     }
+   706 chuckcranor 
+    90   johnbent     PLFS_ENTER; GET_OPEN_FILE;
+    33   johnbent     ret = plfs_write( of, buf, size, offset, fuse_get_context()->pid );
+    90   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+   235   johnbent // not sure if this should return 0 on success like most FUSE ops 
+   235   johnbent // or the number of chars placed in buffer like the system call readlink does
+   262   johnbent // I think it should return 0 for success
+    25   johnbent int Plfs::f_readlink (const char *path, char *buf, size_t bufsize) {
+    25   johnbent     PLFS_ENTER;
+   235   johnbent     ret = plfs_readlink(strPath.c_str(),buf,bufsize); 
+   262   johnbent     if ( ret > 0 ) ret = 0;
+    25   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+   437   johnbent // see comments for f_symlink.  handled the same way
+   235   johnbent int Plfs::f_link( const char *path, const char *to ) {
+    25   johnbent     PLFS_ENTER;
+   706 chuckcranor     mlog(FUSE_DAPI, "%s: %s to %s", __FUNCTION__,path,to);
+   235   johnbent     string toPath = expandPath(to);
+   437   johnbent     ret = plfs_link(path,toPath.c_str());
+    25   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+   437   johnbent // I think we don't want to expand the path here, but just want to pass it
+   437   johnbent // unmodified since that's what should be in a symlink.  
+   437   johnbent // we do need to expand the toPath though since that's the PLFS file being
+   437   johnbent // created
+   235   johnbent int Plfs::f_symlink( const char *path, const char *to ) {
+    25   johnbent     PLFS_ENTER;
+   706 chuckcranor     mlog(FUSE_DAPI, "%s: %s to %s", __FUNCTION__,path,to);
+   235   johnbent     string toPath = expandPath(to);
+   437   johnbent     ret = plfs_symlink(path,toPath.c_str());
+    25   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+   439   johnbent // forwards statfs to one of the backends
+   439   johnbent // however, if statfs is defined in a plfsrc, then forward it there
+    25   johnbent int Plfs::f_statfs(const char *path, struct statvfs *stbuf) {
+    25   johnbent     PLFS_ENTER;
+    25   johnbent     // tempting to stick some identifying info in here that we could
+    25   johnbent     // then pull into our test results like a version or some string
+    25   johnbent     // identifying any optimizations we're trying.  but the statvfs struct
+    25   johnbent     // doesn't have anything good.  very sparse.  it does have an f_fsid flag.
+   200   johnbent     errno = 0;
+   439   johnbent 
+   439   johnbent     // problem here is that the statfs_path will be a physical path
+   439   johnbent     // but FUSE only sees logical paths and all the plfs_* routines
+   439   johnbent     // expect logical paths so how do we specify that it's a physical path?
+   439   johnbent     // hmmm, I guess we can call Util:: and bypass plfs_ but that's a bit
+   439   johnbent     // of a kludge since we try to make everything in FUSE go through plfs
+   439   johnbent     if(self->pmnt->statfs) {
+   706 chuckcranor         mlog(FUSE_DCOMMON, "Forwarding statfs to specified path %s",
+   439   johnbent                 self->pmnt->statfs->c_str());
+   439   johnbent         ret = Util::Statvfs(self->pmnt->statfs->c_str(),stbuf);
+   439   johnbent         ret = Util::retValue(ret);  // fix it up on error
+   439   johnbent     } else {
+   439   johnbent         ret = plfs_statvfs(strPath.c_str(), stbuf);
+   439   johnbent     }
+    25   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+    25   johnbent // returns bytes read or -errno
+    25   johnbent int Plfs::f_readn(const char *path, char *buf, size_t size, off_t offset,
+    25   johnbent 		struct fuse_file_info *fi) 
+    25   johnbent {
+   746   johnbent     // special case the debug files
+   717   johnbent     struct pfuse_debug_driver *dd;
+   706 chuckcranor     if ((dd = get_dbgdrv(path)) != NULL) {
+   746   johnbent         if (offset < 0 || offset >= DEBUGMAXOFF || dd->dbgread == NULL) {
+   706 chuckcranor             return(0);
+   746   johnbent         } else {
+   746   johnbent             return(dd->dbgread(buf, size, offset));
+   746   johnbent         }
+    25   johnbent     }
+    25   johnbent 
+    90   johnbent     PLFS_ENTER; GET_OPEN_FILE;
+   112   johnbent     ostringstream os;
+   706 chuckcranor     os << __FUNCTION__ << " reading from " << of;
+   706 chuckcranor     mlog(FUSE_DCOMMON, "%s", os.str().c_str() );
+    31   johnbent     ret = plfs_read( of, buf, size, offset );
+    90   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+   293   johnbent // fd_mutex should be held when this is called
+   293   johnbent string Plfs::openFilesToString(bool verbose) {
+    25   johnbent     ostringstream oss;
+    53   johnbent     size_t readers, writers;
+    53   johnbent     int quant = self->open_files.size();
+    53   johnbent     oss << quant << " OpenFiles" << ( quant ? ": " : "" ) << endl;
+    53   johnbent     HASH_MAP<string, Plfs_fd *>::iterator itr;
+    53   johnbent     for(itr = self->open_files.begin(); itr != self->open_files.end(); itr++){
+   706 chuckcranor         mlog(FUSE_DCOMMON, "%s openFile %s", __FUNCTION__, itr->first.c_str()); 
+   293   johnbent         if ( verbose ) {
+   293   johnbent             plfs_query( itr->second, &writers, &readers );
+   293   johnbent             oss << itr->second->getPath() << ", ";
+   293   johnbent             oss << readers << " readers, "
+   293   johnbent                 << writers << " writers. " << endl;
+   293   johnbent         } else {
+   293   johnbent             oss << itr->first.c_str() << endl;
+   293   johnbent         }
+    25   johnbent     }
+    25   johnbent     return oss.str();
+    25   johnbent }
+    25   johnbent 
+   422   johnbent string Plfs::confToString( PlfsConf *p, PlfsMount *pmnt ) {
+    25   johnbent     ostringstream oss;
+   422   johnbent     oss << "Mount point: "      << pmnt->mnt_pt << endl  
+   196   johnbent         << "Direct IO: "        << p->direct_io << endl
+    77   johnbent         << "Executable bit: "   << ! p->direct_io << endl
+    25   johnbent         << "Backends: "
+    25   johnbent         ;
+    25   johnbent     vector<string>::iterator itr;
+   422   johnbent     for ( itr = pmnt->backends.begin(); itr != pmnt->backends.end(); itr++ ) {
+    25   johnbent         oss << *itr << ",";
+    25   johnbent     }
+   540   johnbent     oss << endl
+   540   johnbent         << "Backend checksum: " << pmnt->checksum << endl
+   540   johnbent         << "Threadpool size: " << p->threadpool_size << endl
+   196   johnbent         << "Max hostdirs per container: " << p->num_hostdirs << endl;
+    25   johnbent     return oss.str();
+    25   johnbent }
+    25   johnbent 
+    25   johnbent // this should be called when an app does a close on a file
+    25   johnbent // 
+    25   johnbent // for RDONLY files, nothing happens here, they should get cleaned
+    25   johnbent // up in the f_release
+    25   johnbent // 
+    25   johnbent // actually, we don't want to close here because sometimes this can
+    25   johnbent // be called before some IO's.  So for safety sake, we should sync
+    25   johnbent // here and do the close in the release
+    25   johnbent int Plfs::f_flush( const char *path, struct fuse_file_info *fi ) {
+    90   johnbent     PLFS_ENTER; GET_OPEN_FILE;
+    31   johnbent     if ( of ) {
+    33   johnbent         ret = plfs_sync( of, fuse_get_context()->pid );
+    25   johnbent     }
+    90   johnbent     PLFS_EXIT;
+    25   johnbent }
+    25   johnbent 
+    25   johnbent // returns 0 or -errno
+   235   johnbent // there's complexity bec we saw bugs here before when we were doing
+   235   johnbent // a cvs co into a plfs mount.  I think the problem was doing a rename
+   235   johnbent // on an open file so that what the complexity is
+   235   johnbent // but the basic flow is easy, the comments just explain the bug we saw before
+   235   johnbent // the basic flow is:
+   235   johnbent // lock the mutex 
+   235   johnbent // call plfs_rename in the library
+   235   johnbent // update the open files 
+   235   johnbent // unlock the mutex
+   235   johnbent // update other cached stuff such as created files and known modes
+   235   johnbent // not actually sure we should maintain those caches though....
+    25   johnbent int Plfs::f_rename( const char *path, const char *to ) {
+    25   johnbent     PLFS_ENTER;
+   235   johnbent     string toPath = expandPath(to);
+    25   johnbent 
+    78   johnbent         // when I do a cvs co plfs, it dies here
+    74   johnbent         // it creates a CVS/Entries.Backup file, then opens it, then
+    74   johnbent         // renames it to CVS/Entries, and then 
+    78   johnbent         // we need to figure out how to do rename on an open file....
+   235   johnbent 
+   114   johnbent         // ok, we remove the openfile at the old path
+   114   johnbent         // this means that when the release tries to remove it, it won't find it
+   114   johnbent         // but that's ok because not finding it doesn't bother the release.
+   114   johnbent         // we need to add it back again as an openFile on the newPath so that
+   114   johnbent         // new opener's can use it.  Otherwise, they'll open the same droppings
+   114   johnbent         // if they're both writing and they'll overwrite each other.
+   114   johnbent         // we could add it as another openFile but that seems confusing and
+   114   johnbent         // prone to failure when some new proc starts using it and it thinks
+   114   johnbent         // it is pointing to the old path.  In any event, 
+   114   johnbent         // Therefore, we also need to teach it that it has
+   114   johnbent         // a new path and hopefully if it opens any new droppings it will do
+   114   johnbent         // so using the new path
+   250    nmtadam         
+   327    nmtadam     // make the rename happen in the mutex so that no-one can start opening
+   327    nmtadam     // this thing until it's done
+   327    nmtadam     plfs_mutex_lock( &self->fd_mutex, __FUNCTION__ );
+   327    nmtadam     list< struct hash_element > results;
+   332    nmtadam 
+   327    nmtadam     // there's something weird on Adam's centos box where it seems to allow
+   327    nmtadam     // users to screw with each other's directories even if they shouldn't
+   327    nmtadam     // since a plfs file is actually a directory, this means that users could
+   327    nmtadam     // rename the plfs file.  Put a check in here to prevent this.  It 
+   327    nmtadam     // shouldn't be necessary we check on most OS's but put this in as a 
+   327    nmtadam     // work-around for weird-ass centos
+   332    nmtadam     //ret = plfs_access(path,W_OK);
+   332    nmtadam 
+   327    nmtadam     if ( ret == 0 ) {
+   447   johnbent         ret = plfs_rename(strPath.c_str(),toPath.c_str());
+   250    nmtadam         // Updated this code to search for all open files because the open
+   250    nmtadam         // files are now cached based on a uid and flags
+   327    nmtadam         if ( ret == 0 ) {
+   327    nmtadam             findAllOpenFiles ( strPath, results );
+   327    nmtadam             while( results.size() != 0 ) {
+   327    nmtadam                 struct hash_element current;
+   327    nmtadam                 current = results.front();
+   327    nmtadam                 results.pop_front();
+   327    nmtadam                 Plfs_fd *pfd;
+   327    nmtadam                 pfd = current.fd;
+   327    nmtadam                 string pathHash = getRenameHash(toPath.c_str(), 
+   327    nmtadam                                     current.path ,strPath); 
+   327    nmtadam                 if ( ret == 0 && pfd ) {
+   327    nmtadam                     pid_t pid = fuse_get_context()->pid;
+   327    nmtadam                     // Extract the uid and flags from the string
+   327    nmtadam                     removeOpenFile(current.path, pid, pfd);
+   327    nmtadam                     addOpenFile(pathHash, pid, pfd);
+   327    nmtadam                     pfd->setPath( toPath ); 
+   706 chuckcranor                     mlog(FUSE_DCOMMON, "Rename open file %s -> %s "
+   706 chuckcranor                          "(hope this works)",
+   706 chuckcranor                                path, to );
+   327    nmtadam                 }
+   327    nmtadam             }
+   250    nmtadam         }
+    53   johnbent     }
+   235   johnbent     plfs_mutex_unlock( &self->fd_mutex, __FUNCTION__ );
+    53   johnbent 
+   235   johnbent     // update some of the caches that we maintain
+    43   johnbent     if ( ret == 0 ) {
+   235   johnbent         plfs_mutex_lock( &self->container_mutex, __FUNCTION__ );
+    90   johnbent         if (self->createdContainers.find(strPath)
+    90   johnbent                 !=self->createdContainers.end()) 
+    90   johnbent         {
+    53   johnbent             self->createdContainers.erase( strPath );
+    90   johnbent             self->createdContainers.insert( toPath );
+    53   johnbent         }
+   235   johnbent         plfs_mutex_unlock( &self->container_mutex, __FUNCTION__ );
+    90   johnbent         if ( self->known_modes.find(strPath) != self->known_modes.end() ) {
+    90   johnbent             self->known_modes[toPath] = self->known_modes[strPath];
+    90   johnbent             self->known_modes.erase(strPath);
+    90   johnbent         }
+    43   johnbent     }
+    90   johnbent 
+    25   johnbent     PLFS_EXIT;
+    25   johnbent }
+   250    nmtadam 
+   250    nmtadam string Plfs::pathToHash ( string expanded , uid_t uid , int flags ) {
+   250    nmtadam     stringstream converter;
+   250    nmtadam     converter << "." << uid << "." << flags;
+   250    nmtadam     expanded.append( converter.str() );
+   250    nmtadam     return expanded; 
+   250    nmtadam } 
+   269   johnbent 
+   250    nmtadam // Pass a pointer to a list so you don't have to copy it 
+   250    nmtadam /*list<struct hash_element >  Plfs::findAllOpenFiles(string expanded) {
+   250    nmtadam     HASH_MAP<string, Plfs_fd *>::iterator searcher;
+   250    nmtadam     list< struct hash_element > results;
+   250    nmtadam     
+   250    nmtadam     struct hash_element current;
+   250    nmtadam     for( searcher = self->open_files.begin() ; searcher != self->open_files.end() ; searcher++)
+   250    nmtadam     {
+   250    nmtadam         if ( !strncmp( expanded.c_str() , searcher->first.c_str() ,
+   250    nmtadam                         expanded.size() ) ) {
+   250    nmtadam             current.path = searcher->first;
+   250    nmtadam             current.fd = searcher->second;
+   250    nmtadam             results.push_back(current);
+   250    nmtadam         }   
+   250    nmtadam     }
+   250    nmtadam     return results;
+   250    nmtadam }
+   250    nmtadam */
+   250    nmtadam void 
+   250    nmtadam Plfs::findAllOpenFiles( string expanded, list<struct hash_element > &results) {
+   250    nmtadam   HASH_MAP<string, Plfs_fd *>::iterator searcher;  
+   250    nmtadam   struct hash_element current;
+   250    nmtadam   for( searcher = self->open_files.begin() ; 
+   250    nmtadam         searcher != self->open_files.end() ; searcher++) {
+   250    nmtadam         if ( !strncmp( expanded.c_str() , searcher->first.c_str() ,
+   250    nmtadam                         expanded.size() ) ) {
+   250    nmtadam             current.path = searcher->first;
+   250    nmtadam             current.fd = searcher->second;
+   250    nmtadam             results.push_back(current);
+   250    nmtadam         }   
+   250    nmtadam     }
+   250    nmtadam }
+   293   johnbent 
+   250    nmtadam // Convert to string using the current filename hash 
+   293   johnbent // oh, it just rips the .uid.mode off and appends them.
+   293   johnbent string Plfs:: getRenameHash(string to, string current, string base) {
+   250    nmtadam     string uid_mode;
+   250    nmtadam     string pathHash;
+   250    nmtadam     
+   293   johnbent     uid_mode = current.substr(base.size() , current.size());
+   293   johnbent     pathHash.append(to);
+   293   johnbent     pathHash.append(uid_mode);
+   250    nmtadam     return pathHash;     
+   250    nmtadam }
+   706 chuckcranor 
+   706 chuckcranor /*
+   706 chuckcranor  * special debug file drivers...
+   706 chuckcranor  */
+   706 chuckcranor 
+   706 chuckcranor #define DEBUGFILESIZE 16384
+   706 chuckcranor #define DEBUGLOGSIZE  4194304
+   706 chuckcranor 
+   706 chuckcranor /**
+   706 chuckcranor  * dbg_sizer: sizer for static debug files.
+   706 chuckcranor  * XXX: this just replicates the old code
+   706 chuckcranor  */
+   717   johnbent static int dbg_sizer(struct pfuse_debug_driver *dd) {
+   706 chuckcranor     if (strcmp(dd->name, "debug") == 0)
+   706 chuckcranor         return(DEBUGFILESIZE);
+   706 chuckcranor     if (strcmp(dd->name, "log") == 0)
+   706 chuckcranor         return(DEBUGLOGSIZE);
+   706 chuckcranor     return(0);
+   706 chuckcranor }
+   706 chuckcranor 
+   706 chuckcranor /**
+   706 chuckcranor  * dbg_debug_read: read the debug/compile info
+   706 chuckcranor  */
+   706 chuckcranor int Plfs::dbg_debug_read(char *buf, size_t size, off_t offset) {
+   706 chuckcranor     size_t validsize;
+   706 chuckcranor     off_t maxsize = DEBUGFILESIZE;
+   706 chuckcranor 
+   706 chuckcranor     /* make sure we don't allow them to read more than we have */
+   706 chuckcranor     if ( off_t(size + offset) > maxsize ) {
+   706 chuckcranor         if ( maxsize > offset ) {
+   706 chuckcranor             validsize = maxsize - offset;
+   706 chuckcranor         } else {
+   706 chuckcranor             validsize = 0;
+   706 chuckcranor         }
+   706 chuckcranor     } else {
+   706 chuckcranor         validsize = size;
+   706 chuckcranor     }
+   706 chuckcranor 
+   706 chuckcranor     char *tmpbuf = new char[maxsize];
+   706 chuckcranor     int  ret;
+   706 chuckcranor     memset( buf, 0, size );
+   706 chuckcranor     memset( tmpbuf, 0, maxsize );
+   706 chuckcranor 
+   706 chuckcranor     string stats;
+   706 chuckcranor     plfs_stats( &stats );
+   706 chuckcranor     // openFilesToString must be called from w/in a mutex
+   706 chuckcranor     plfs_mutex_lock( &self->fd_mutex, __FUNCTION__ ); 
+   706 chuckcranor     ret = snprintf( tmpbuf, DEBUGFILESIZE, 
+   706 chuckcranor                     "Version %s (SVN %s) (DATA %s) (LIB %s)\n"
+   706 chuckcranor                     "Build date: %s\n"
+   706 chuckcranor                     "Hostname %s, %.2f Uptime\n"
+   706 chuckcranor                     "%s"
+   706 chuckcranor                     "%s"
+   706 chuckcranor                     "%.2f MakeContainerTime\n"
+   706 chuckcranor                     "%d WTFs\n"
+   706 chuckcranor                     "%d ExtraAttempts\n"
+   706 chuckcranor                     "%d Opens with O_RDWR\n"
+   706 chuckcranor                     "%s",
+   706 chuckcranor                     STR(TAG_VERSION), 
+   706 chuckcranor                     STR(SVN_VERSION), 
+   706 chuckcranor                     STR(DATA_VERSION),
+   706 chuckcranor                     plfs_version(),
+   706 chuckcranor                     plfs_buildtime(),
+   706 chuckcranor                     self->myhost.c_str(), 
+   706 chuckcranor                     plfs_wtime() - self->begin_time,
+   706 chuckcranor                     confToString(self->pconf,self->pmnt).c_str(),
+   706 chuckcranor                     stats.c_str(),
+   706 chuckcranor                     self->make_container_time,
+   706 chuckcranor                     self->wtfs,
+   706 chuckcranor                     self->extra_attempts,
+   706 chuckcranor                     self->o_rdwrs,
+   706 chuckcranor                     openFilesToString(true).c_str() );
+   706 chuckcranor     plfs_mutex_unlock( &self->fd_mutex, __FUNCTION__ );
+   706 chuckcranor 
+   706 chuckcranor     if ( ret >= maxsize ) {
+   706 chuckcranor         LogMessage lm;
+   706 chuckcranor         lm << "WARNING:  DEBUGFILESIZE is too small" << endl;
+   706 chuckcranor         lm.flush();
+   706 chuckcranor     }
+   706 chuckcranor 
+   706 chuckcranor     // this next line is nice, it makes the reading of the debug files
+   706 chuckcranor     // really fast since they only read the size of the file
+   706 chuckcranor     // but for some reason it crashes when the size > 4096....
+   706 chuckcranor     //validsize = strlen( &(tmpbuf[offset]) );
+   706 chuckcranor 
+   706 chuckcranor     memcpy( buf, (const void*)&(tmpbuf[offset]), validsize );
+   706 chuckcranor     delete []tmpbuf;
+   706 chuckcranor     tmpbuf = NULL;
+   706 chuckcranor     return(validsize);
+   706 chuckcranor 
+   706 chuckcranor }
+   706 chuckcranor 
+   706 chuckcranor /**
+   706 chuckcranor  * dbg_log_read: read the debug log
+   706 chuckcranor  */
+   706 chuckcranor static int dbg_log_read(char *buf, size_t size, off_t offset) {
+   706 chuckcranor     size_t validsize;
+   706 chuckcranor     off_t maxsize = DEBUGLOGSIZE;
+   706 chuckcranor 
+   706 chuckcranor     /* make sure we don't allow them to read more than we have */
+   706 chuckcranor     if ( off_t(size + offset) > maxsize ) {
+   706 chuckcranor         if ( maxsize > offset ) {
+   706 chuckcranor             validsize = maxsize - offset;
+   706 chuckcranor         } else {
+   706 chuckcranor             validsize = 0;
+   706 chuckcranor         }
+   706 chuckcranor     } else {
+   706 chuckcranor         validsize = size;
+   706 chuckcranor     }
+   706 chuckcranor 
+   706 chuckcranor     char *tmpbuf = new char[maxsize]; /* XXX: malloc's 4MB here */
+   706 chuckcranor     int  ret;
+   706 chuckcranor     memset( buf, 0, size );
+   706 chuckcranor     memset( tmpbuf, 0, maxsize );
+   706 chuckcranor     
+   706 chuckcranor     ret = snprintf(tmpbuf, maxsize, "%s", LogMessage::Dump().c_str());
+   706 chuckcranor 
+   706 chuckcranor     if ( ret >= maxsize ) {
+   706 chuckcranor         LogMessage lm;
+   706 chuckcranor         lm << "WARNING:  DEBUGFILESIZE is too small" << endl;
+   706 chuckcranor         lm.flush();
+   706 chuckcranor     }
+   706 chuckcranor     // this next line is nice, it makes the reading of the debug files
+   706 chuckcranor     // really fast since they only read the size of the file
+   706 chuckcranor     // but for some reason it crashes when the size > 4096....
+   706 chuckcranor     //validsize = strlen( &(tmpbuf[offset]) );
+   706 chuckcranor 
+   706 chuckcranor     memcpy( buf, (const void*)&(tmpbuf[offset]), validsize );
+   706 chuckcranor     delete []tmpbuf;
+   706 chuckcranor     tmpbuf = NULL;
+   706 chuckcranor     return validsize; 
+   706 chuckcranor }
+   706 chuckcranor 
+   706 chuckcranor /**
+   706 chuckcranor  * dbg_msgbufsz: get the message buffer size
+   706 chuckcranor  */
+   717   johnbent static int dbg_msgbufsz(struct pfuse_debug_driver *dd) {
+   706 chuckcranor     return(mlog_mbcount());
+   706 chuckcranor }
+   706 chuckcranor 
+   706 chuckcranor /**
+   706 chuckcranor  * dbg_msgbuf_read: read the message buffer
+   706 chuckcranor  */
+   706 chuckcranor static int dbg_msgbuf_read(char *buf, size_t size, off_t offset) {
+   706 chuckcranor     int rv;
+   706 chuckcranor 
+   706 chuckcranor     /*
+   706 chuckcranor      * we already used DEBUGMAXOFF to make sure the 64 off_t offset isn't
+   706 chuckcranor      * going to wrap the offset arg to mlog
+   706 chuckcranor      */
+   706 chuckcranor     rv = mlog_mbcopy(buf, offset, size);
+   706 chuckcranor     if (rv < 0)
+   706 chuckcranor         return(0);    /* just make errors be the same as EOF */
+   706 chuckcranor     return(rv);
+   706 chuckcranor }
+   706 chuckcranor 
+   706 chuckcranor /**
+   706 chuckcranor  * dbg_mlogsize: get the size of the mlog mask info...
+   706 chuckcranor  */
+   717   johnbent static int dbg_mlogsize(struct pfuse_debug_driver *dd) {
+   706 chuckcranor     int rv;
+   706 chuckcranor 
+   706 chuckcranor     rv = mlog_getmasks(NULL, 0, 0, 1);
+   706 chuckcranor     return(rv);
+   706 chuckcranor }
+   706 chuckcranor 
+   706 chuckcranor /**
+   706 chuckcranor  * dbg_mlogmask_read: read the current mlog mask...
+   706 chuckcranor  */
+   706 chuckcranor static int dbg_mlogmask_read(char *buf, size_t size, off_t offset) {
+   706 chuckcranor     int rv;
+   706 chuckcranor 
+   706 chuckcranor     rv = mlog_getmasks(buf, offset, size, 1);
+   706 chuckcranor     return(rv);
+   706 chuckcranor }
+   706 chuckcranor 
+   706 chuckcranor /**
+   706 chuckcranor  * dbg_mlogmask_write: change the current mlog mask...
+   706 chuckcranor  */
+   706 chuckcranor static int dbg_mlogmask_write(const char *buf, size_t size, off_t offset) {
+   735 chuckcranor     mlog_setmasks((char *)buf, size);
+   706 chuckcranor     return(size);
+   706 chuckcranor }

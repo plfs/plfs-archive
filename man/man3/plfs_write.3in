@@ -1,0 +1,42 @@
+#COPYRIGHT#
+.TH plfs_write 3 12/3/2010 "#PACKAGE_STRING#" 
+.SH NAME
+plfs_write
+.SH SYNTAX
+#include <plfs.h>
+.PP
+ssize_t plfs_write( Plfs_fd *, const char *, size_t, off_t, pid_t );
+
+.SH DESCRIPTION
+Write to a file descriptor.  See 
+.I write(2)
+for more information.
+Note this function is thread-safe when multiple threads are sharing the same
+file handle.
+
+.SH INPUT PARAMETERS
+.TP 1i
+Plfs_fd
+the file handle returned from plfs_open
+.TP 1i
+char
+what to write
+.TP 1i
+size_t
+size of what to write
+.TP 1i
+off_t
+Offset to start writing
+.TP 1i
+pid_t
+pid of processr to write
+
+.SH RETURN VALUES
+Returns the number of bytes or -errno
+
+.SH AUTHORS
+#AUTHORS#
+
+.SH SEE ALSO
+#SEEALSO3#
+
