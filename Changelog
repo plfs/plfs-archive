@@ -1,0 +1,521 @@
+~~~ Version 2.2.1
+* Fixed an issue in ad_plfs/ad_plfs_fcntl.c where a non-collective call to
+MPI_File_get_size() would hang and could crash on a subsequent close call from
+another MPI rank.
+
+~~~ Version 2.2
+* Error Copying Large File Merges Contiguous Index Entries
+Tickets #7 & #57: This problem was noticed copying a ~340 GB restart dump file
+from a non-PLFS file system to a PLFS file system. It resulted in an error
+exit code 134 opening the file to read. This was because the PLFS index file
+was larger than the memory available to hold it. There was an outstanding
+ticket (#7) to merge contiguous index entries for scalability. This was the
+answer to this problem. An index compression algorithm was implemented so that
+contiguous index entries are merged by O(1K). The compression factor can be
+changed as files get orders of magnitude larger.
+
+* Fixed Misleading Variable Names in WriteFile.cpp
+Ticket #19: PLFS has the concept of logical and physical files. Some of the
+variables in WriteFile.cpp were misleading about what was logical and what was
+physical. This made the code confusing to developers. The merge from EMC
+engineering that added a LogicalFD class and moved all the code into
+ContainerFD and added FlatFileFD cleaned all this up. Now only the expandPath
+code ever sees a logical path. All the internal container and flatfile code
+and index code (which is part of container) see only physical paths.
+
+* PLFS Tools Indicate Version
+Tickets #28 & #42: There are a variety of utilities that come with PLFS. Each
+now takes a "-version" flag that will return the version of PLFS with
+which they were distributed. The PLFS library also has a function that returns
+the version for applications that use the PLFS API directly.
+
+* plfs_query Made More User-Friendly
+Tickets #32, #52, & #55: This utility is intended primarily for system
+administration and PLFS development personnel. It enables one to learn more
+about the backend files that comprise a PLFS file or figure out to which PLFS
+file one of the PLFS mount point backend files belongs.
+
+* Fixed Code to Eliminate Comparison Warnings
+Ticket #37: There were several warnings about comparisons involving signed and
+unsigned values. Many of them were comparing to see if an unsigned integer was
+less than zero (impossible). These were all fixed.
+
+* Include Directive in PLFSRC Resulted in Default Values Being Used
+Tickets #41 & #44: PLFS verision 2.1 introduced the ability to include files
+as part of the PLFSRC file. A bug that reset required parameters to default
+values every time a new file that was included was parsed was fixed. This was
+most noticeable in that it forced include files to be put in a certain order
+or values, specifically num_hostdirs, were changed back to incorrect default
+values. The PLFSRC file parser now expands all include files and ensures that
+resulting PLFSRC file, as a whole, is correct.
+
+* plfs_check_config Makes Non-Existent Directories
+Ticket #43: This utility is intended primarily for system administration and
+PLFS development personnel. It enables one to check if the PLFS configuration
+defined in the PLFSRC file is valid. The plfs_check_config utility will tell
+the user when backend directories don't exist for a mount point. Using the
+"-mkdir" switch will create those backends that don't exist.
+
+* Race Condition for N-1 I/O through FUSE
+Ticket #45: N-1 I/O through FUSE jobs would fail because the file could not be
+found. This was a race condition between creation and when the file was
+accessed. All tests that reproduced this error now work correctly. The PLFS
+team does not recommend this I/O pattern through FUSE because it is a slow
+pattern with additional overhead by FUSE. However, it now works for
+completeness.
+
+* Rewinddir Fixed
+Ticket #47: The POSIX call, rewinddir, could not be used on PLFS. Instead, the
+user had to closedir then opendir again. It turned out to be a C macro that
+was the only line in an "if" statement's "then" clause. No
+curly braces, {}, were used because it was one line. However, the macro
+expanded to two statements and so the second statement was always executed,
+even when it should not have been executed. We've changed our coding
+standard to ask developers to always use curly braces, {}, irrespective of the
+number of statements that follow (for loops, ifs, etc.).
+
+* ADIO Interface Patched for Cray
+Tickets #48 & 56: Fixed the ADIO interface and add some patches so that it can
+be compiled out of the PLFS repository for use with Cray's xt-mpich2 MPI
+without Cray having to make changes. Furthermore, all functions have either
+"plfs" or "adplfs_", depending on where they are defined, prepended to them so
+that they don't conflict with other libraries.
+
+* Better Logging Capability Implemented
+Ticket #53: PLFS used a custom plfs_debug logging capability. This was
+transitioned to a more flexible one based on "mlog". Information on how to
+configure the mlog-based logging is in README.mlog.
+
+* plfs_init Ensures "init" Routines Called One Time
+Ticket #59: There were several things that happened when PLFS gets
+initialized. For a while some things were getting done more than one time and
+that caused problems. The plfs_init routine has been fixed so that all the
+initializations are done one time and there are no unintended side-effects to
+multiple initializations.
+
+* Error in ANL Test noncontig.c
+Ticket #60: This bug was caused due to opening the file in Read-Write mode w/
+truncate. There was a bug with trunc of an open file. Initially the bug was
+that metadata droppings wouldn't rename properly, but this unveiled a separate
+bug where physical offsets wouldn't get correctly updated. These are both
+fixed. The PLFS team recommends against using O_RDWR. Please use O_RDONLY or
+O_WRONLY. There are performance penalties for using O_RDWR.
+
+* "Flat File" Mode for Better N-N Workload Performance
+Ticket #64: The "Flat File" concept was developed and implemented for the N-N
+workload. Any one file is written contiguously to a PLFS backend. Multiple
+files can be written concurrently when a PLFS mount point has multiple
+backends. This provides parallelism that is transparent to the user. There
+are no indexes, containers, metalinks, etc. Thus, the PLFS overhead of
+turning the N-1 pattern into N-N is eliminated. A mount point cannot support
+both "Flat File" and "Container" mode. The same backend directory
+specification can't be used in both "Flat File" and "Container" mode. A site
+must handle this administratively so that the mount points are properly
+declared to meet these criteria.
+
+* Truncating an Open File Doesn't Work
+Ticket #66: The metadata for a file that was truncated wasn't being
+updated. So, the file had the new contents, but the old length. That made a
+user of the file get the wrong size for the file and use it incorrectly. All
+metadata is properly updated now so that the size of the file is correct
+after it is truncated.
+
+* PLFS Build within a PLFS Mount Point
+Ticket #77: There was an error in the "./configure" script run that
+indicated a problem building PLFS within a PLFS mount point managed by PLFS
+2.2rc2. A metalink was not resolving to the correct physical location. This
+bug was fixed and PLFS can now be correctly configured and built within a
+PLFS mount point.
+
+* Overwriting N-1 File with Less Data Shows Wrong Size
+Ticket #78: When you overwrite a N-1 PLFS file with less data than it
+originally had, it does not show the correct size. However, if you write it
+with more data, it does show the correct size. There was an inconsistency in
+how the metadata information was maintained. It was fixed and PLFS now
+reports the correct file size in all cases.
+
+~~~ Version 2.1
+* Added include directive in plfsrc files. This way rc files can be modular
+and combined. (Trac ticket #26)
+
+* Fixed corruption of backends when removing a non-empty directory; symptom
+was 'No such file or directory' from ls output:
+ct-fe1 : pwd /plfs/scratch3/afn
+ct-fe1 : ls -als
+ls: cannot access blah: No such file or directory
+total 32
+16 drwxr-xr-x 2 afn eapdev 4096 Sep 10 01:04 .
+16 drwxr-xr-x 11 root root 4096 Sep 6 18:08 ..
+
+    ? ?????????? ? ? ? ? ? blah
+
+(Trac ticket #30)
+
+* Fixed rename through the FUSE interface. Adding multiple backends in 2.0
+broke this functionality. (Trac ticket #17)
+
+* added the sweet-ass FileOp.* classes
+
+* updated chown/chmod to work w/ shadow containers
+
+* fixed race condition bug in shadow subdirs being linked into canonical
+
+* made tools like plfs_recover a bit more user friendly.  the plfs lib
+used to only work if you passed full logical paths which meant if your cwd
+was in a plfs mount point, it wouldn't work with relative paths.  Now it
+does (but it does print a warning message in this case which might be spammed
+a bit (ticket 43522)
+
+* fixed bug with opening non-existent files for read through ADIO.  also but
+where you could turn a file into a directory by writing to it.  (ticket 41436)
+
+* fixed off-by-one error where subdirs were created btwn 1 and 
+plfsrc:num_hostdirs but adio assumed they were created btwn 0 and 
+plfsrc:num_hostdirs - 1.  Now both count from 0 like computers should.
+(ticket 42896)
+
+* changed hash by path to hash by filename.  No compatible with 2.0.1.  But 
+plfs_recover can be used to fix this.  This was necessary bec hash by path
+would orphan children when parent directories were renamed. 
+
+* Now 'plfs:' prefix can be passed to all plfs functions.
+It is used to direct MPIIO to use plfs and MPIIO in that case strips it
+off.  But users might get used to using it so if they ever do use it, then
+it will work.  Brett or someone commented that this might help prevent
+confusion so give it a try.  I hope it doesn't add a lot of overhead.  It's
+just one extra strncmp in the normal case where prefix isn't present 
+(ticket 41492)  
+
+* put better info (job size, BW) into the global_summary_dir droppings
+
+* added tools/plfs_query which is just a tool for developers.
+
+* missing plfsrc was assert(0).  Now it's a bit more elegant (ticket 40866)  
+
+* added tools/plfs_version which queries all plfs mountpoints and reports
+their versions.  It also digs into a container and reports the version that
+created a particular plfs file if a target is passed on the command line
+
+* Fixed the bug where multiple slashes (e.g. /mnt///plfs) were not working
+in the ADIO path.  They were fine in the FUSE path because FUSE cleans up
+paths for us but in the ADIO path, they were failing because we were just
+using strcmp to test the path against the possible mount points.  Now we
+tokenize and compare each token one by one.  Extra dots in a path 
+(e.g. /mnt/./plfs) still won't work in ADIO.
+
+* Added README.developer
+
+* added tools/plfs_recover which is designed for the case where a user
+modified the plfsrc to change the set of backends for an existing mount point.
+They shouldn't ever do this!  But if they do, what will happen is that they
+will see their file on a readdir() but on a stat() they'll either get ENOENT
+because there is nothing at the new canonical location, or they'll see a
+shadow container which looks like a directory to them.  So this function makes
+it so that a plfs file that had a different previous canonical location is now
+recovered to the new canonical location.  It also works on directories.  It
+also works across file systems (i.e. it doesn't use rename).
+
+~~~ Version 2.0.1
+* Reduced container overhead by 4 files and 2 directories: combined access
+and creator, removed version dir and combined all 3 version files into one,
+combined openhosts and meta dir
+* Fix bug in bitmap in ad_plfs_open where some compilers don't correctly 
+do bit's.  Now we do bitmaps ourselves instead of relying on the compiler.
+
+~~~ Version 2.0
+* Got the distributed metadata hashing working.  Removed map from plfsrc
+
+~~~ Version 1.1.9
+* got the addMeta to drop a better summary file in global_summary_dir
+* added parallel index read for read open() through ADIO.  This avoids
+the horrible N^2 index read problem that we encounter through FUSE.
+We might eventually need to figure out how to address this in FUSE, but
+for the time being, our current usage model only does parallel IO through
+ADIO so this is sufficient.  Rank 0 reads the subdirs, and farms them
+out to subdir leaders.  Each of those reads the subdirs, and farms out 
+the individual index files to their subdir workers.  Then all the 
+individual index files are read in parallel, compressed up through
+subdir leaders, compressed again to rank 0 who then broadcasts it out
+to all.  This removes ALL redundant activity at the file system by
+transferring a bit more work to the much faster interconnect network.
+* improved the documentation a bit about building plfs-patched MPI's 
+* automated the patch generation for one of our two patches
+* removed a few deprecated calls deep within the Index class (startBuffering)
+
+~~~ Version 1.1.8
+* Fixed the getattr bug (we were just getting the attr from the openfile
+handle and not getting it from the Container as well).  This made the size
+reasonable but the permissions/ownership/everthing else were garbage).
+This also required a bit of smarts.  This was really slowing things down
+in lanl's fs_test program which does a file stat before the close and this
+was making rank 0 descend the entire container structure and build an index
+in order to figure out the size.  Now we added a lazy flag and ad_plfs_fcntl
+passes the lazy flag and it gets the size from the open file handle (this
+won't be perfectly accurate but it will show incremental progress and won't
+be expensive to query).
+* fixed ADIO parse conf error.  Now a good error is reported when the 
+conf file is bad or the file path is bad.
+* added global_summary_dir to the plfsrc
+* fixed tools/plfs_flatten_index which broke due to the stop_buffering
+thing we put into the Index to stop buffering when memory is exhausted.
+the buffering is so everyone retains their write index in memory to do
+the flatten on close in ADIO
+
+~~~ Version 1.1.7
+Fixed a bug in rename.
+
+~~~ Version 1.1.6
+Added support for a statfs override in the plfsrc file 
+in response to ticket 35609.
+
+~~~ Version 1.1.5
+Bug fix for symbolic links.  I swear this is the second time I fixed this bug
+
+~~~ Version 1.1.4
+Bug fix in the multiple mount point parsing (unitialized string pointer)
+
+~~~ Version 1.1.3
+Added the multiple mount point parsing in plfsrc
+
+~~~ Version 1.1.2
+Index flattening in ADIO close for write
+
+~~~ Version 1.1.1
+Index broadcast in ADIO open for read
+
+~~~ Version 1.0.0.0pre.0.C
+
+No new features or performance engineering.  Just bug fixes.
+All the bug fixes we've made since the last release:
+
+31207 unlink non-atomic right now resolved  plfs  adamm 0
+johnbent@lanl.gov 2 weeks ago   8 days ago  0
+- We now rename the container to a hidden path before unlinking since
+the recursive unlink over a container is not atomic.
+
+31236 reproducible rename bug resolved  plfs  Nobody  0
+johnbent@lanl.gov 2 weeks ago   2 weeks ago 0
+- Simple bug in rename.  PLFS has to remove a container in the destination
+spot before doing a rename since the rename system call can clobber an
+existing file but not an existing directory.  So if the user wants to rename
+over an existing PLFS file, we have to remove the container first.  We had
+a bug where we were removing the src instead of the dest.
+
+31253 plfsrc improvement  resolved  plfs  Nobody  0
+adamm@lanl.gov  2 weeks ago   8 days ago  0
+- Make it so that if there is no map defined in the plfsrc file, it 
+defaults to:
+map MNT:BACK
+
+31346 Open files on rename  resolved  plfs  johnbent  0
+adamm@lanl.gov  2 weeks ago 2 weeks ago 8 days ago  0
+- The problem was that the rename was creating an open file in the open_files
+cache with the relative name but the open_files cache should be for absolute
+names.  Then when the remove file was asking the open_files cache to remove it,
+it wasn't found (i.e. absolute != relative).  So now rename correctly inserts
+the absolute path into the open_files cache.
+
+31348 symlink not working resolved  plfs  Nobody  0
+johnbent@lanl.gov 2 weeks ago   2 weeks ago 0
+- We now handle sym links correctly.  We just stash the logical front-end path
+into the backend symlink.  Then it just works.  On the plfs_getattr though, we
+now have to do two stats:  one of the entry to see if it's a symlink, ENONENT,
+a file, or a directory.  If it's a directory, we then have to check for the
+access file.
+
+31367 weird bug with relative paths in f_symlink (FUSE problem?)  resolved  plfs  Nobody  0
+johnbent@lanl.gov 2 weeks ago   9 days ago  0
+- This was nothing.  I had forgotten that symlinks can actually be relative.
+
+31375 can't remove a read-only file resolved  plfs  Nobody  0
+johnbent@lanl.gov 13 days ago   9 days ago  0
+- fixed this by making dirMode() always make files owner-writable because
+a file can only be deleted in the parent dir is writable. this means we
+can only remove a container if the top-level dir is writable. this
+means that a user can't protect file from themselves writing it. we can
+live with that.
+
+31421 svn co times out  resolved  plfs  Nobody  0
+adamm@lanl.gov  9 days ago    40 hours ago  0
+- This was a problem with O_RDWR files.  We started creating the index on opens
+for reads to check for permissions problems.  However, for O_RDONLY, we can
+cache this index, but not for O_RDWR.  We were however incorrectly caching it
+for O_RDWR and this was causing problems when reads wouldn't get newly written
+data.
+
+31424 weird issue with using an executable made in a plfs mountpoint on centos  resolved  plfs  samuel  0
+adamm@lanl.gov  9 days ago  9 days ago  8 days ago  0
+- Something weird where we built on centos: 
+We build plfs itself in a plfs mount point. We then try to run that
+plfs executable and get this error:
+cannot restore segment prot after reloc: Permission denied
+we then do this:
+/usr/sbin/setenforce 0
+And it works.  I think this is not a big deal, we know a workaround, and 
+it might actually work better on CentOS since we fixed some other bugs that
+were causing build issues on other distributions.  So this might be fixed now
+and if not, there's an easy workaround.
+
+31427 can't turn off debugging info resolved  plfs  johnbent  0
+adamm@lanl.gov  9 days ago    8 days ago  0
+- Silly issues with setting DEFINES in the configuration code.
+
+31587 umask breaking our 777 dropping thing resolved  plfs  Nobody  0
+johnbent@lanl.gov 3 days ago    3 days ago  0
+- We need to set droppings to 777 so that they can also be modified.  Otherwise,
+some other user can write to a file and create droppings and then the original
+owner can't remove the file.  But the umask was sometimes getting applied as
+well and the droppings weren't always 777.  So now we set the umask to 0 in 
+WriteFile::openFile (and then restore it).
+
+31616 truncate bug  resolved  plfs  Nobody  0
+johnbent@lanl.gov 3 days ago    40 hours ago  0
+- We haven't seen this in a long time.  We think it got magically fixed by some
+other bug fixes.
+
+31639 rmdir error seen on cuda  resolved  plfs  Nobody  0
+johnbent@lanl.gov 2 days ago    47 hours ago  0
+- This was strange and annoying since it was old code that had never had
+problems before on other systems.  But then something about FUSE on cuda was
+different.The problem was that on opendir, we were doing the actual readdir and
+caching it.  Then on readdir, we'd return the cached dirents.  But what was
+happening was:
+
+opendir
+readdir from offset 0 to end
+unlink entry
+readdir from offset 0 to end
+stat entry
+ENOENT
+
+So now we remove the dirents after we do a complete readdir to end. Then if a
+new readdir comes in, we refetch the dirents. Therefore, we get the newly
+revised set of dirents following the unlink so we don't return a deleted entry
+on the readdir.
+
+31656 permission error on open  resolved  plfs  Nobody  0
+johnbent@lanl.gov 2 days ago    22 hours ago  0
+- This was a long weird one but the resolution was that Gary had code that
+was calling open with O_CREAT but no mode and it was resulting in very weird
+permissions.  This is fine and that's what happens on other file systems is that
+the file gets created with weird permission bits.  But PLFS was failing to 
+create the file bec it was putting the weird permission bits on the container 
+and was then unable to create the droppings.  We just weren't adding S_IRUSR in
+the dirMode() call.
+
+31704 rename of an open file causes segfault on next read of .plfsdebug resolved  plfs  Nobody  0
+johnbent@lanl.gov 42 hours ago    40 hours ago  0
+- This was related to the other rename of an open file.  The rename was 
+removing the plfs fd but not removing the entry in the open_files cache.  Then
+when we iterated down it, we dereferenced a dangling pointer.  The fix was
+making sure that we keep the set of open files consistent with the open_files
+cache.  We screwed this up by inserting a relative path and then trying to 
+remove an absolute one.
+
+31720 can't build plfs in plfs johnbent@lanl.gov 40 hours ago    14 hours ago  0
+- This is fixed now. The problem was that truncate wasn't cleaning up meta
+droppings so the stat was wrong and reads that pre-allocated a buffer
+according to the stat were finding garbage in the buffer.  It works now for
+truncates to 0 bec it just unlinks all the metadata droppings. However, I
+wonder if on this case, we should probably set the mtime of the access file.
+It doesn't yet work for truncates to the middle of the file. For these, we have
+to selectively unlink/modify metadata droppings.
+
+~~~ Version 1.0pre.0 
+
+1) Problems with building the PLFS SC09 paper.  Problems are in data/summary
+directory.  When make does ./get_data > data, it was failing due to a bad
+reference count because we were incrementing the writers when a child came
+in and used the parent's fd.  Then when the file was closed, it asserted since
+the reference count was still 1.  So now we don't increment the writers for
+children but now we're still seeing this other strange behavior:
+jvpn-132-65:/tmp/plfs_mnt/SC09/data/summary>./get_data >! data
+cat: stdout: Result too large
+
+2) plfs_read is now multi-threaded when a logical read spans multiple physical
+data chunks.  In addition, if these chunks need to be opened that is done in
+the threads as well so we parallelize both the opens and the reads
+
+3) Container::populateIndex is now multi-threaded when the container has
+more than one index file.  This means of course that overlapped writes are
+now non-deterministically handled in addition to being undefined as they
+were previously.
+
+4) Moved the mapping from a logical file to a physical path into the plfs
+library and out of fuse.  The mapping consults a plfsrc file in order to
+know how to distribute users across multiple backends.
+
+~~~ Version 0.1.6
+
+1) Gary found a bug in the old version running on cuda.lanl.gov.  I tried to 
+reproduce it but found it was no longer in 0.1.5.  The test was just doing
+a bunch of dd's with increasing offsets and then reading from another node.
+Just sure what was causing that bug.  Didn't go back and debug old versions.
+But while investigating that bug, I found another bug that was caused when
+dd would truncate a file and the index file trunctated would be truncated 
+at the first entry and then would be empty.  But I was assuming that it 
+wasn't empty so I was checking the entry before the truncate point to see
+if it needed to be partially truncated.  But when there was no entry, then
+this was tromping memory.
+
+~~~ Version 0.1.5
+
+1) Fixed a bug where temp dirs used to attempt to create the container were
+not being deleted when some other node created the container first.  The 
+problem was that we changed from SUID to accessfile to identify a container
+and we weren't removing the accessfile in the temporary container before
+trying to unlink the temporary container.
+
+2) Added a container/version/$(TAG_VERSION) dropping so in the future we can
+make sure to be backward compatible.
+
+~~~ Version 0.1.5
+
+1) Changed the behavior of truncate to not remove droppings but just to truncate
+them.  This was needed because we discovered that if one proc already has open
+handles to droppings, another can do a truncate, and then those droppings 
+disappear when the handles are closed.  This was discovered using the qio
+tests which don't do barriers after open and closes.
+
+2) Fixed reference counting bugs in the Plfs_fd structure.  Again this was 
+discovered due to the lack of barriers in the qio tests.  When we had 
+simultaneous readers and writers in a Plfs_fd structure, some of the closes
+were screwing up the reference counting, and other thread's Plfs_fd structures
+were being removed out from under them.
+
+3) cvs co was causing problems because it was renaming open files.  I thought
+I had fixed that before but it cropped up again.  Now in the rename, when we
+are renaming an open file, we remove the old open file, we change it's 
+internal names, and we add it back again as a new open file.  There's a bunch
+of comments in plfs_fuse.cpp:f_rename about this as well.
+
+4) Fixed a bug that was caused by layering PLFS's (e.g. running PLFS-MPI onto
+a PLFS-MNT) which was causing this problem:
+	a) the app creates file 'foo'
+	b) PLFS-MPI does mkdir 'foo' on PLFS-MNT
+	c) PLFS-MNT does mkdir 'foo' on PLFS-BACK
+	d) PLFS-MPI touches 'foo/access' on PLFS-MNT
+	e) PLFS-MNT does mkdir 'foo/access' on PLFS-BACK
+	f) PLFS-MPI tries to access directory 'foo'
+	g) PLFS-MNT thinks 'foo' is a container since it has an access entry
+	h) PLFS-MPI gets confused bec what was a directory is now a file
+Also, this revealed a bug where PLFS library thought that mmap returned NULL
+on error, but really it returns MAP_FAIL, so PLFS library didn't notice when
+mmap failed and this caused a segfault.  To fix this, the check for the access
+file checks both existence and whether it is a file.  Now when the PLFS-MPI
+does a touch of 'foo/access,' the PLFS-MNT makes a 'foo/access' directory, so 
+when PLFS-MPI looks at 'foo,' PLFS-MNT doesn't find a 'foo/access' file, so it
+treats 'foo' as a directory which is the proper behavior in this confusing
+layered case.  This also revealed the worse problem that a user can never
+create an 'access' entry in a directory because PLFS will start treating that
+directory as a container and when it doesn't have the other entries that PLFS
+expects in a container, it gets all weird.  So to fix this, we have broken
+backwards compatibility by changing the name of the access file from 'access'
+to '.plfsaccess081173'  At some point, we need to add backward compatibility
+checking.
+
+5) Fixed it so that the plfs_map in the trace/ directory is correctly built
+again.  I tried to change it so that it builds from the library only but it
+access the low-level index calls so that doesn't work.  So now it builds by
+just using all the src/*.o files instead of just trying to link with the
+library alone.
