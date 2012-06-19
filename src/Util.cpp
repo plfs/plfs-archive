@@ -500,6 +500,12 @@ ssize_t Util::Readlink(const char *link, char *buf, size_t bufsize)
 {
     ENTER_IO;
     ret = readlink(link,buf,bufsize);
+    string newbuf = string(buf);
+    if(newbuf.compare(0,16, "::PLFS_SYMLINK::") == 0) {
+        newbuf = newbuf.substr(16, newbuf.size() - 16);
+        bufsize -= 16;
+    }
+    strcpy(buf, newbuf.c_str());
     EXIT_UTIL;
 }
 

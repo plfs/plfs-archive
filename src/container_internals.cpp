@@ -432,7 +432,6 @@ container_access( const char *logical, int mask )
 int container_statvfs( const char *logical, struct statvfs *stbuf )
 {
     PLFS_ENTER;
-    Util::Symlink(path.c_str(), "/users/tmachado/stating");
     ret = retValue( Util::Statvfs(path.c_str(),stbuf) );
     PLFS_EXIT(ret);
 }
@@ -1484,7 +1483,8 @@ container_symlink(const char *logical, const char *to)
     if (exp_info.expand_error) {
         PLFS_EXIT(-ENOENT);
     }
-    ret = retValue(Util::Symlink(logical,topath.c_str()));
+    string newLogical = "::PLFS_SYMLINK::" + string(logical);
+    ret = retValue(Util::Symlink(newLogical.c_str(),topath.c_str()));
     mlog(PLFS_DAPI, "%s: %s to %s: %d", __FUNCTION__,
          path.c_str(), topath.c_str(),ret);
     PLFS_EXIT(ret);
