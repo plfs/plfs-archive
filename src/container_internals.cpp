@@ -486,6 +486,11 @@ container_rename( const char *logical, const char *to )
     // now check whether it is a file of a directory we are renaming
     mode_t mode;
     bool isfile = Container::isContainer(old_canonical,&mode);
+    if(isfile) {
+        Util::Symlink(path.c_str(), exp_info.dir_root_path.c_str());
+        Util::Unlink(expansion_info.dir_root_path.c_str());
+    }
+/*
     // get the list of all possible entries for both src and dest
     vector<string> srcs, dsts;
     vector<string>::iterator itr;
@@ -509,6 +514,7 @@ container_rename( const char *logical, const char *to )
              srcs[i].c_str(),dsts[i].c_str(),err);
     }
     // if it's a file whose canonical location has moved, recover it
+*/
 /*    bool moved = (old_canonical_backend!=new_canonical_backend);
     if (moved && isfile) {
         // ok, old canonical is no longer a valid path bec we renamed it
